@@ -1,0 +1,25 @@
+package {{.Package}}
+
+// {{.ClassName}}Encoder handles encoding for {{.ClassName}} instructions
+type {{.ClassName}}Encoder struct{}
+
+{{range .Instructions}}
+// {{.FuncName}} encodes the {{.Instruction.Mnemonic}} instruction
+// Receiver is "enc" (not "e") so single-letter fields like e/f/g stay valid params.
+func (enc *{{$.ClassName}}Encoder) {{.FuncName}}({{range $i, $op := .Operands}}{{if $i}}, {{end}}{{$op.ParamName}} {{$op.ParamType}}{{end}}) (uint32, error) {
+	_ = enc
+	encoding := uint32(0)
+
+	{{range .FixedBits}}
+	encoding |= {{printf "0x%X" .Value}} << {{.Start}}
+	{{end}}
+
+	{{range .Operands}}
+	{{if ge .Operand.BitRange.Start 0}}
+	encoding |= uint32({{.ParamName}}) << {{.Operand.BitRange.Start}}
+	{{end}}
+	{{end}}
+
+	return encoding, nil
+}
+{{end}}

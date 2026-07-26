@@ -1,0 +1,6 @@
+profile: .coverage/coverage.out
+
+threshold:
+  file: 0
+  package: 0
+  total: 40

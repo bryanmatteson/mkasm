@@ -1,0 +1,187 @@
+[tools]
+go = "1.26.5"
+rust = "1.97.1"
+"go:github.com/vladopajic/go-test-coverage/v2" = "v2.18.9"
+
+[vars]
+corpus = "https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2026-06.tar.gz"
+benchtime = "1s"
+benchcount = "1"
+
+[tasks.default]
+description = "List repository tasks"
+run = "mise tasks ls"
+
+[tasks."fmt:check"]
+description = "Require all Go sources to be gofmt-clean"
+run = '''
+unformatted="$(find cmd pkg tests templates -type f -name '*.go' -exec gofmt -l {} +)"
+test -z "$unformatted" || {
+  echo "gofmt required:" >&2
+  echo "$unformatted" >&2
+  exit 1
+}
+'''
+
+[tasks.vet]
+description = "Run Go static analysis"
+run = "go vet ./..."
+
+[tasks.test]
+description = "Run the deterministic offline test suite"
+run = "go test ./... -count=1 -timeout 180s"
+
+[tasks."test:race"]
+description = "Run race-sensitive core and conformance packages"
+run = "go test -race ./pkg/decoder ./pkg/arm ./pkg/coverage ./tests/conformance"
+
+[tasks."coverage:source"]
+description = "Measure source coverage and enforce configured regression floors"
+run = '''
+mkdir -p .coverage
+go test ./... -coverprofile=.coverage/coverage.out -covermode=atomic -coverpkg=./...
+go-test-coverage --config=.testcoverage.yml
+go test ./pkg/coverage -coverprofile=.coverage/coverage-package.out -covermode=atomic
+go-test-coverage --profile=.coverage/coverage-package.out \
+  --threshold-file=100 --threshold-package=100 --threshold-total=100
+'''
+
+[tasks."coverage:encodings"]
+description = "Prove every resolved encoding appears exactly once in Go and Rust exact ledgers"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+MKASM_CORPUS="$corpus" MKASM_LEDGER_COVERAGE=1 \
+  go test ./tests/conformance \
+    -run '^TestGeneratedLedgerEncodingCoverage$' -v -count=1 -timeout 300s
+'''
+
+[tasks.verify]
+description = "Run formatting, vet, unit, race, source, and encoding-coverage gates"
+run = [
+  { task = "fmt:check" },
+  { task = "vet" },
+  { task = "test" },
+  { task = "test:race" },
+  { task = "coverage:source" },
+  { task = "coverage:encodings" },
+]
+
+[tasks.bench]
+description = "Run corpus-scale public API benchmarks"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+benchtime="${BENCHTIME:-{{vars.benchtime}}}"
+benchcount="${BENCHCOUNT:-{{vars.benchcount}}}"
+MKASM_BENCH_CORPUS="$corpus" go test ./tests/benchmarks \
+  -run '^$' -bench . -benchmem -benchtime "$benchtime" -count "$benchcount"
+'''
+
+[tasks."bench:micro"]
+description = "Run parser hot-path microbenchmarks"
+run = '''
+benchtime="${BENCHTIME:-{{vars.benchtime}}}"
+benchcount="${BENCHCOUNT:-{{vars.benchcount}}}"
+go test ./pkg/arm -run '^$' \
+  -bench '^Benchmark(ParseIForm|ParseAsmTemplate|PseudocodeParser|TarCorpusPreparedIFormLookup)$' \
+  -benchmem -benchtime "$benchtime" -count "$benchcount"
+'''
+
+[tasks."generate:go"]
+description = "Generate and test the standalone Go project"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+out="${OUT:-./output}"
+go run ./cmd/asmgen --codegen go --output "$out" "$corpus"
+(cd "$out" && go test ./...)
+'''
+
+[tasks."generate:rust"]
+description = "Generate and test the standalone Rust crate"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+out="${OUT:-./output-rs}"
+go run ./cmd/asmgen --codegen rust --output "$out" "$corpus"
+(cd "$out" && RUSTFLAGS="-D warnings" cargo test)
+'''
+
+[tasks."conformance:go"]
+description = "LLVM byte parity for every toolchain-supported Go exact encoder"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+MKASM_CORPUS="$corpus" \
+MKASM_CLANG="${MKASM_CLANG:-}" MKASM_LLVM_MC="${MKASM_LLVM_MC:-}" \
+MKASM_GO_LLVM_CONFORMANCE=1 \
+  go test ./tests/conformance \
+    -run '^TestGoAssemblerLLVMConformance$' -v -count=1 -timeout 600s
+'''
+
+[tasks."conformance:rust"]
+description = "LLVM byte parity for toolchain-supported typed and exact Rust encoders"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+MKASM_CORPUS="$corpus" \
+MKASM_CLANG="${MKASM_CLANG:-}" MKASM_LLVM_MC="${MKASM_LLVM_MC:-}" \
+MKASM_RUST_LLVM_CONFORMANCE=1 \
+  go test ./tests/conformance \
+    -run '^TestRustAssemblerLLVMConformance$' -v -count=1 -timeout 600s
+'''
+
+[tasks."conformance:disasm"]
+description = "Word-to-text-to-LLVM parity for every toolchain-supported printable encoding"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+MKASM_CORPUS="$corpus" MKASM_CLANG="${MKASM_CLANG:-}" MKASM_LLVM_MC="${MKASM_LLVM_MC:-}" \
+MKASM_DISASM_LLVM_PARITY=1 \
+  go test ./tests/conformance \
+    -run '^TestDisasmAssemblesBack$' -v -count=1 -timeout 600s
+'''
+
+[tasks.conformance]
+description = "Run supported-instruction Go, Rust, and disassembler LLVM parity"
+run = [
+  { task = "conformance:go" },
+  { task = "conformance:rust" },
+  { task = "conformance:disasm" },
+]
+
+[tasks."conformance:strict:go"]
+description = "Require LLVM coverage and exact bytes for every generated Go encoding"
+run = "MKASM_LLVM_REQUIRE_ALL=1 mise run conformance:go"
+
+[tasks."conformance:strict:rust"]
+description = "Require LLVM coverage and exact bytes for every typed and exact Rust encoding"
+run = "MKASM_LLVM_REQUIRE_ALL=1 mise run conformance:rust"
+
+[tasks."conformance:strict:disasm"]
+description = "Require LLVM coverage and exact bytes for every printable encoding"
+run = "MKASM_DISASM_REQUIRE_ALL=1 mise run conformance:disasm"
+
+[tasks."conformance:strict"]
+description = "Run all-opcode LLVM coverage and byte-parity gates"
+run = [
+  { task = "conformance:strict:go" },
+  { task = "conformance:strict:rust" },
+  { task = "conformance:strict:disasm" },
+]
+
+[tasks."audit:disasm"]
+description = "Run the historical threshold report without claiming conformance"
+run = "MKASM_DISASM_AUDIT=1 mise run conformance:disasm"
+
+[tasks."conformance:asl"]
+description = "Cross-check opcode bits and fields against Arm ASL"
+run = '''
+corpus="${CORPUS:-{{vars.corpus}}}"
+asl="${ASL:-../arm-asl-parser/asl}"
+test -f "$asl/arm_instrs.asl"
+test -f "$asl/arch_decode.asl"
+MKASM_CORPUS="$corpus" \
+MKASM_ASL_INSTRS="$asl/arm_instrs.asl" \
+MKASM_ASL_DECODE="$asl/arch_decode.asl" \
+  go test ./pkg/asl ./tests/conformance \
+    -run 'Corpus|Coverage|CrossCheck' -v -count=1
+'''
+
+[tasks.clean]
+description = "Remove generated projects and local coverage output"
+run = "rm -rf ./output ./output-rs ./.coverage"
