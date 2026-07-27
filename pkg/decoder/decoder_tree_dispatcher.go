@@ -1,7 +1,7 @@
 package decoder
 
 import (
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 	"slices"
 )
 

@@ -1,9 +1,9 @@
 # mkasm
 
-`mkasm` is a streaming ARM A64 instruction-set parser and Go/Rust code
-generator. It consumes Arm's XML corpus directly from a directory, tarball,
-stdin, or URL; resolves the complete instruction model; and emits standalone
-assembler/decoder projects.
+`mkasm` is a streaming Arm A64 instruction-set parser and Go/Rust code
+generator. It reads Arm's XML corpus from a directory, tarball, stdin, or URL,
+resolves the instruction model, and emits standalone assembler and decoder
+projects.
 
 The implementation favors explicit data flow, bounded memory, hand-written
 parsers, deterministic output, and independent verification over generated
@@ -22,9 +22,10 @@ Using `ISA_A64_xml_A_profile-2026-06.tar.gz`:
 | Independent LLVM parity for supported instructions | 100%; zero mismatches |
 | Strict all-instruction LLVM parity | Open; 5 LLVM-unknown encodings |
 
-The parser and generators are usable. The repository does **not** claim complete
-byte conformance while the strict LLVM ledger is red. Current independent
-results and toolchain versions are recorded in
+Every encoding recognized by the installed LLVM oracle is byte-identical. Five
+newer encodings are not recognized by that toolchain and remain explicitly
+unverified; the strict gate stays red until an independent oracle accepts them.
+Current results and toolchain versions are recorded in
 [`tests/conformance`](tests/conformance/README.md).
 
 ## Quick start
@@ -32,29 +33,31 @@ results and toolchain versions are recorded in
 Requires Go 1.24.2 or newer.
 
 ```bash
-go install ./cmd/asmgen
+go install github.com/bryanmatteson/mkasm/cmd/mkasm@latest
 
 CORPUS='https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2026-06.tar.gz'
 
 # Generate a standalone Rust crate.
-asmgen --codegen rust --output ./output-rs "$CORPUS"
+mkasm --codegen rust --output ./output-rs "$CORPUS"
 
 # Emit deterministic IR JSON.
-asmgen --json "$CORPUS" > arm-ir.json
+mkasm --json "$CORPUS" > arm-ir.json
 ```
 
-Without installing:
+From a source checkout:
 
 ```bash
-go run ./cmd/asmgen --codegen go --output ./output "$CORPUS"
+go run ./cmd/mkasm --codegen go --output ./output "$CORPUS"
 ```
 
 ## CLI contract
 
 ```text
-asmgen --codegen rust --output DIR INPUT
-asmgen --codegen go   --output DIR INPUT
-asmgen --json INPUT
+mkasm --codegen rust --output DIR INPUT
+mkasm --codegen go   --output DIR INPUT
+mkasm --json INPUT
+mkasm --version
+mkasm --help
 ```
 
 `INPUT` may be:
@@ -67,7 +70,8 @@ asmgen --json INPUT
 Progress and statistics are written to stderr. JSON mode writes only JSON to
 stdout. Code generation writes only below `--output` and leaves stdout empty.
 Invalid flag combinations exit with status 2; input, parse, validation, or
-generation failures exit with status 1.
+generation failures exit with status 1. Running `mkasm` without arguments,
+`mkasm -h`, or `mkasm --help` prints the complete help screen to stdout.
 
 ## Architecture
 
@@ -152,6 +156,7 @@ mise run verify
 Additional explicit gates:
 
 ```bash
+mise run build
 mise run bench
 mise run bench:micro
 mise run generate:go
@@ -166,6 +171,20 @@ mise run conformance:strict
 ASL=/path/to/arm-asl-parser/asl mise run conformance:asl
 ```
 
+Before tagging a release, run the complete supported-toolchain gate:
+
+```bash
+mise run release:check
+VERSION=v0.1.0 mise run build
+./dist/mkasm --version
+```
+
+`mise run build` produces a stripped, path-trimmed binary plus a versioned
+`.tar.gz` containing `mkasm`, `LICENSE`, and `README.md`, with a SHA-256 checksum
+beside it under `dist/`. `VERSION` is embedded in release builds; without it,
+the task uses `git describe` so local artifacts remain identifiable. Set
+`GOOS` and `GOARCH` to package another Go target.
+
 `mise run conformance` proves byte identity for every instruction recognized by
 the installed LLVM oracle and fails on any rejected spelling or byte mismatch.
 Unsupported instructions remain visible and unverified. The separate
@@ -177,7 +196,7 @@ threshold report and is not presented as conformance.
 `mise run coverage:encodings` proves that the Go and Rust exact ledgers each
 contain every resolved encoding exactly once. Source statement coverage is a
 separate `mise run coverage:source` regression metric; the two numbers are not
-conflated. Current source coverage is 49.0% overall; `coverage:source` separately
+conflated. Current source coverage is 49.7% overall; `coverage:source` separately
 holds the focused `pkg/coverage` package at 100%.
 
 Benchmark methodology is documented in
@@ -189,7 +208,7 @@ and current results are documented in
 
 | Path | Responsibility |
 |---|---|
-| [`cmd/asmgen`](cmd/asmgen) | Minimal CLI and JSON export |
+| [`cmd/mkasm`](cmd/mkasm) | Public CLI and JSON export |
 | [`pkg/arm`](pkg/arm) | Corpus loading, orchestration, IForm parsing, code generation |
 | [`pkg/parse`](pkg/parse) | Streaming XML event engine |
 | [`pkg/ir`](pkg/ir) | Architecture-neutral instruction and bit-field model |

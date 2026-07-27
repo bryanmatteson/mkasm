@@ -8,20 +8,47 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
-	"mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
 )
 
-const usage = `usage:
-  asmgen --codegen rust --output DIR INPUT
-  asmgen --codegen go   --output DIR INPUT
-  asmgen --json INPUT
+const commandName = "mkasm"
 
-INPUT is an ISA XML directory, a .tar/.tar.gz file, an HTTP(S) URL, or -
-for a tar stream on stdin.
+const helpText = `mkasm generates AArch64 assembler projects or exports the resolved IR.
+
+Usage:
+  mkasm --codegen <rust|go> --output <dir> <input>
+  mkasm --json <input>
+
+Modes:
+  --codegen <rust|go>  Generate a standalone assembler project.
+  --json               Write resolved instruction IR as JSON to stdout.
+
+Arguments:
+  <input>  ARM ISA XML directory, .tar or .tar.gz archive, HTTP(S) URL,
+           or - to read a tar stream from stdin.
+
+Options:
+  --output <dir>  Destination directory. Required with --codegen.
+  --version       Show the mkasm version.
+  -h, --help      Show this help.
+
+Examples:
+  mkasm --codegen rust --output ./aarch64-rs ./ISA_A64_xml.tar.gz
+  mkasm --codegen go --output ./aarch64-go https://example.com/ISA_A64_xml.tar.gz
+  curl -fsSL https://example.com/ISA_A64_xml.tar.gz | mkasm --json - > arm-ir.json
+
+Status and statistics are written to stderr. JSON is written only to stdout.
+
+Learn more:
+  https://github.com/bryanmatteson/mkasm
 `
+
+// version is replaced by the release build using -ldflags=-X.
+var version = "dev"
 
 type usageError struct {
 	message string
@@ -34,28 +61,44 @@ func main() {
 	if err == nil {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "asmgen: %v\n", err)
+	fmt.Fprintf(os.Stderr, "%s: %v\n", commandName, err)
 	var badUsage *usageError
 	if errors.As(err, &badUsage) {
-		fmt.Fprint(os.Stderr, usage)
+		fmt.Fprintf(os.Stderr, "\n%s", helpText)
 		os.Exit(2)
 	}
 	os.Exit(1)
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) (err error) {
-	flags := flag.NewFlagSet("asmgen", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage) }
+	if len(args) == 0 {
+		_, err := io.WriteString(stdout, helpText)
+		return err
+	}
+
+	flags := flag.NewFlagSet(commandName, flag.ContinueOnError)
+	// The flag package otherwise writes its own error and usage before returning
+	// an error, causing main to print both a second time. All diagnostics have
+	// one owner here so stdout and stderr remain predictable.
+	flags.SetOutput(io.Discard)
 
 	codegen := flags.String("codegen", "", "generate a rust or go project")
 	jsonIR := flags.Bool("json", false, "write resolved instruction IR as JSON to stdout")
 	output := flags.String("output", "", "generated project directory")
+	showVersion := flags.Bool("version", false, "show the mkasm version")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return nil
+			_, err := io.WriteString(stdout, helpText)
+			return err
 		}
 		return &usageError{message: err.Error()}
+	}
+	if *showVersion {
+		if flags.NArg() != 0 || *codegen != "" || *jsonIR || *output != "" {
+			return &usageError{message: "--version cannot be combined with a mode, output, or input"}
+		}
+		_, err := fmt.Fprintf(stdout, "%s %s\n", commandName, resolvedVersion())
+		return err
 	}
 
 	if flags.NArg() != 1 {
@@ -147,4 +190,15 @@ func printStats(w io.Writer, source string, registry *arm.InstructionRegistry, m
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintf(w, "Elapsed: %s\n", elapsed.Round(time.Millisecond))
+}
+
+func resolvedVersion() string {
+	if version != "" && version != "dev" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
 }

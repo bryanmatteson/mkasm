@@ -11,9 +11,9 @@ import (
 	"strings"
 	"text/template"
 
-	"mkasm/pkg/decoder"
-	"mkasm/pkg/ir"
-	"mkasm/templates"
+	"github.com/bryanmatteson/mkasm/pkg/decoder"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/templates"
 )
 
 // CodeGenerator generates Go code from the instruction IR
@@ -260,18 +260,24 @@ func writeEncodeDecodeCorpusTest(decoderDir, modPath string, instrs []*ir.Instru
 				continue
 			}
 			max := uint64(1)<<uint(width) - 1
-			val := max
+			variable := max
 			if max > 1 {
-				val = max / 2
-				if val == 0 {
-					val = 1
+				variable = max / 2
+				if variable == 0 {
+					variable = 1
 				}
 			}
-			val &= uint64(free)
-			if val == 0 {
+			variable &= uint64(free)
+			if variable == 0 {
 				// Lowest free bit keeps the case non-trivial.
-				val = uint64(free & (^free + 1))
+				variable = uint64(free & (^free + 1))
 			}
+			// EncodeWithFields accepts the complete logical field value. Retain
+			// any bits the encoding pins inside a partly variable field and vary
+			// only the free portion.
+			fieldMask := fieldRangeMask(f.Start, f.End)
+			fixedValue := uint64((w & fieldMask) >> uint(f.Start))
+			val := fixedValue | variable
 			packed, err := ir.InsertField(w, f, val)
 			if err != nil {
 				continue

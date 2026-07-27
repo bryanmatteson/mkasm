@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
 )
 
 func TestE2E_Pass2_CLREX(t *testing.T) {

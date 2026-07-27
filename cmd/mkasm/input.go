@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
 )
 
 type inputSource struct {

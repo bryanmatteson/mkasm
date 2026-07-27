@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/parse"
+	"github.com/bryanmatteson/mkasm/pkg/parse"
 )
 
 func TestMixedContentTextAccumulatesDescendants(t *testing.T) {

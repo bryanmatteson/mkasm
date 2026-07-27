@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // InferOperandType maps ARM field/operand names to OperandType.

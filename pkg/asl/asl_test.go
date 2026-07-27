@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/asl"
+	"github.com/bryanmatteson/mkasm/pkg/asl"
 )
 
 // umovSource is the UMOV encoding as mra_tools emits it. It exercises every

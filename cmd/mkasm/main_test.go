@@ -109,17 +109,75 @@ func TestRunRejectsInvalidModeCombinations(t *testing.T) {
 	}
 }
 
-func TestHelpUsesInstalledCommandName(t *testing.T) {
-	var stderr bytes.Buffer
-	if err := run(context.Background(), []string{"--help"},
-		bytes.NewReader(nil), io.Discard, &stderr); err != nil {
+func TestHelpIsUsefulAndUsesStdout(t *testing.T) {
+	for _, args := range [][]string{nil, {"-h"}, {"--help"}} {
+		var stdout, stderr bytes.Buffer
+		if err := run(context.Background(), args,
+			bytes.NewReader(nil), &stdout, &stderr); err != nil {
+			t.Fatalf("run(%q): %v", args, err)
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("run(%q) stderr = %q", args, stderr.String())
+		}
+		help := stdout.String()
+		for _, required := range []string{
+			"mkasm generates AArch64",
+			"Usage:",
+			"Modes:",
+			"Arguments:",
+			"Options:",
+			"Examples:",
+			"Learn more:",
+			"--codegen <rust|go>",
+			"--json",
+			"--output <dir>",
+			"--version",
+			"https://github.com/bryanmatteson/mkasm",
+		} {
+			if !strings.Contains(help, required) {
+				t.Errorf("run(%q) help lacks %q:\n%s", args, required, help)
+			}
+		}
+	}
+}
+
+func TestVersionUsesStdout(t *testing.T) {
+	previous := version
+	version = "v1.2.3"
+	t.Cleanup(func() { version = previous })
+
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"--version"},
+		bytes.NewReader(nil), &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(stderr.String(), "usage:\n  asmgen ") {
-		t.Fatalf("help does not identify asmgen:\n%s", stderr.String())
+	if got, want := stdout.String(), "mkasm v1.2.3\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-	if strings.Contains(stderr.String(), "parse-arm") {
-		t.Fatalf("help contains retired command name:\n%s", stderr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestVersionRejectsOtherArguments(t *testing.T) {
+	err := run(context.Background(), []string{"--version", "input.tar"},
+		bytes.NewReader(nil), io.Discard, io.Discard)
+	var badUsage *usageError
+	if !errors.As(err, &badUsage) {
+		t.Fatalf("error = %v, want usage error", err)
+	}
+}
+
+func TestInvalidFlagDoesNotWriteBeforeMainFormatsError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{"--unknown"},
+		bytes.NewReader(nil), &stdout, &stderr)
+	var badUsage *usageError
+	if !errors.As(err, &badUsage) {
+		t.Fatalf("error = %v, want usage error", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("run wrote stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 

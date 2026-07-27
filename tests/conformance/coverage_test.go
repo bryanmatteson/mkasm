@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"mkasm/pkg/arm"
-	encodingcoverage "mkasm/pkg/coverage"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
+	encodingcoverage "github.com/bryanmatteson/mkasm/pkg/coverage"
 )
 
 func TestGeneratedLedgerEncodingCoverage(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // --- Go master encoder (templates/go/master_encoder.tmpl) ---

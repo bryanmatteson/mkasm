@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // PseudocodeParser converts pseudocode text into AST nodes. It is stateless and

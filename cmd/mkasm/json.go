@@ -6,8 +6,8 @@ import (
 	"io"
 	"sort"
 
-	"mkasm/pkg/arm"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 type jsonDocument struct {

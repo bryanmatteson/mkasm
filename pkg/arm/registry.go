@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // InstructionRegistry stores and indexes parsed instructions

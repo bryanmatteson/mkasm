@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"mkasm/pkg/arm"
-	"mkasm/pkg/decoder"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/decoder"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // Known A64 encodings (fixed CRm/imm forms) for golden decode.

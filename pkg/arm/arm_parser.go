@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"mkasm/pkg/ir"
-	"mkasm/pkg/parse"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/parse"
 )
 
 // ARMParser orchestrates the 3-pass parsing pipeline

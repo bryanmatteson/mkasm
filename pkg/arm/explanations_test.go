@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func TestSplitFieldList(t *testing.T) {
@@ -29,6 +29,13 @@ func TestSplitFieldList(t *testing.T) {
 				t.Fatalf("splitFieldList(%q) = %#v, want %#v", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlainXMLText(t *testing.T) {
+	const input = "  Is <syntax>&lt;imm&gt;</syntax>\n\tin <a>the</a> range &#x31; to 2.  "
+	if got, want := plainXMLText(input), "Is <imm> in the range 1 to 2."; got != want {
+		t.Fatalf("plainXMLText() = %q, want %q", got, want)
 	}
 }
 

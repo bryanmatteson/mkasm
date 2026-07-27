@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func TestCollectFieldMasksSkipsInvalidRanges(t *testing.T) {

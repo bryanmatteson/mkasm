@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/arm"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // TestGapScan enumerates every encoding that has no typed method and attributes

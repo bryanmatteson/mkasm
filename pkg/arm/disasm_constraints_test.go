@@ -3,7 +3,7 @@ package arm
 import (
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func TestDisasmOperandInfersRestrictedRegisterBias(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func TestParseIFormFile_CLREX(t *testing.T) {

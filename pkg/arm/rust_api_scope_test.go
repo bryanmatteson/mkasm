@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/arm"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // TestOperandCoverage measures how much of the ISA can be given a typed

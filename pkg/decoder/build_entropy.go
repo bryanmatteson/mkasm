@@ -5,7 +5,7 @@ import (
 	"maps"
 	"slices"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // buildNodeWithEntropy constructs the decoder tree using the hybrid entropy strategy

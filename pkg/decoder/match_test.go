@@ -3,7 +3,7 @@ package decoder
 import (
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func fixed(v uint64) *uint64 { return &v }

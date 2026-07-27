@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // ValidationError records one consistency problem on an instruction.

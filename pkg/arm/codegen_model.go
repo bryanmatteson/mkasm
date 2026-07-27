@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // CodegenLang is a Pass 3 emission target.

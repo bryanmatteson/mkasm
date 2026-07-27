@@ -5,8 +5,8 @@ import (
 	"sort"
 	"testing"
 
-	"mkasm/pkg/decoder"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/decoder"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // treeCoverageSeed fixes the fills so a regression reproduces from the failure

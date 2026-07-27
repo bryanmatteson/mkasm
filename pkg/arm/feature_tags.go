@@ -3,7 +3,7 @@ package arm
 import (
 	"strings"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 var featureDescriptions = map[string]string{

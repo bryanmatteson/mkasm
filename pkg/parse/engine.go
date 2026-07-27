@@ -128,6 +128,9 @@ type ScopeContext struct {
 }
 
 func ScopeStore[T any](scope *ScopeContext, key string, value T) {
+	if scope.storage == nil {
+		scope.storage = make(map[string]any)
+	}
 	scope.storage[key] = value
 }
 
@@ -143,6 +146,7 @@ func ScopeLoad[T any](scope *ScopeContext, key string) (T, bool) {
 
 type ScopeStack struct {
 	stack []*ScopeContext
+	free  []*ScopeContext
 }
 
 func NewScopeStack() *ScopeStack {
@@ -154,15 +158,28 @@ func (sm *ScopeStack) Push(_ string) {
 	if len(sm.stack) != 0 {
 		parent = sm.stack[len(sm.stack)-1]
 	}
-	sm.stack = append(sm.stack, &ScopeContext{
-		Parent:  parent,
-		storage: make(map[string]any),
-	})
+	var scope *ScopeContext
+	if n := len(sm.free); n != 0 {
+		scope = sm.free[n-1]
+		sm.free = sm.free[:n-1]
+		scope.Parent = parent
+	} else {
+		scope = &ScopeContext{Parent: parent}
+	}
+	sm.stack = append(sm.stack, scope)
 }
 
 func (sm *ScopeStack) Pop() {
 	if len(sm.stack) != 0 {
-		sm.stack = sm.stack[:len(sm.stack)-1]
+		n := len(sm.stack) - 1
+		scope := sm.stack[n]
+		sm.stack = sm.stack[:n]
+		scope.Parent = nil
+		if scope.storage != nil {
+			clear(scope.storage)
+			scope.storage = nil
+		}
+		sm.free = append(sm.free, scope)
 	}
 }
 

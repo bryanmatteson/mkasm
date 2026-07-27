@@ -3,7 +3,7 @@ package decoder
 import (
 	"fmt"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // MatchResult is the outcome of walking a decoder tree for one instruction word.

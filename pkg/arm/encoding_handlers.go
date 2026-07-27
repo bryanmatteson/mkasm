@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"mkasm/pkg/ir"
-	"mkasm/pkg/parse"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/parse"
 )
 
 // InstructionRowHandler handles <tr> elements in encodingindex.xml

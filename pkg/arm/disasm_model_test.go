@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
 )
 
 // loadResolvedParser runs Pass 1 and 2 and hands back the parser itself, which

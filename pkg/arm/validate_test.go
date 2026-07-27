@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func TestInstructionValidator_resolvedCLREX(t *testing.T) {

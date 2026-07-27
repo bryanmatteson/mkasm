@@ -7,7 +7,7 @@ import (
 	"math/bits"
 	"slices"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // maskSplitBudget bounds how far a single split may duplicate the candidate set.

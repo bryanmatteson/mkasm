@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // ParsedIForm is the authoritative content extracted from an instructionsection XML file
@@ -264,6 +264,17 @@ func ParseIFormFile(path, encodingID string) (*ParsedIForm, error) {
 }
 
 func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
+	return parseIFormShared(r, encodingID, nil)
+}
+
+// parseIFormShared reuses page-level explanations already decoded from the same
+// IForm XML member. Explanations are immutable and scoped to the whole page;
+// decoding their nested value tables once per encoding only duplicates work.
+func parseIFormShared(
+	r io.Reader,
+	encodingID string,
+	sharedExplanations *[]AsmExplanation,
+) (*ParsedIForm, error) {
 	dec := xml.NewDecoder(r)
 
 	out := &ParsedIForm{EncodingName: encodingID}
@@ -304,7 +315,6 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 		diagram      []RegBox // regdiagram currently being read
 		iclassBase   []RegBox // regdiagram of the enclosing iclass
 		lastDiagram  []RegBox // fallback when encodingID is not found
-		ownerBase    []RegBox // diagram of the iclass owning encodingID
 		encOverrides []RegBox // per-encoding override boxes for encodingID
 		matched      bool
 		iclassSerial int
@@ -349,8 +359,6 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 				if inEncoding {
 					out.EncodingName = encName
 					out.BitDiffs = attr(t, "bitdiffs")
-					// Bind this encoding to its own iclass diagram.
-					ownerBase = append([]RegBox(nil), iclassBase...)
 					ownerIClass = iclassSerial
 					encOverrides = nil
 					matched = true
@@ -389,9 +397,9 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 				if curDst == nil {
 					break
 				}
-				hi, _ := strconv.Atoi(attr(t, "hibit"))
-				w, _ := strconv.Atoi(attr(t, "width"))
-				if w <= 0 {
+				hi, _ := decimal(attr(t, "hibit"))
+				w, ok := decimal(attr(t, "width"))
+				if !ok || w <= 0 {
 					w = 1
 				}
 				*curDst = append(*curDst, RegBox{
@@ -405,7 +413,7 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 			case "c":
 				curSpan = 1
 				if curBox != nil {
-					if cs, err := strconv.Atoi(attr(t, "colspan")); err == nil && cs > 1 {
+					if cs, ok := decimal(attr(t, "colspan")); ok && cs > 1 {
 						curSpan = cs
 					}
 				}
@@ -425,15 +433,22 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 			case "text":
 				textVerbatim.Reset()
 			case "explanations":
-				// Unmarshal the whole subtree: value tables are too nested to
-				// track with the streaming state machine above.
-				exps, err := decodeExplanations(dec, t)
-				if err != nil {
-					return nil, err
+				if sharedExplanations != nil {
+					if err := dec.Skip(); err != nil {
+						return nil, err
+					}
+					out.Explanations = *sharedExplanations
+				} else {
+					// Unmarshal the whole subtree once: value tables are too
+					// nested to track with the outer state machine.
+					exps, err := decodeExplanations(dec, t)
+					if err != nil {
+						return nil, err
+					}
+					out.Explanations = exps
 				}
-				out.Explanations = exps
-				// DecodeElement consumed through </explanations>, so drop the
-				// bookkeeping this element pushed.
+				// The subtree consumer advanced through </explanations>, so drop
+				// the bookkeeping this element pushed.
 				pathStack = pathStack[:len(pathStack)-1]
 				textStart = textStart[:len(textStart)-1]
 				continue
@@ -442,6 +457,12 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 			name := t.Name.Local
 			switch name {
 			case "encoding":
+				if inEncoding {
+					// The owning diagram and overrides are now complete. Resolve
+					// them before the next iclass can replace iclassBase, avoiding
+					// a full diagram copy for every parsed encoding.
+					out.Boxes = mergeBoxes(iclassBase, encOverrides)
+				}
 				inEncoding = false
 				encName = ""
 			case "text":
@@ -527,13 +548,16 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 				docvarKey = ""
 			case "regdiagram":
 				if len(diagram) > 0 {
-					lastDiagram = append([]RegBox(nil), diagram...)
+					// Transfer ownership instead of copying. The next diagram
+					// starts with a fresh slice, while iclassBase and the fallback
+					// retain this immutable one.
+					lastDiagram = diagram
 					// A regdiagram inside an iclass belongs to that iclass only.
 					if inIClass(pathStack) {
 						iclassBase = lastDiagram
 					}
 				}
-				diagram = diagram[:0]
+				diagram = nil
 			}
 			if len(pathStack) > 0 {
 				pathStack = pathStack[:len(pathStack)-1]
@@ -560,8 +584,7 @@ func parseIForm(r io.Reader, encodingID string) (*ParsedIForm, error) {
 	}
 
 	switch {
-	case matched && len(ownerBase) > 0:
-		out.Boxes = mergeBoxes(ownerBase, encOverrides)
+	case matched && len(out.Boxes) > 0:
 	case len(lastDiagram) > 0:
 		// encodingID absent from this file (or a file with a bare regdiagram):
 		// fall back to the only diagram available.
@@ -602,6 +625,28 @@ func attr(se xml.StartElement, name string) string {
 		}
 	}
 	return ""
+}
+
+// decimal parses the non-negative decimal XML attributes used for bit
+// positions and spans. strconv.Atoi allocates an error for every omitted
+// optional attribute; absence is the common case for <c colspan>.
+func decimal(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		digit := int(c - '0')
+		if n > (int(^uint(0)>>1)-digit)/10 {
+			return 0, false
+		}
+		n = n*10 + digit
+	}
+	return n, true
 }
 
 // looksLikeEncodingID distinguishes encoding names (SBC_32_addsub_carry) from

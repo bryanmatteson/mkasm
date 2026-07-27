@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func TestParseBitDiffs_basic(t *testing.T) {

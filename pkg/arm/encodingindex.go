@@ -3,7 +3,7 @@ package arm
 import (
 	"context"
 
-	"mkasm/pkg/parse"
+	"github.com/bryanmatteson/mkasm/pkg/parse"
 )
 
 type InstructionTableContext struct {

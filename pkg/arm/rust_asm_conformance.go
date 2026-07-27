@@ -39,7 +39,7 @@ func EmitRustConformanceTest(crateName string, s *AsmSurface) (string, []RustCon
 //
 // A passing invocation proves that every generated call emits one word. Full
 // byte conformance additionally requires an external assembler to consume this
-// ledger; go-mkasm's mise run conformance:rust is the reference oracle driver.
+// ledger; mkasm's mise run conformance:rust is the reference oracle driver.
 
 use %s::*;
 

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // AddressingMode is the memory operand form an encoding accepts.

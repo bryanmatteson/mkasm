@@ -3,8 +3,8 @@ package arm
 import (
 	"encoding/xml"
 	"html"
-	"regexp"
 	"strings"
+	"unicode"
 )
 
 // AsmExplanation is ARM's authoritative description of one operand symbol for a
@@ -84,11 +84,9 @@ type xmlProse struct {
 	Inner string `xml:",innerxml"`
 }
 
-var xmlTagRE = regexp.MustCompile(`<[^>]*>`)
-
 // Text renders captured markup as plain prose.
 func (p xmlProse) Text() string {
-	return collapseSpace(html.UnescapeString(xmlTagRE.ReplaceAllString(p.Inner, "")))
+	return plainXMLText(p.Inner)
 }
 
 type xmlValueTable struct {
@@ -104,7 +102,7 @@ type xmlTableEntry struct {
 }
 
 func (e xmlTableEntry) Text() string {
-	return collapseSpace(html.UnescapeString(xmlTagRE.ReplaceAllString(e.Inner, "")))
+	return plainXMLText(e.Inner)
 }
 
 // decodeExplanations unmarshals an <explanations> subtree.
@@ -261,7 +259,49 @@ func splitEncList(s string) []string {
 }
 
 func collapseSpace(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+	var b strings.Builder
+	b.Grow(len(s))
+	pendingSpace := false
+	wrote := false
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			pendingSpace = wrote
+			continue
+		}
+		if pendingSpace {
+			b.WriteByte(' ')
+			pendingSpace = false
+		}
+		b.WriteRune(r)
+		wrote = true
+	}
+	return b.String()
+}
+
+func plainXMLText(inner string) string {
+	if inner == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(inner))
+	inTag := false
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '<':
+			inTag = true
+		case '>':
+			if inTag {
+				inTag = false
+			} else {
+				b.WriteByte(inner[i])
+			}
+		default:
+			if !inTag {
+				b.WriteByte(inner[i])
+			}
+		}
+	}
+	return collapseSpace(html.UnescapeString(b.String()))
 }
 
 // ExplanationsFor returns the explanations that apply to encodingID, keyed by

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
 )
 
 const corpusEnv = "MKASM_CORPUS"

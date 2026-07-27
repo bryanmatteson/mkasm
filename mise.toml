@@ -91,7 +91,7 @@ description = "Generate and test the standalone Go project"
 run = '''
 corpus="${CORPUS:-{{vars.corpus}}}"
 out="${OUT:-./output}"
-go run ./cmd/asmgen --codegen go --output "$out" "$corpus"
+go run ./cmd/mkasm --codegen go --output "$out" "$corpus"
 (cd "$out" && go test ./...)
 '''
 
@@ -100,8 +100,35 @@ description = "Generate and test the standalone Rust crate"
 run = '''
 corpus="${CORPUS:-{{vars.corpus}}}"
 out="${OUT:-./output-rs}"
-go run ./cmd/asmgen --codegen rust --output "$out" "$corpus"
+go run ./cmd/mkasm --codegen rust --output "$out" "$corpus"
 (cd "$out" && RUSTFLAGS="-D warnings" cargo test)
+'''
+
+[tasks.build]
+description = "Build and package mkasm for the current platform"
+run = '''
+version="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+goos="$(go env GOOS)"
+goarch="$(go env GOARCH)"
+artifact_version="$(printf '%s' "$version" | tr '/ ' '--')"
+package="mkasm_${artifact_version}_${goos}_${goarch}"
+mkdir -p dist
+go build -trimpath -ldflags "-s -w -X main.version=$version" \
+  -o dist/mkasm ./cmd/mkasm
+./dist/mkasm --version
+package_dir="$(mktemp -d "${TMPDIR:-/tmp}/mkasm-release.XXXXXX")"
+trap 'rm -rf "$package_dir"' EXIT
+cp dist/mkasm LICENSE README.md "$package_dir/"
+tar -C "$package_dir" -czf "dist/${package}.tar.gz" mkasm LICENSE README.md
+if command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 "dist/${package}.tar.gz" > "dist/${package}.tar.gz.sha256"
+elif command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "dist/${package}.tar.gz" > "dist/${package}.tar.gz.sha256"
+else
+  echo "release: shasum or sha256sum is required" >&2
+  exit 1
+fi
+printf 'release: dist/%s.tar.gz\n' "$package"
 '''
 
 [tasks."conformance:go"]
@@ -182,6 +209,16 @@ MKASM_ASL_DECODE="$asl/arch_decode.asl" \
     -run 'Corpus|Coverage|CrossCheck' -v -count=1
 '''
 
+[tasks."release:check"]
+description = "Verify source, build mkasm, test generated projects, and run supported LLVM parity"
+run = [
+  { task = "verify" },
+  { task = "build" },
+  { task = "generate:go" },
+  { task = "generate:rust" },
+  { task = "conformance" },
+]
+
 [tasks.clean]
 description = "Remove generated projects and local coverage output"
-run = "rm -rf ./output ./output-rs ./.coverage"
+run = "rm -rf ./output ./output-rs ./aarch64-go ./aarch64-rs ./dist ./.coverage"

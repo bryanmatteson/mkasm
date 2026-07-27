@@ -3,7 +3,7 @@ package arm_test
 import (
 	"testing"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 func TestDisassemble_CLREX(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // ParseBitDiffs parses an ARM encoding@bitdiffs expression into a boolean tree.

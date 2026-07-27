@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"mkasm/templates"
+	"github.com/bryanmatteson/mkasm/templates"
 )
 
 // GenerateRust emits a Rust crate for catalog under outputDir.

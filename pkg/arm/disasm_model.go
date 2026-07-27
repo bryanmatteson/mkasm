@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // The disassembly print model.

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
 )
 
 // TestGoAssemblerLLVMConformance verifies every generated Go exact encoder

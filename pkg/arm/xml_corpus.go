@@ -490,19 +490,27 @@ func prepareXMLMember(builder *preparedCorpusBuilder, name string, data []byte) 
 		return nil
 	}
 
-	ids, aliases, isIForm, err := inspectIFormMember(bytes.NewReader(data), name)
+	ids, aliases, isIForm, err := inspectIFormMemberBytes(data, name)
 	if err != nil || !isIForm {
 		return err
 	}
 
 	forms := make(map[string]*ParsedIForm, len(ids))
-	for _, id := range ids {
+	var explanations []AsmExplanation
+	for i, id := range ids {
 		if _, duplicate := forms[id]; duplicate {
 			return fmt.Errorf("duplicate encoding %q", id)
 		}
-		form, err := parseIForm(bytes.NewReader(data), id)
+		var shared *[]AsmExplanation
+		if i > 0 {
+			shared = &explanations
+		}
+		form, err := parseIFormShared(bytes.NewReader(data), id, shared)
 		if err != nil {
 			return fmt.Errorf("parse encoding %q: %w", id, err)
+		}
+		if i == 0 {
+			explanations = form.Explanations
 		}
 		forms[id] = form
 	}

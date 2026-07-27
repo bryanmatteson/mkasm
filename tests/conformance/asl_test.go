@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/asl"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/asl"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // The ASL specification lives outside this repository: it is generated from

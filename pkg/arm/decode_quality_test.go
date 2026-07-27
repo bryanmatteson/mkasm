@@ -3,8 +3,8 @@ package arm_test
 import (
 	"testing"
 
-	"mkasm/pkg/decoder"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/decoder"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // TestDecodeQuality_selfMatch measures how often each resolved encoding's

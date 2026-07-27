@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/arm"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // The only external oracle in this repo that runs on an ordinary machine.

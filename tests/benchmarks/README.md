@@ -30,3 +30,28 @@ CORPUS=/path/to/ISA_A64_xml_A_profile-2026-06.tar.gz mise run bench
 The benchmark reports allocations, compressed throughput, resolved instruction
 count, and the loader's bounded peak in-flight XML buffers. Wall-clock results
 should be compared on the same machine, Go version, corpus, and worker count.
+
+## Optimization reference
+
+The parser's structural index uses a hand-written, allocation-light XML scan;
+the authoritative IForm model still uses Go's validating XML decoder. Page-level
+explanations are decoded once and shared immutably, register diagrams transfer
+slice ownership instead of being copied, and parser scopes allocate storage only
+when a handler stores state.
+
+The following is the median of seven one-iteration loader runs on an Apple M5
+Max with Go 1.26.5 and `GOMAXPROCS=4`. Both revisions loaded the same compressed
+2026-06 corpus and resolved all 4,623 encodings:
+
+| Loader metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Time | 1.058 s | 0.832 s | -21.4% |
+| Allocated bytes | 1,841,927,656 | 1,316,972,176 | -28.5% |
+| Allocations | 43,879,046 | 31,941,805 | -27.2% |
+| Peak in-flight XML | 8.102 MiB | 8.102 MiB | bounded |
+
+Reproduce the controlled measurement with:
+
+```bash
+GOMAXPROCS=4 BENCHTIME=1x BENCHCOUNT=7 mise run bench
+```

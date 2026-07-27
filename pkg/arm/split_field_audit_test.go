@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"mkasm/pkg/arm"
-	"mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // TestSplitFieldAudit checks that every operand of every typed form covers all

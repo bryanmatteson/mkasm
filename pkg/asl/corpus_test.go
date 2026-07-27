@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"mkasm/pkg/asl"
+	"github.com/bryanmatteson/mkasm/pkg/asl"
 )
 
 // aslPathEnv names the arm_instrs.asl file to parse. The ASL lives outside this
