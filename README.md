@@ -147,57 +147,62 @@ Generated project directories are verification products and are not committed.
 
 ## Verification
 
-The default repository gate is deterministic and self-contained:
+The repository can be built and verified with standard Go/Rust tools and
+`make`; `mise` is optional:
 
 ```bash
-mise run verify
+make verify
+make help
 ```
 
 Additional explicit gates:
 
 ```bash
-mise run build
-mise run bench
-mise run bench:micro
-mise run generate:go
-mise run generate:rust
+make build
+make bench
+make bench-micro
+make generate-go
+make generate-rust
 
-mise run coverage:encodings
-mise run conformance
-mise run conformance:go
-mise run conformance:rust
-mise run conformance:disasm
-mise run conformance:strict
-ASL=/path/to/arm-asl-parser/asl mise run conformance:asl
+make coverage-encodings
+make conformance
+make conformance-go
+make conformance-rust
+make conformance-disasm
+make conformance-strict
+make conformance-asl ASL=/path/to/arm-asl-parser/asl
 ```
 
 Before tagging a release, run the complete supported-toolchain gate:
 
 ```bash
-mise run release:check
-VERSION=v0.1.0 mise run build
+make release-check
+make build VERSION=v0.1.0
 ./dist/mkasm --version
 ```
 
-`mise run build` produces a stripped, path-trimmed binary plus a versioned
+`make build` produces a stripped, path-trimmed binary plus a versioned
 `.tar.gz` containing `mkasm`, `LICENSE`, and `README.md`, with a SHA-256 checksum
 beside it under `dist/`. `VERSION` is embedded in release builds; without it,
 the task uses `git describe` so local artifacts remain identifiable. Set
 `GOOS` and `GOARCH` to package another Go target.
 
-`mise run conformance` proves byte identity for every instruction recognized by
+`make conformance` proves byte identity for every instruction recognized by
 the installed LLVM oracle and fails on any rejected spelling or byte mismatch.
 Unsupported instructions remain visible and unverified. The separate
-`mise run conformance:strict` gate also requires LLVM to recognize every
+`make conformance-strict` gate also requires LLVM to recognize every
 generated and printable encoding; it currently fails on the documented five
-LLVM-unknown encodings. `mise run audit:disasm` is a separately named coverage
+LLVM-unknown encodings. `make audit-disasm` is a separately named coverage
 threshold report and is not presented as conformance.
 
-`mise run coverage:encodings` proves that the Go and Rust exact ledgers each
+`make coverage-encodings` proves that the Go and Rust exact ledgers each
 contain every resolved encoding exactly once. Source statement coverage is a
-separate `mise run coverage:source` regression metric; the two numbers are not
-conflated. Current source coverage is 49.7% overall; `coverage:source` separately
+separate `make coverage-source` regression metric; the two numbers are not
+conflated. Current source coverage is 49.7% overall; `coverage-source` separately
 holds the focused `pkg/coverage` package at 100%.
+
+The same workflows remain available through `mise.toml` for contributors who
+want pinned Go, Rust, and coverage-tool versions.
 
 Benchmark methodology is documented in
 [`tests/benchmarks`](tests/benchmarks/README.md). Independent-oracle contracts
@@ -208,6 +213,7 @@ and current results are documented in
 
 | Path | Responsibility |
 |---|---|
+| [`Makefile`](Makefile) / [`mise.toml`](mise.toml) | Portable and version-pinned verification workflows |
 | [`cmd/mkasm`](cmd/mkasm) | Public CLI and JSON export |
 | [`pkg/arm`](pkg/arm) | Corpus loading, orchestration, IForm parsing, code generation |
 | [`pkg/parse`](pkg/parse) | Streaming XML event engine |
