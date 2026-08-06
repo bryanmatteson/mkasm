@@ -12,6 +12,7 @@ var (
 // is the stable boundary on which generated typed assembler methods are built.
 type EncodeFields struct {
 	Mode            Mode
+	SegmentOverride byte
 	AddressOverride bool
 	Mod             byte
 	Reg             byte
@@ -21,6 +22,9 @@ type EncodeFields struct {
 	Base            byte
 	UseSIB          bool
 	VVVV            byte
+	Mask            byte
+	Zeroing         bool
+	Broadcast       bool
 	OpcodeReg       byte
 	Displacement    int64
 	Immediate       [4]uint64
@@ -32,7 +36,16 @@ func Encode(dst []byte, e *Encoding, fields EncodeFields) (int, error) {
 	if e == nil || len(dst) == 0 || !e.Modes.supports(fields.Mode) {
 		return 0, ErrInvalidEncodeField
 	}
-	if fields.Reg > 31 || fields.RM > 31 || fields.Index > 31 || fields.Base > 31 || fields.VVVV > 31 || fields.OpcodeReg > 15 || fields.Mod > 3 || fields.Scale > 3 {
+	if fields.SegmentOverride != 0 && fields.SegmentOverride != 0x26 && fields.SegmentOverride != 0x2e && fields.SegmentOverride != 0x36 && fields.SegmentOverride != 0x3e && fields.SegmentOverride != 0x64 && fields.SegmentOverride != 0x65 {
+		return 0, ErrInvalidEncodeField
+	}
+	if e.OperandSize == 64 && fields.Mode != Mode64 {
+		return 0, ErrInvalidEncodeField
+	}
+	if fields.Reg > 31 || fields.RM > 31 || fields.Index > 31 || fields.Base > 31 || fields.VVVV > 31 || fields.Mask > 7 || fields.OpcodeReg > 15 || fields.Mod > 3 || fields.Scale > 3 {
+		return 0, ErrInvalidEncodeField
+	}
+	if e.Kind != EncodingEVEX && (fields.Mask != 0 || fields.Zeroing || fields.Broadcast) {
 		return 0, ErrInvalidEncodeField
 	}
 	if e.Kind != EncodingEVEX && (fields.Reg > 15 || fields.RM > 15 || fields.Index > 15 || fields.Base > 15 || fields.VVVV > 15) {
@@ -54,16 +67,23 @@ func Encode(dst []byte, e *Encoding, fields EncodeFields) (int, error) {
 		pos++
 		return true
 	}
+	if fields.SegmentOverride != 0 && !put(fields.SegmentOverride) {
+		return 0, ErrBufferTooSmall
+	}
 	if fields.AddressOverride && !put(0x67) {
 		return 0, ErrBufferTooSmall
 	}
 	if e.Kind == EncodingLegacy {
+		operandOverride := operandSizeOverride(fields.Mode, e.OperandSize)
+		if operandOverride && e.MandatoryPrefix != Prefix66 && !put(0x66) {
+			return 0, ErrBufferTooSmall
+		}
 		if prefix := mandatoryPrefixByte(e.MandatoryPrefix); prefix != 0 && !put(prefix) {
 			return 0, ErrBufferTooSmall
 		}
 		rex := byte(0)
 		if fields.Mode == Mode64 {
-			if e.W == BitOne {
+			if e.W == BitOne || e.OperandSize == 64 {
 				rex |= 1 << 3
 			}
 			rex |= (fields.Reg >> 3 & 1) << 2
@@ -125,7 +145,7 @@ func Encode(dst []byte, e *Encoding, fields EncodeFields) (int, error) {
 		}
 	}
 	for i, tail := range e.Tail {
-		width := tailBytes(tail, fields.Mode, e.MandatoryPrefix == Prefix66, e.W == BitOne, fields.AddressOverride)
+		width := tailBytes(tail, fields.Mode, e.MandatoryPrefix == Prefix66 || operandSizeOverride(fields.Mode, e.OperandSize), e.W == BitOne || e.OperandSize == 64, fields.AddressOverride)
 		if pos+width > len(dst) || pos+width > 15 {
 			return 0, ErrBufferTooSmall
 		}
@@ -133,6 +153,17 @@ func Encode(dst []byte, e *Encoding, fields EncodeFields) (int, error) {
 		pos += width
 	}
 	return pos, nil
+}
+
+func operandSizeOverride(mode Mode, size uint8) bool {
+	switch mode {
+	case Mode16:
+		return size == 32
+	case Mode32, Mode64:
+		return size == 16
+	default:
+		return false
+	}
 }
 
 func mandatoryPrefixByte(prefix MandatoryPrefix) byte {
@@ -217,15 +248,22 @@ func vectorPrefix(e *Encoding, fields EncodeFields) ([4]byte, int, error) {
 		}
 		regHigh, vHigh := fields.Reg>>4&1, fields.VVVV>>4&1
 		out[0] = 0x62
-		out[1] = (^regHigh&1)<<7 | (^x&1)<<6 | (^b&1)<<5 | (^r&1)<<4 | (mapBits & 3)
+		out[1] = (^r&1)<<7 | (^x&1)<<6 | (^b&1)<<5 | (^regHigh&1)<<4 | (mapBits & 3)
 		out[2] = w<<7 | (^fields.VVVV&15)<<3 | 1<<2 | pp
-		out[3] = ll<<5 | (^vHigh&1)<<3
+		out[3] = boolBit(fields.Zeroing)<<7 | ll<<5 | boolBit(fields.Broadcast)<<4 | (^vHigh&1)<<3 | fields.Mask
 		return out, 4, nil
 	case EncodingMVEX, Encoding3DNow:
 		return out, 0, ErrUnsupportedFamily
 	default:
 		return out, 0, ErrInvalidEncodeField
 	}
+}
+
+func boolBit(value bool) byte {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func ppFromMandatoryPrefix(prefix MandatoryPrefix) byte {

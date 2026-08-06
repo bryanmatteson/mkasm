@@ -843,7 +843,7 @@ var (
 	aliasFieldEqRE     = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*==\s*([A-Za-z_][A-Za-z0-9_]*)\b`)
 	aliasBitsEqRE      = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*==\s*'([01]+)'`)
 	aliasNextEqRE      = regexp.MustCompile(`(?i)UInt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\+\s*1\s*==\s*UInt\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`)
-	aliasBitCountOneRE = regexp.MustCompile(`BitCount\s*\(\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*::\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*\)\s*==\s*1`)
+	aliasBitCountOneRE = regexp.MustCompile(`BitCount\s*\(\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*::\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*\)\s*==\s*1`)
 )
 
 // applyAliasConstraints supplies the fields an alias template intentionally

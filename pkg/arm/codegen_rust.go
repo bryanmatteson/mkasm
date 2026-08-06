@@ -61,6 +61,17 @@ func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
 	if err := execTmplWrite(tmpl, "decoders.rs.tmpl", filepath.Join(srcDir, "decoders.rs"), decData); err != nil {
 		return err
 	}
+	disasm := cg.disasm
+	if disasm == nil {
+		disasm = &DisasmSurface{}
+	}
+	disasmData, err := buildRustDisasmData(catalog, disasm)
+	if err != nil {
+		return err
+	}
+	if err := execTmplWrite(tmpl, "formatters.rs.tmpl", filepath.Join(srcDir, "formatters.rs"), disasmData); err != nil {
+		return err
+	}
 
 	regData := struct{ AllTable string }{AllTable: emitRustRegistryTable(catalog)}
 	if err := execTmplWrite(tmpl, "registry.rs.tmpl", filepath.Join(srcDir, "registry.rs"), regData); err != nil {

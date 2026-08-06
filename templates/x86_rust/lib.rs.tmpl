@@ -1,5 +1,7 @@
 //! Generated allocation-free x86 instruction codec.
 
+use std::fmt::Write as _;
+
 const KIND_COUNT: usize = 6;
 const MAP_COUNT: usize = 8;
 const DISPATCH_SIZE: usize = KIND_COUNT * MAP_COUNT * 256;
@@ -26,7 +28,9 @@ pub struct Encoding {
     prefix_value: u8,
     modes: u8,
     w: i8,
+    operand_size: u8,
     vector_length: u16,
+	tuple: &'static str,
     has_modrm: bool,
     mod_kind: u8,
     reg_mask: u8,
@@ -35,6 +39,19 @@ pub struct Encoding {
     rm_value: u8,
     tail_start: u32,
     tail_len: u8,
+	operand_start: u32,
+	operand_len: u8,
+}
+
+#[derive(Clone, Copy)]
+struct OperandSpec {
+    kind: &'static str,
+    symbol: &'static str,
+    encoded_in: &'static str,
+    data_type: &'static str,
+    size: &'static str,
+    value: &'static str,
+    flags: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -58,22 +75,128 @@ pub enum EncodeError {
     Unsupported,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegisterClass {
+    Gpr, Vector, Mask, Mmx, Bound, Control, Debug, Segment, X87, Other,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Register {
+    pub class: RegisterClass,
+    pub number: u8,
+    pub width: u16,
+    pub high8: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperandKind { None, Register, Memory, Immediate, Relative, FarPointer, Mask, Other }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Access {
+    pub read: bool,
+    pub write: bool,
+    pub conditional_read: bool,
+    pub conditional_write: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Immediate {
+    pub value: u64,
+    pub signed: i64,
+    pub width: u8,
+    pub offset: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryOperand {
+    pub segment: Option<Register>,
+    pub base: Option<Register>,
+    pub index: Option<Register>,
+    pub scale: u8,
+    pub displacement: i64,
+    pub displacement_width: u8,
+    pub address_size: u8,
+    pub size: u16,
+    pub rip_relative: bool,
+}
+
+const EMPTY_MEMORY: MemoryOperand = MemoryOperand {
+    segment: None, base: None, index: None, scale: 1, displacement: 0,
+    displacement_width: 0, address_size: 0, size: 0, rip_relative: false,
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DecodedOperand {
+    pub kind: OperandKind,
+    pub access: Access,
+    pub implicit: bool,
+    pub register: Option<Register>,
+    pub memory: MemoryOperand,
+    pub immediate: Immediate,
+    pub text: &'static str,
+}
+
+const EMPTY_IMMEDIATE: Immediate = Immediate { value: 0, signed: 0, width: 0, offset: 0 };
+const EMPTY_ACCESS: Access = Access { read: false, write: false, conditional_read: false, conditional_write: false };
+const EMPTY_OPERAND: DecodedOperand = DecodedOperand {
+    kind: OperandKind::None, access: EMPTY_ACCESS, implicit: false, register: None,
+    memory: EMPTY_MEMORY, immediate: EMPTY_IMMEDIATE, text: "",
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PhysicalDecode {
+    pub mode: Mode,
+    pub operand_size: u8,
+    pub address_size: u8,
+    pub rex: u8,
+    pub vector_length: u16,
+    pub modrm: Option<u8>,
+    pub sib: Option<u8>,
+    pub mod_bits: u8,
+    pub reg: u8,
+    pub rm: u8,
+    pub opcode_register: u8,
+    pub vvvv: u8,
+    pub mask: u8,
+	pub zeroing: bool,
+	pub broadcast: bool,
+	pub lock: bool,
+	pub repeat: u8,
+    pub displacement: Immediate,
+    pub immediates: [Immediate; 4],
+    pub immediate_count: u8,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Decoded {
     pub form_index: u32,
     pub length: u8,
     pub alternatives: u16,
+	pub physical: PhysicalDecode,
+	operands: [DecodedOperand; 12],
+	operand_count: u8,
 }
 
 impl Decoded {
     pub fn encoding(&self) -> &'static Encoding {
         &ENCODINGS[self.form_index as usize]
     }
+
+    pub fn operands(&self) -> &[DecodedOperand] {
+        &self.operands[..self.operand_count as usize]
+    }
+
+    /// Format the instruction in Intel syntax. Relative targets are resolved
+    /// against `ip`, the address of the first instruction byte.
+    pub fn format_intel(&self, ip: u64) -> String {
+        format_intel(self, ip)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct EncodeFields {
     pub mode: Mode,
+    pub segment_override: u8,
     pub address_override: bool,
     pub mod_bits: u8,
     pub reg: u8,
@@ -83,6 +206,9 @@ pub struct EncodeFields {
     pub base: u8,
     pub use_sib: bool,
     pub vvvv: u8,
+    pub mask: u8,
+    pub zeroing: bool,
+    pub broadcast: bool,
     pub opcode_reg: u8,
     pub displacement: i64,
     pub immediate: [u64; 4],
@@ -92,6 +218,7 @@ impl Default for EncodeFields {
     fn default() -> Self {
         Self {
             mode: Mode::Mode64,
+            segment_override: 0,
             address_override: false,
             mod_bits: 0,
             reg: 0,
@@ -101,6 +228,9 @@ impl Default for EncodeFields {
             base: 0,
             use_sib: false,
             vvvv: 0,
+            mask: 0,
+            zeroing: false,
+            broadcast: false,
             opcode_reg: 0,
             displacement: 0,
             immediate: [0; 4],
@@ -113,6 +243,9 @@ static ENCODINGS: &[Encoding] = &[
 
 static TAILS: &[u8] = &[
 {{.Tails}}];
+
+static OPERANDS: &[OperandSpec] = &[
+{{.Operands}}];
 
 static BUCKETS: [Bucket; DISPATCH_SIZE] = [
 {{.Buckets}}];
@@ -129,6 +262,19 @@ struct Head {
     w: u8,
     vector_length: u16,
     address_override: bool,
+	operand_override: bool,
+	rex: u8,
+	reg_ext: u8,
+	index_ext: u8,
+	base_ext: u8,
+	rm_high_ext: u8,
+	index_high_ext: u8,
+	vvvv: u8,
+	mask: u8,
+	zeroing: bool,
+	broadcast: bool,
+	lock: bool,
+	segment: u8,
     modrm_offset: usize,
 }
 
@@ -146,15 +292,18 @@ pub fn decode(src: &[u8], mode: Mode) -> Result<Decoded, DecodeError> {
     if bucket.count == 0 {
         return Err(DecodeError::Unknown);
     }
-    let mut first = None;
+    let mut best = None;
+    let mut best_score = 0u32;
     let mut matches = 0u16;
     let mut saw_short = false;
     for offset in 0..bucket.count as usize {
         let index = CANDIDATES[bucket.start as usize + offset];
         match match_encoding(src, mode, head, &ENCODINGS[index as usize]) {
             Match::Yes(length) => {
-                if first.is_none() {
-                    first = Some((index, length));
+                let score = encoding_specificity(&ENCODINGS[index as usize]);
+                if best.is_none() || score > best_score {
+                    best = Some((index, length));
+                    best_score = score;
                 }
                 matches += 1;
             }
@@ -162,13 +311,23 @@ pub fn decode(src: &[u8], mode: Mode) -> Result<Decoded, DecodeError> {
             Match::No => {}
         }
     }
-    if let Some((form_index, length)) = first {
-        Ok(Decoded { form_index, length: length as u8, alternatives: matches - 1 })
+    if let Some((form_index, length)) = best {
+        Ok(decoded_details(src, mode, head, form_index, length, matches - 1))
     } else if saw_short {
         Err(DecodeError::Truncated)
     } else {
         Err(DecodeError::Unknown)
     }
+}
+
+fn encoding_specificity(e: &Encoding) -> u32 {
+    e.prefix_mask.count_ones() * 16
+        + u32::from(e.w >= 0) * 8
+        + u32::from(e.vector_length != 0) * 8
+        + u32::from(e.operand_size != 0) * 8
+        + u32::from(e.mod_kind != 0) * 4
+        + e.reg_mask.count_ones() * 2
+        + e.rm_mask.count_ones() * 2
 }
 
 enum Match {
@@ -181,6 +340,7 @@ fn match_encoding(src: &[u8], mode: Mode, head: Head, e: &Encoding) -> Match {
     if !supports(e.modes, mode)
         || head.prefix_bits & e.prefix_mask != e.prefix_value
         || (e.w >= 0 && e.w as u8 != head.w)
+        || (e.operand_size != 0 && e.operand_size as usize != effective_operand_bits(mode, head.prefix_bits & 1 != 0, head.w != 0))
         || (e.vector_length != 0 && e.vector_length != head.vector_length)
     {
         return Match::No;
@@ -240,15 +400,27 @@ fn modrm_length(src: &[u8], mode: Mode, address_override: bool, offset: usize, e
 
 fn parse_head(src: &[u8], mode: Mode) -> Result<Head, DecodeError> {
     if src.is_empty() { return Err(DecodeError::Truncated); }
-    let mut h = Head { kind: 0, map: 0, opcode: 0, prefix_bits: 0, w: 0, vector_length: 0, address_override: false, modrm_offset: 0 };
+    let mut h = Head {
+        kind: 0, map: 0, opcode: 0, prefix_bits: 0, w: 0,
+        vector_length: 0, address_override: false, operand_override: false,
+        rex: 0, reg_ext: 0, index_ext: 0, base_ext: 0, rm_high_ext: 0,
+        index_high_ext: 0, vvvv: 0,
+        mask: 0, zeroing: false, broadcast: false, lock: false, segment: 0, modrm_offset: 0,
+    };
     let mut pos = 0usize;
     while pos < src.len() && pos < 15 {
         match src[pos] {
-            0x66 => h.prefix_bits |= 1,
+            0x66 => { h.prefix_bits |= 1; h.operand_override = true; },
             0xf3 => h.prefix_bits |= 2,
             0xf2 => h.prefix_bits |= 4,
             0x67 => h.address_override = true,
-            0xf0 | 0x2e | 0x36 | 0x3e | 0x26 | 0x64 | 0x65 => {}
+            0x26 => h.segment = 1,
+            0x2e => h.segment = 2,
+            0x36 => h.segment = 3,
+            0x3e => h.segment = 4,
+            0x64 => h.segment = 5,
+            0x65 => h.segment = 6,
+            0xf0 => h.lock = true,
             _ => break,
         }
         pos += 1;
@@ -256,44 +428,68 @@ fn parse_head(src: &[u8], mode: Mode) -> Result<Head, DecodeError> {
     if pos >= 15 { return Err(DecodeError::TooLong); }
     if pos >= src.len() { return Err(DecodeError::Truncated); }
     if mode == Mode::Mode64 && (0x40..=0x4f).contains(&src[pos]) {
-        h.w = (src[pos] >> 3) & 1;
+        h.rex = src[pos];
+        h.w = (h.rex >> 3) & 1;
+        h.reg_ext = (h.rex >> 2 & 1) << 3;
+        h.index_ext = (h.rex >> 1 & 1) << 3;
+        h.base_ext = (h.rex & 1) << 3;
         pos += 1;
         if pos >= src.len() { return Err(DecodeError::Truncated); }
     }
     match src[pos] {
-        0xc5 => {
+        0xc5 if mode == Mode::Mode64 || src.get(pos + 1).is_some_and(|byte| byte & 0xc0 == 0xc0) => {
             if pos + 2 >= src.len() { return Err(DecodeError::Truncated); }
             h.kind = 1; h.map = 1;
             let p1 = src[pos + 1];
             h.prefix_bits = prefix_bits_from_pp(p1 & 3);
             h.vector_length = 128 << ((p1 >> 2) & 1);
+			h.reg_ext = ((!p1 >> 7) & 1) << 3;
+			h.vvvv = (!p1 >> 3) & 15;
             pos += 2;
         }
-        0xc4 => {
+        0xc4 if mode == Mode::Mode64 || src.get(pos + 1).is_some_and(|byte| byte & 0xc0 == 0xc0) => {
             if pos + 3 >= src.len() { return Err(DecodeError::Truncated); }
             h.kind = 1;
             h.map = map_from_mmmmm(src[pos + 1] & 0x1f).ok_or(DecodeError::Unknown)?;
-            let p2 = src[pos + 2];
+            let p1 = src[pos + 1]; let p2 = src[pos + 2];
             h.w = p2 >> 7; h.prefix_bits = prefix_bits_from_pp(p2 & 3);
             h.vector_length = 128 << ((p2 >> 2) & 1);
+			h.reg_ext = ((!p1 >> 7) & 1) << 3;
+			h.index_ext = ((!p1 >> 6) & 1) << 3;
+			h.base_ext = ((!p1 >> 5) & 1) << 3;
+			h.vvvv = (!p2 >> 3) & 15;
             pos += 3;
         }
-        0x62 => {
+        0x62 if mode == Mode::Mode64 || src.get(pos + 1).is_some_and(|byte| byte & 0xc0 == 0xc0) => {
             if pos + 4 >= src.len() { return Err(DecodeError::Truncated); }
             h.kind = 2;
             h.map = map_from_mmmmm(src[pos + 1] & 7).ok_or(DecodeError::Unknown)?;
             let p1 = src[pos + 2]; let p2 = src[pos + 3];
             h.w = p1 >> 7; h.prefix_bits = prefix_bits_from_pp(p1 & 3);
             h.vector_length = match (p2 >> 5) & 3 { 0 => 128, 1 => 256, 2 => 512, _ => return Err(DecodeError::Unknown) };
+			let p0 = src[pos + 1];
+			h.reg_ext = ((!p0 >> 7) & 1) << 3 | ((!p0 >> 4) & 1) << 4;
+			h.index_ext = ((!p0 >> 6) & 1) << 3;
+			h.base_ext = ((!p0 >> 5) & 1) << 3;
+			h.rm_high_ext = ((!p0 >> 6) & 1) << 4;
+			h.index_high_ext = ((!p2 >> 3) & 1) << 4;
+			h.vvvv = (!p1 >> 3) & 15 | ((!p2 >> 3) & 1) << 4;
+			h.mask = p2 & 7;
+			h.zeroing = p2 >> 7 != 0;
+			h.broadcast = p2 & 0x10 != 0;
             pos += 4;
         }
         0x8f if pos + 1 < src.len() && src[pos + 1] & 0x1f >= 8 => {
             if pos + 3 >= src.len() { return Err(DecodeError::Truncated); }
             h.kind = 4;
             h.map = map_from_mmmmm(src[pos + 1] & 0x1f).ok_or(DecodeError::Unknown)?;
-            let p2 = src[pos + 2];
+            let p1 = src[pos + 1]; let p2 = src[pos + 2];
             h.w = p2 >> 7; h.prefix_bits = prefix_bits_from_pp(p2 & 3);
             h.vector_length = 128 << ((p2 >> 2) & 1);
+			h.reg_ext = ((!p1 >> 7) & 1) << 3;
+			h.index_ext = ((!p1 >> 6) & 1) << 3;
+			h.base_ext = ((!p1 >> 5) & 1) << 3;
+			h.vvvv = (!p2 >> 3) & 15;
             pos += 3;
         }
         _ => {}
@@ -314,12 +510,689 @@ fn parse_head(src: &[u8], mode: Mode) -> Result<Head, DecodeError> {
     Ok(h)
 }
 
+fn decoded_details(
+    src: &[u8], mode: Mode, head: Head, form_index: u32, length: usize, alternatives: u16,
+) -> Decoded {
+    let encoding = &ENCODINGS[form_index as usize];
+    let operand_size = effective_operand_bits(mode, head.operand_override, head.w != 0) as u8;
+    let address_size = effective_address_bits(mode, head.address_override) as u8;
+    let mut physical = PhysicalDecode {
+        mode, operand_size, address_size, rex: head.rex, vector_length: head.vector_length,
+        modrm: None, sib: None, mod_bits: 0, reg: 0, rm: 0,
+        opcode_register: (head.opcode & 7) | head.base_ext,
+        vvvv: head.vvvv, mask: head.mask, zeroing: head.zeroing, broadcast: head.broadcast,
+        lock: head.lock, repeat: head.prefix_bits & 6,
+        displacement: EMPTY_IMMEDIATE,
+        immediates: [EMPTY_IMMEDIATE; 4], immediate_count: 0,
+    };
+    let mut memory = EMPTY_MEMORY;
+    memory.address_size = address_size;
+    memory.scale = 1;
+    memory.segment = segment_register(head.segment);
+    let mut tail_offset = head.modrm_offset;
+    if encoding.has_modrm {
+        let modrm = src[head.modrm_offset];
+        physical.modrm = Some(modrm);
+        physical.mod_bits = modrm >> 6;
+        physical.reg = (modrm >> 3 & 7) | head.reg_ext;
+        physical.rm = (modrm & 7) | head.base_ext |
+            if physical.mod_bits == 3 { head.rm_high_ext } else { 0 };
+        tail_offset += 1;
+        if physical.mod_bits != 3 {
+            let rm_low = modrm & 7;
+            let mut displacement_bytes = 0usize;
+            if address_size == 16 {
+                let bx = gpr(3, 16, false);
+                let bp = gpr(5, 16, false);
+                let si = gpr(6, 16, false);
+                let di = gpr(7, 16, false);
+                match rm_low {
+                    0 => { memory.base = Some(bx); memory.index = Some(si); }
+                    1 => { memory.base = Some(bx); memory.index = Some(di); }
+                    2 => { memory.base = Some(bp); memory.index = Some(si); }
+                    3 => { memory.base = Some(bp); memory.index = Some(di); }
+                    4 => memory.base = Some(si),
+                    5 => memory.base = Some(di),
+                    6 if physical.mod_bits == 0 => displacement_bytes = 2,
+                    6 => memory.base = Some(bp),
+                    _ => memory.base = Some(bx),
+                }
+                if physical.mod_bits == 1 { displacement_bytes = 1; }
+                if physical.mod_bits == 2 { displacement_bytes = 2; }
+            } else {
+                if rm_low == 4 {
+                    let sib = src[tail_offset];
+                    physical.sib = Some(sib);
+                    tail_offset += 1;
+                    memory.scale = 1 << (sib >> 6);
+                    let index_low = (sib >> 3) & 7;
+                    if index_low != 4 {
+                        memory.index = Some(gpr(index_low | head.index_ext, address_size as u16, false));
+                    }
+                    let base_low = sib & 7;
+                    if physical.mod_bits == 0 && base_low == 5 {
+                        displacement_bytes = 4;
+                    } else {
+                        memory.base = Some(gpr(base_low | head.base_ext, address_size as u16, false));
+                    }
+                } else if physical.mod_bits == 0 && rm_low == 5 {
+                    displacement_bytes = 4;
+                    memory.rip_relative = address_size == 64;
+                } else {
+                    memory.base = Some(gpr(rm_low | head.base_ext, address_size as u16, false));
+                }
+                if physical.mod_bits == 1 { displacement_bytes = 1; }
+                if physical.mod_bits == 2 { displacement_bytes = 4; }
+            }
+            if displacement_bytes != 0 {
+                let value = read_little(src, tail_offset, displacement_bytes);
+                let signed = sign_extend_u64(value, displacement_bytes * 8);
+                physical.displacement = Immediate {
+                    value, signed, width: (displacement_bytes * 8) as u8, offset: tail_offset as u8,
+                };
+                memory.displacement = signed;
+                memory.displacement_width = (displacement_bytes * 8) as u8;
+                tail_offset += displacement_bytes;
+            }
+        }
+    }
+    for i in 0..encoding.tail_len as usize {
+        let tail = TAILS[encoding.tail_start as usize + i];
+        let width = tail_bytes(tail, mode, head.operand_override, head.w != 0, head.address_override);
+        let value = read_little(src, tail_offset, width);
+        physical.immediates[i] = Immediate {
+            value, signed: sign_extend_u64(value, width * 8), width: (width * 8) as u8,
+            offset: tail_offset as u8,
+        };
+        physical.immediate_count += 1;
+        tail_offset += width;
+    }
+
+    let mut operands = [EMPTY_OPERAND; 12];
+    let mut operand_count = 0usize;
+    let mut tail_index = 0usize;
+    let has_is4 = (0..encoding.operand_len as usize).any(|i| {
+        OPERANDS[encoding.operand_start as usize + i].encoded_in == "IS4"
+    });
+    for i in 0..encoding.operand_len as usize {
+        let spec = &OPERANDS[encoding.operand_start as usize + i];
+        if let Some(operand) = decode_operand(spec, &physical, memory, head, encoding.tuple, has_is4, length, &mut tail_index) {
+            operands[operand_count] = operand;
+            operand_count += 1;
+        }
+    }
+    normalize_operand_views(&mut operands[..operand_count], encoding.mnemonic, &physical);
+    normalize_signed_immediates(&mut operands[..operand_count], encoding.mnemonic, &physical);
+    Decoded {
+        form_index, length: length as u8, alternatives, physical,
+        operands, operand_count: operand_count as u8,
+    }
+}
+
+fn normalize_operand_views(operands: &mut [DecodedOperand], mnemonic: &str, physical: &PhysicalDecode) {
+    if physical.mode != Mode::Mode64 || !matches!(mnemonic, "CALL" | "JMP" | "PUSH" | "POP") { return; }
+    for operand in operands.iter_mut().filter(|operand| !operand.implicit) {
+        match operand.kind {
+            OperandKind::Register => if let Some(register) = operand.register.as_mut() {
+                if register.class == RegisterClass::Gpr && register.width == 32 { register.width = 64; }
+            },
+            OperandKind::Memory if operand.memory.size == 32 => operand.memory.size = 64,
+            _ => {}
+        }
+    }
+}
+
+fn normalize_signed_immediates(operands: &mut [DecodedOperand], mnemonic: &str, physical: &PhysicalDecode) {
+    let target_width = immediate_target_width(operands, mnemonic, physical);
+    for operand in operands {
+        if operand.kind != OperandKind::Immediate || operand.immediate.signed >= 0 ||
+            target_width <= operand.immediate.width as u16 { continue; }
+        operand.immediate.value = operand.immediate.signed as u64;
+    }
+}
+
+fn immediate_target_width(operands: &[DecodedOperand], mnemonic: &str, physical: &PhysicalDecode) -> u16 {
+    let mut target_width = 0u16;
+    for operand in operands.iter().filter(|operand| !operand.implicit) {
+        let width = match operand.kind {
+            OperandKind::Register => operand.register
+                .filter(|register| register.class == RegisterClass::Gpr)
+                .map_or(0, |register| register.width),
+            OperandKind::Memory if operand.memory.size <= 64 => operand.memory.size,
+            _ => 0,
+        };
+        target_width = target_width.max(width);
+    }
+    if target_width != 0 { return target_width; }
+    if mnemonic == "PUSH" && physical.mode == Mode::Mode64 && physical.operand_size == 32 {
+            64
+    } else {
+        physical.operand_size as u16
+    }
+}
+
+fn decode_operand(
+    spec: &'static OperandSpec, physical: &PhysicalDecode, mut memory: MemoryOperand,
+    head: Head, tuple: &'static str, has_is4: bool, _length: usize, tail_index: &mut usize,
+) -> Option<DecodedOperand> {
+    let access = Access {
+        read: spec.flags & 1 != 0, write: spec.flags & 2 != 0,
+        conditional_read: spec.flags & 16 != 0, conditional_write: spec.flags & 32 != 0,
+    };
+    let implicit = spec.flags & 4 != 0;
+    let mut operand = DecodedOperand { access, implicit, text: spec.value, ..EMPTY_OPERAND };
+    if !spec.value.is_empty() {
+        if let Some(register) = fixed_register(spec.value, physical.operand_size, physical.address_size) {
+            operand.kind = OperandKind::Register;
+            operand.register = Some(register);
+        } else if let Ok(value) = spec.value.parse::<i64>() {
+            operand.kind = OperandKind::Immediate;
+            operand.immediate = Immediate { value: value as u64, signed: value, width: 0, offset: 0 };
+        } else {
+            operand.kind = OperandKind::Other;
+        }
+        return Some(operand);
+    }
+
+    let encoded = spec.encoded_in;
+    if matches!(spec.kind, "MEM" | "MIB" | "AGEN") {
+        memory.size = operand_size(spec.size, physical.operand_size, physical.address_size);
+		if memory.displacement_width == 8 {
+			let element_bits = data_type_bits(spec.data_type).unwrap_or(memory.size);
+			memory.displacement *= tuple_scale(tuple, element_bits, physical.vector_length, physical.broadcast);
+		}
+		let vector_index_width = match spec.symbol { "VMX" => 128, "VMY" => 256, "VMZ" => 512, _ => 0 };
+		if vector_index_width != 0 {
+			if let Some(mut index) = memory.index {
+				index.class = RegisterClass::Vector;
+				index.number |= head.index_high_ext;
+				index.width = vector_index_width;
+				memory.index = Some(index);
+			}
+		}
+        operand.kind = OperandKind::Memory;
+        operand.memory = memory;
+        return Some(operand);
+    }
+    if spec.kind == "MOFFS" {
+        let immediate = take_immediate(physical, tail_index)?;
+        memory.size = operand_size(spec.size, physical.operand_size, physical.address_size);
+        memory.displacement = immediate.value as i64;
+        memory.displacement_width = immediate.width;
+        operand.kind = OperandKind::Memory;
+        operand.memory = memory;
+        return Some(operand);
+    }
+    if spec.kind == "PTR" {
+        operand.kind = OperandKind::FarPointer;
+        operand.immediate = take_immediate(physical, tail_index)?;
+        return Some(operand);
+    }
+    if spec.kind == "REL" {
+        operand.kind = OperandKind::Relative;
+        operand.immediate = take_immediate(physical, tail_index)?;
+        return Some(operand);
+    }
+    if spec.kind == "IMM" || is_tail_encoding(encoded) {
+        operand.kind = OperandKind::Immediate;
+        operand.immediate = take_immediate(physical, tail_index)?;
+		if has_is4 && encoded == "IB" {
+			operand.immediate.value &= 0xf;
+			operand.immediate.signed = operand.immediate.value as i64;
+		}
+		if !spec.data_type.starts_with('S') && spec.symbol != "SIMM" {
+			operand.immediate.signed = operand.immediate.value as i64;
+		}
+        return Some(operand);
+    }
+
+    let number = match encoded {
+        "REG" => physical.reg,
+        "RM" => physical.rm,
+        "VVVV" => physical.vvvv,
+        "OPCODE" => physical.opcode_register,
+        "AAA" => physical.mask,
+        "IS4" => {
+            let immediate = peek_immediate(physical, *tail_index)?;
+            (immediate.value >> 4) as u8
+        }
+        "OSZ" | "ASZ" => 0,
+        _ => return None,
+    };
+    if let Some(register) = register_for_symbol(spec.symbol, number, physical, head.rex != 0) {
+        operand.kind = if spec.kind == "PREG" && encoded == "AAA" { OperandKind::Mask } else { OperandKind::Register };
+        operand.register = Some(register);
+        Some(operand)
+    } else {
+        operand.kind = OperandKind::Other;
+        Some(operand)
+    }
+}
+
+fn take_immediate(physical: &PhysicalDecode, index: &mut usize) -> Option<Immediate> {
+    let value = physical.immediates.get(*index).copied();
+    *index += 1;
+    value.filter(|immediate| immediate.width != 0)
+}
+
+fn peek_immediate(physical: &PhysicalDecode, index: usize) -> Option<Immediate> {
+    physical.immediates.get(index).copied().filter(|immediate| immediate.width != 0)
+}
+
+fn is_tail_encoding(encoded: &str) -> bool {
+    matches!(encoded, "IB" | "IW" | "ID" | "IQ" | "IZ" | "IV" | "RB" | "RW" | "RD" | "RQ" | "RZ" | "RV" | "IDPP")
+}
+
+fn operand_size(size: &str, operand_bits: u8, address_bits: u8) -> u16 {
+    match size {
+        "SZ_V" => operand_bits as u16,
+        "SZ_Y" => if operand_bits == 64 { 64 } else { 32 },
+        "SZ_Z" => if operand_bits == 16 { 16 } else { 32 },
+        "SZ_A" => address_bits as u16,
+        _ => size.parse().unwrap_or(0),
+    }
+}
+
+fn tuple_scale(tuple: &str, element_bits: u16, vector_bits: u16, broadcast: bool) -> i64 {
+	let element = i64::from(element_bits / 8).max(1);
+	let vector = i64::from(vector_bits / 8).max(element);
+	match tuple {
+		"FV" | "FVM" => if broadcast { element } else { vector },
+		"HV" | "HVM" => vector / 2,
+		"QVM" => vector / 4,
+		"OVM" => vector / 8,
+		"M128" => 16,
+		"T1S" => element,
+		"T1F32" => 4,
+		"T1F64" => 8,
+		"T1S8" => 1,
+		"T1S16" => 2,
+		"T2" => element * 2,
+		"T4" => element * 4,
+		"T8" => element * 8,
+		"DUP" => if vector_bits == 128 { 8 } else { vector },
+		_ => 1,
+	}
+}
+
+fn data_type_bits(data_type: &str) -> Option<u16> {
+	if data_type.ends_with("512") { Some(512) }
+	else if data_type.ends_with("256") { Some(256) }
+	else if data_type.ends_with("128") { Some(128) }
+	else if data_type.ends_with("80") { Some(80) }
+	else if data_type.ends_with("64") { Some(64) }
+	else if data_type.ends_with("32") { Some(32) }
+	else if data_type.ends_with("16") { Some(16) }
+	else if data_type.ends_with('8') { Some(8) }
+	else { None }
+}
+
+fn register_for_symbol(symbol: &str, number: u8, physical: &PhysicalDecode, rex: bool) -> Option<Register> {
+    let (class, width) = match symbol {
+        "GPR8" => (RegisterClass::Gpr, 8),
+        "GPR16" => (RegisterClass::Gpr, 16),
+        "GPR32" => (RegisterClass::Gpr, 32),
+        "GPR64" => (RegisterClass::Gpr, 64),
+        "GPRv" => (RegisterClass::Gpr, physical.operand_size as u16),
+        "GPRy" => (RegisterClass::Gpr, if physical.operand_size == 64 { 64 } else { 32 }),
+        "GPRz" => (RegisterClass::Gpr, if physical.operand_size == 16 { 16 } else { 32 }),
+        "GPRa" => (RegisterClass::Gpr, physical.address_size as u16),
+        "XMMREG" => (RegisterClass::Vector, 128),
+        "YMMREG" => (RegisterClass::Vector, 256),
+        "ZMMREG" => (RegisterClass::Vector, 512),
+        "MASKREG" => (RegisterClass::Mask, 64),
+        "MMXREG" => (RegisterClass::Mmx, 64),
+        "BNDREG" => (RegisterClass::Bound, 128),
+        "CREG" => (RegisterClass::Control, 64),
+        "DREG" => (RegisterClass::Debug, 64),
+        "SEGREG" => (RegisterClass::Segment, 16),
+        "FPREG" => (RegisterClass::X87, 80),
+        _ => return fixed_register(symbol, physical.operand_size, physical.address_size),
+    };
+    Some(Register { class, number, width, high8: class == RegisterClass::Gpr && width == 8 && !rex && (4..8).contains(&number) })
+}
+
+fn fixed_register(name: &str, operand_bits: u8, address_bits: u8) -> Option<Register> {
+    let upper = name.as_bytes();
+    let named = match name {
+        "AL" => Some(gpr(0, 8, false)), "CL" => Some(gpr(1, 8, false)),
+        "DL" => Some(gpr(2, 8, false)), "BL" => Some(gpr(3, 8, false)),
+        "AH" => Some(gpr(4, 8, true)), "CH" => Some(gpr(5, 8, true)),
+        "DH" => Some(gpr(6, 8, true)), "BH" => Some(gpr(7, 8, true)),
+        "AX" => Some(gpr(0, 16, false)), "CX" => Some(gpr(1, 16, false)),
+        "DX" => Some(gpr(2, 16, false)), "BX" => Some(gpr(3, 16, false)),
+        "SP" => Some(gpr(4, 16, false)), "BP" => Some(gpr(5, 16, false)),
+        "SI" => Some(gpr(6, 16, false)), "DI" => Some(gpr(7, 16, false)),
+        "EAX" => Some(gpr(0, 32, false)), "ECX" => Some(gpr(1, 32, false)),
+        "EDX" => Some(gpr(2, 32, false)), "EBX" => Some(gpr(3, 32, false)),
+        "ESP" => Some(gpr(4, 32, false)), "EBP" => Some(gpr(5, 32, false)),
+        "ESI" => Some(gpr(6, 32, false)), "EDI" => Some(gpr(7, 32, false)),
+        "RAX" => Some(gpr(0, 64, false)), "RCX" => Some(gpr(1, 64, false)),
+        "RDX" => Some(gpr(2, 64, false)), "RBX" => Some(gpr(3, 64, false)),
+        "RSP" => Some(gpr(4, 64, false)), "RBP" => Some(gpr(5, 64, false)),
+        "RSI" => Some(gpr(6, 64, false)), "RDI" => Some(gpr(7, 64, false)),
+        "AXv" => Some(gpr(0, operand_bits as u16, false)),
+        "DXv" => Some(gpr(2, operand_bits as u16, false)),
+        "BPv" => Some(gpr(5, operand_bits as u16, false)),
+        "SPv" => Some(gpr(4, operand_bits as u16, false)),
+        "AXa" => Some(gpr(0, address_bits as u16, false)),
+        "CXa" => Some(gpr(1, address_bits as u16, false)),
+        "DXa" => Some(gpr(2, address_bits as u16, false)),
+        "BXa" => Some(gpr(3, address_bits as u16, false)),
+        "SPa" => Some(gpr(4, address_bits as u16, false)),
+        "BPa" => Some(gpr(5, address_bits as u16, false)),
+        "SIa" => Some(gpr(6, address_bits as u16, false)),
+        "DIa" => Some(gpr(7, address_bits as u16, false)),
+        _ => None,
+    };
+    if named.is_some() { return named; }
+	for (prefix, class, width) in [
+		("XMM", RegisterClass::Vector, 128), ("YMM", RegisterClass::Vector, 256),
+		("ZMM", RegisterClass::Vector, 512), ("BND", RegisterClass::Bound, 128),
+		("CR", RegisterClass::Control, 64), ("DR", RegisterClass::Debug, 64),
+		("MM", RegisterClass::Mmx, 64), ("ST", RegisterClass::X87, 80),
+		("K", RegisterClass::Mask, 64),
+	] {
+		if let Some(number) = numbered_suffix(name, prefix) {
+			return Some(Register { class, number, width, high8: false });
+		}
+	}
+	if upper.len() >= 2 && upper[0] == b'R' {
+		let mut tail = &name[1..];
+		let width = if tail.ends_with('B') { tail = &tail[..tail.len() - 1]; 8 }
+			else if tail.ends_with('W') { tail = &tail[..tail.len() - 1]; 16 }
+			else if tail.ends_with('D') { tail = &tail[..tail.len() - 1]; 32 } else { 64 };
+		if let Ok(number) = tail.parse::<u8>() { return Some(gpr(number, width, false)); }
+	}
+	let segment = match name { "ES" => Some(0), "CS" => Some(1), "SS" => Some(2), "DS" => Some(3), "FS" => Some(4), "GS" => Some(5), _ => None };
+	if let Some(number) = segment { return Some(Register { class: RegisterClass::Segment, number, width: 16, high8: false }); }
+    None
+}
+
+fn numbered_suffix(name: &str, prefix: &str) -> Option<u8> {
+	name.strip_prefix(prefix)?.parse().ok()
+}
+
+fn segment_register(segment: u8) -> Option<Register> {
+    if segment == 0 { None }
+	else { Some(Register { class: RegisterClass::Segment, number: segment - 1, width: 16, high8: false }) }
+}
+
+fn gpr(number: u8, width: u16, high8: bool) -> Register {
+    Register { class: RegisterClass::Gpr, number, width, high8 }
+}
+
+fn read_little(src: &[u8], offset: usize, width: usize) -> u64 {
+    let mut value = 0u64;
+    for i in 0..width { value |= u64::from(src[offset + i]) << (i * 8); }
+    value
+}
+
+fn sign_extend_u64(value: u64, width: usize) -> i64 {
+    if width == 0 || width >= 64 { return value as i64; }
+    let shift = 64 - width;
+    ((value << shift) as i64) >> shift
+}
+
+pub fn format_intel(decoded: &Decoded, ip: u64) -> String {
+    let encoding = decoded.encoding();
+    let mut output = String::new();
+    if decoded.physical.lock { output.push_str("lock "); }
+    let repeatable = encoding.map == 0 && matches!(encoding.mnemonic,
+        "CMPSB" | "CMPSW" | "CMPSD" | "CMPSQ" | "SCASB" | "SCASW" | "SCASD" | "SCASQ" |
+        "MOVSB" | "MOVSW" | "MOVSD" | "MOVSQ" | "LODSB" | "LODSW" | "LODSD" | "LODSQ" |
+        "STOSB" | "STOSW" | "STOSD" | "STOSQ" | "INSB" | "INSW" | "INSD" | "OUTSB" | "OUTSW" | "OUTSD");
+    let rep_named = encoding.mnemonic.starts_with("XCRYPT") || matches!(encoding.mnemonic, "XSHA1" | "XSHA256" | "XSTORE");
+    if encoding.kind == 0 && (encoding.mandatory == 0 || repeatable || rep_named) {
+        if decoded.physical.repeat & 2 != 0 {
+            if matches!(encoding.mnemonic, "CMPSB" | "CMPSW" | "CMPSD" | "CMPSQ" | "SCASB" | "SCASW" | "SCASD" | "SCASQ") {
+                output.push_str("repz ");
+            } else {
+                output.push_str("rep ");
+            }
+        } else if decoded.physical.repeat & 4 != 0 {
+            output.push_str("repnz ");
+        }
+    }
+    output.push_str(&display_mnemonic(decoded).to_ascii_lowercase());
+    if repeatable {
+        format_string_operands(&mut output, decoded, encoding.mnemonic);
+        return output;
+    }
+    if matches!(encoding.mnemonic, "CALL" | "JMP") && encoding.map == 0 && matches!(encoding.opcode, 0x9a | 0xea) {
+        if let Some(pointer) = decoded.operands().iter().find(|operand| operand.kind == OperandKind::FarPointer) {
+            let offset_bits = if pointer.immediate.width == 32 { 16 } else { 32 };
+            let offset_mask = if offset_bits == 16 { 0xffff } else { 0xffff_ffff };
+            let offset = pointer.immediate.value & offset_mask;
+            let selector = pointer.immediate.value >> offset_bits;
+            let _ = write!(output, " far 0x{offset:x}, 0x{selector:x}");
+            return output;
+        }
+    }
+    let shown_mnemonic = display_mnemonic(decoded).to_ascii_lowercase();
+    if shown_mnemonic.starts_with("rdssp") {
+        if let Some(operand) = decoded.operands().iter().find(|operand| !operand.implicit && operand.kind == OperandKind::Register) {
+            output.push(' '); format_operand(&mut output, decoded, operand, ip);
+        }
+        return output;
+    }
+    if shown_mnemonic == "xlat" {
+        let base = gpr(3, decoded.physical.address_size as u16, false);
+        output.push_str(" byte ptr ["); write_register(&mut output, base); output.push(']');
+        return output;
+    }
+    let mut first = true;
+    for operand in decoded.operands().iter().filter(|operand| !operand.implicit) {
+		if operand.kind == OperandKind::Mask {
+			if let Some(register) = operand.register {
+				if register.number != 0 {
+					if encoding.mnemonic.contains("GATHER") || encoding.mnemonic.contains("SCATTER") {
+						if first { output.push(' '); first = false; } else { output.push_str(", "); }
+						write_register(&mut output, register);
+					} else {
+						output.push('{'); write_register(&mut output, register); output.push('}');
+						if decoded.physical.zeroing { output.push_str("{z}"); }
+					}
+				}
+			}
+			continue;
+		}
+        if first { output.push(' '); first = false; } else { output.push_str(", "); }
+        format_operand(&mut output, decoded, operand, ip);
+    }
+    if shown_mnemonic == "nop" && encoding.kind == 0 && encoding.map == 1 && encoding.opcode == 0x18 {
+        output.push_str(", ");
+        write_register(&mut output, gpr(decoded.physical.reg, 32, false));
+    }
+    if shown_mnemonic == "vmsave" && first { output.push_str(" rax"); }
+    output
+}
+
+fn format_string_operands(output: &mut String, decoded: &Decoded, mnemonic: &str) {
+    let width = if mnemonic.ends_with('B') { 8 } else if mnemonic.ends_with('W') { 16 }
+        else if mnemonic.ends_with('Q') { 64 } else { 32 };
+    let address = decoded.physical.address_size as u16;
+    let source = gpr(6, address, false);
+    let destination = gpr(7, address, false);
+    if mnemonic.starts_with("CMPS") { output.push(' '); write_string_memory(output, source, width); output.push_str(", "); write_string_memory(output, destination, width); }
+    else if mnemonic.starts_with("MOVS") { output.push(' '); write_string_memory(output, destination, width); output.push_str(", "); write_string_memory(output, source, width); }
+    else if mnemonic.starts_with("LODS") { output.push(' '); write_string_memory(output, source, width); }
+    else if mnemonic.starts_with("STOS") || mnemonic.starts_with("SCAS") { output.push(' '); write_string_memory(output, destination, width); }
+    else if mnemonic.starts_with("INS") { output.push(' '); write_string_memory(output, destination, width); output.push_str(", dx"); }
+    else if mnemonic.starts_with("OUTS") { output.push_str(" dx, "); write_string_memory(output, source, width); }
+}
+
+fn write_string_memory(output: &mut String, register: Register, width: u16) {
+    output.push_str(match width { 8 => "byte ptr [", 16 => "word ptr [", 64 => "qword ptr [", _ => "dword ptr [" });
+    write_register(output, register);
+    output.push(']');
+}
+
+fn display_mnemonic(decoded: &Decoded) -> &str {
+    let encoding = decoded.encoding();
+    if encoding.kind == 0 && encoding.map == 1 {
+        if encoding.opcode == 0x18 && decoded.physical.mod_bits != 3 {
+            return match decoded.physical.reg & 7 { 6 => "prefetchit1", 7 => "prefetchit0", _ => encoding.mnemonic };
+        }
+        if encoding.opcode == 0x1e && decoded.physical.repeat & 2 != 0 && decoded.physical.mod_bits == 3 && decoded.physical.reg & 7 == 1 {
+            return if decoded.physical.rex & 8 != 0 { "rdsspq" } else { "rdsspd" };
+        }
+        if encoding.opcode == 0x0d {
+            if decoded.physical.mod_bits == 3 { return "nop"; }
+            return match decoded.physical.reg & 7 { 0 => "prefetch_exclusive", 1 | 3 => "prefetchw", 2 => "prefetchwt1", _ => "prefetch_reserved" };
+        }
+        if encoding.opcode == 0x07 && decoded.physical.rex & 8 != 0 { return "sysretq"; }
+    }
+    if decoded.physical.operand_size == 64 {
+        return match encoding.mnemonic {
+            "PCMPESTRI" => "pcmpestri64", "PCMPESTRM" => "pcmpestrm64",
+            "VPCMPESTRI" => "vpcmpestri64", "VPCMPESTRM" => "vpcmpestrm64",
+            _ => encoding.mnemonic,
+        };
+    }
+    if encoding.kind == 1 && encoding.mnemonic == "KMOVW" && decoded.physical.mod_bits == 3 { return "kmov"; }
+    match encoding.mnemonic {
+        "FDISI8087_NOP" => return "fndisi", "FENI8087_NOP" => return "fneni", "FSETPM287_NOP" => return "fnsetpm",
+        "XCRYPT_CBC" => return "xcryptcbc", "XCRYPT_CFB" => return "xcryptcfb", "XCRYPT_CTR" => return "xcryptctr",
+        "XCRYPT_ECB" => return "xcryptecb", "XCRYPT_OFB" => return "xcryptofb",
+        _ => {}
+    }
+    if encoding.kind == 0 && encoding.map == 0 {
+        return match encoding.opcode {
+            0x98 => match decoded.physical.operand_size { 16 => "cbw", 64 => "cdqe", _ => "cwde" },
+            0x99 => match decoded.physical.operand_size { 16 => "cwd", 64 => "cqo", _ => "cdq" },
+            0xcf => match decoded.physical.operand_size { 16 => "iret", 64 => "iretq", _ => "iretd" },
+            0xe3 => match decoded.physical.address_size { 16 => "jcxz", 32 => "jecxz", _ => "jrcxz" },
+            0xe1 => "loopz",
+            0xe0 => "loopnz",
+            0xcb | 0xca => "ret far",
+            _ => encoding.mnemonic,
+        };
+    }
+    encoding.mnemonic
+}
+
+fn format_operand(output: &mut String, decoded: &Decoded, operand: &DecodedOperand, ip: u64) {
+    match operand.kind {
+        OperandKind::Register => {
+            if let Some(mut register) = operand.register {
+                if decoded.physical.mode == Mode::Mode64 && register.class == RegisterClass::Gpr && register.width == 32 &&
+                    matches!(decoded.encoding().mnemonic, "CALL" | "JMP" | "PUSH" | "POP") { register.width = 64; }
+                if register.class == RegisterClass::Gpr && matches!(decoded.encoding().mnemonic, "TPAUSE" | "UMWAIT") { register.width = 32; }
+                if register.class == RegisterClass::Gpr && matches!(decoded.encoding().mnemonic, "CLZERO" | "INVLPGA" | "VMLOAD" | "VMRUN" | "VMSAVE") && register.number == 0 { register.width = 64; }
+                write_register(output, register);
+            }
+            else { output.push_str(&operand.text.to_ascii_lowercase()); }
+        }
+        OperandKind::Memory => {
+            let mut memory = operand.memory;
+            let encoding = decoded.encoding();
+            if matches!(encoding.mnemonic, "LEA" | "BNDCL" | "BNDCN" | "BNDCU" | "BNDMK") { memory.segment = None; }
+            if decoded.physical.mode == Mode::Mode64 && memory.size == 32 && matches!(encoding.mnemonic, "CALL" | "JMP" | "PUSH" | "POP") { memory.size = 64; }
+            if matches!(encoding.mnemonic, "INVLPG" | "CLDEMOTE") { memory.size = 0; }
+            if matches!(encoding.mnemonic, "LGDT" | "LIDT" | "SGDT" | "SIDT" | "LDS" | "LES" | "LFS" | "LGS" | "LSS") { memory.size = 48; }
+            if matches!(encoding.mnemonic, "CLFLUSH" | "CLFLUSHOPT" | "CLWB") { memory.size = 8; }
+            if encoding.map == 1 && encoding.opcode == 0x18 && decoded.physical.mod_bits != 3 && matches!(decoded.physical.reg & 7, 6 | 7) { memory.size = 8; }
+            if encoding.map == 0 && encoding.opcode == 0xff && matches!(encoding.reg_value, 3 | 5) { output.push_str("far "); memory.size = 48; }
+            if matches!(encoding.mnemonic, "FLDENV" | "FNSTENV") && decoded.physical.operand_size == 16 {
+                output.push_str("fpuenv14 ptr ");
+                memory.size = 0;
+            } else if matches!(encoding.mnemonic, "FRSTOR" | "FNSAVE") && decoded.physical.operand_size == 16 {
+                output.push_str("fpustate94 ptr ");
+                memory.size = 0;
+            }
+            write_memory(output, decoded, memory, ip)
+        },
+        OperandKind::Relative => {
+            let target = ip.wrapping_add(decoded.length as u64).wrapping_add_signed(operand.immediate.signed);
+            let _ = write!(output, "0x{target:x}");
+        }
+        OperandKind::Immediate => {
+            if !operand.text.is_empty() && operand.text.parse::<u64>().is_err() { output.push_str(&operand.text.to_ascii_lowercase()); }
+            else {
+                let target_width = immediate_target_width(decoded.operands(), decoded.encoding().mnemonic, &decoded.physical);
+                let value = if operand.immediate.signed < 0 && target_width < 64 {
+                    operand.immediate.value & ((1u64 << target_width) - 1)
+                } else {
+                    operand.immediate.value
+                };
+                let _ = write!(output, "0x{value:x}");
+            }
+        }
+        OperandKind::FarPointer => { let _ = write!(output, "0x{:x}", operand.immediate.value); }
+		OperandKind::Mask => {}
+        OperandKind::Other => output.push_str(&operand.text.to_ascii_lowercase()),
+        OperandKind::None => {}
+    }
+}
+
+fn write_memory(output: &mut String, _decoded: &Decoded, memory: MemoryOperand, _ip: u64) {
+    let size = match memory.size {
+        8 => "byte ptr ", 16 => "word ptr ", 32 => "dword ptr ", 48 => "fword ptr ",
+        64 => "qword ptr ", 80 => "tbyte ptr ", 128 => "xmmword ptr ",
+        256 => "ymmword ptr ", 512 => "zmmword ptr ", _ => "",
+    };
+    output.push_str(size);
+    if let Some(segment) = memory.segment { write_register(output, segment); output.push(':'); }
+    output.push('[');
+    let mut term = false;
+    if memory.rip_relative {
+        output.push_str("rip"); term = true;
+    } else if let Some(base) = memory.base {
+        write_register(output, base); term = true;
+    }
+    if let Some(index) = memory.index {
+        if term { output.push('+'); }
+        write_register(output, index);
+        if memory.scale != 1 { let _ = write!(output, "*{}", memory.scale); }
+        term = true;
+    }
+    if memory.displacement != 0 || !term {
+        if memory.displacement < 0 {
+            let _ = write!(output, "-0x{:x}", memory.displacement.unsigned_abs());
+        } else {
+            if term { output.push('+'); }
+            let _ = write!(output, "0x{:x}", memory.displacement);
+        }
+    }
+    output.push(']');
+}
+
+fn write_register(output: &mut String, register: Register) {
+    match register.class {
+        RegisterClass::Gpr => {
+            const LOW8: [&str; 16] = ["al","cl","dl","bl","spl","bpl","sil","dil","r8b","r9b","r10b","r11b","r12b","r13b","r14b","r15b"];
+            const HIGH8: [&str; 4] = ["ah","ch","dh","bh"];
+            const R16: [&str; 16] = ["ax","cx","dx","bx","sp","bp","si","di","r8w","r9w","r10w","r11w","r12w","r13w","r14w","r15w"];
+            const R32: [&str; 16] = ["eax","ecx","edx","ebx","esp","ebp","esi","edi","r8d","r9d","r10d","r11d","r12d","r13d","r14d","r15d"];
+            const R64: [&str; 16] = ["rax","rcx","rdx","rbx","rsp","rbp","rsi","rdi","r8","r9","r10","r11","r12","r13","r14","r15"];
+            let index = register.number as usize;
+            let name = if register.high8 { HIGH8.get(index.saturating_sub(4)).copied() }
+                else { match register.width { 8 => LOW8.get(index), 16 => R16.get(index), 32 => R32.get(index), _ => R64.get(index) }.copied() };
+            if let Some(name) = name { output.push_str(name); } else { let _ = write!(output, "r{}", register.number); }
+        }
+        RegisterClass::Vector => { let bank = if register.width >= 512 { "zmm" } else if register.width >= 256 { "ymm" } else { "xmm" }; let _ = write!(output, "{bank}{}", register.number); }
+        RegisterClass::Mask => { let _ = write!(output, "k{}", register.number); }
+        RegisterClass::Mmx => { let _ = write!(output, "mm{}", register.number); }
+        RegisterClass::Bound => { let _ = write!(output, "bnd{}", register.number); }
+        RegisterClass::Control => { let _ = write!(output, "cr{}", register.number); }
+        RegisterClass::Debug => { let _ = write!(output, "dr{}", register.number); }
+        RegisterClass::Segment => { const SEG: [&str; 6] = ["es","cs","ss","ds","fs","gs"]; output.push_str(SEG.get(register.number as usize).copied().unwrap_or("seg")); }
+        RegisterClass::X87 => { if register.number == 0 { output.push_str("st"); } else { let _ = write!(output, "st({})", register.number); } }
+        RegisterClass::Other => { let _ = write!(output, "reg{}", register.number); }
+    }
+}
+
 pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Result<usize, EncodeError> {
     let e = ENCODINGS.get(form_index).ok_or(EncodeError::BadForm)?;
     if !supports(e.modes, fields.mode)
+        || (e.operand_size == 64 && fields.mode != Mode::Mode64)
+        || !matches!(fields.segment_override, 0 | 0x26 | 0x2e | 0x36 | 0x3e | 0x64 | 0x65)
         || fields.reg > 31 || fields.rm > 31 || fields.index > 31 || fields.base > 31
         || fields.vvvv > 31 || fields.opcode_reg > 15 || fields.mod_bits > 3 || fields.scale > 3
+        || fields.mask > 7
         || (e.kind != 2 && (fields.reg > 15 || fields.rm > 15 || fields.index > 15 || fields.base > 15 || fields.vvvv > 15))
+        || (e.kind != 2 && (fields.mask != 0 || fields.zeroing || fields.broadcast))
         || (e.reg_mask != 0 && fields.reg & e.reg_mask != e.reg_value)
         || (e.rm_mask != 0 && fields.rm & e.rm_mask != e.rm_value)
         || (e.mod_kind == 1 && fields.mod_bits == 3)
@@ -328,12 +1201,15 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
         return Err(EncodeError::BadField);
     }
     let mut pos = 0usize;
+    if fields.segment_override != 0 { push(out, &mut pos, fields.segment_override)?; }
     if fields.address_override { push(out, &mut pos, 0x67)?; }
     if e.kind == 0 {
+        let operand_override = operand_size_override(fields.mode, e.operand_size);
+        if operand_override && e.mandatory != 1 { push(out, &mut pos, 0x66)?; }
         if let Some(prefix) = mandatory_prefix_byte(e.mandatory) { push(out, &mut pos, prefix)?; }
         let mut rex = 0u8;
         if fields.mode == Mode::Mode64 {
-            if e.w == 1 { rex |= 8; }
+            if e.w == 1 || e.operand_size == 64 { rex |= 8; }
             rex |= (fields.reg >> 3 & 1) << 2;
             if e.opcode_plus_reg { rex |= fields.opcode_reg >> 3 & 1; }
             else if fields.use_sib { rex |= (fields.index >> 3 & 1) << 1; rex |= fields.base >> 3 & 1; }
@@ -362,7 +1238,7 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
     }
     for i in 0..e.tail_len as usize {
         let tail = TAILS[e.tail_start as usize + i];
-        let width = tail_bytes(tail, fields.mode, e.mandatory == 1, e.w == 1, fields.address_override);
+        let width = tail_bytes(tail, fields.mode, e.mandatory == 1 || operand_size_override(fields.mode, e.operand_size), e.w == 1 || e.operand_size == 64, fields.address_override);
         write_little(out, &mut pos, fields.immediate[i], width)?;
     }
     Ok(pos)
@@ -391,9 +1267,10 @@ fn vector_prefix(e: &Encoding, f: EncodeFields) -> Result<([u8; 4], usize), Enco
         2 => {
             let ll = match e.vector_length { 256 => 1, 512 => 2, _ => 0 };
             out[0] = 0x62;
-            out[1] = (!(f.reg >> 4) & 1) << 7 | (!x & 1) << 6 | (!b & 1) << 5 | (!r & 1) << 4 | map & 3;
+            out[1] = (!r & 1) << 7 | (!x & 1) << 6 | (!b & 1) << 5 | (!(f.reg >> 4) & 1) << 4 | map & 3;
             out[2] = w << 7 | (!f.vvvv & 15) << 3 | 1 << 2 | pp;
-            out[3] = ll << 5 | (!(f.vvvv >> 4) & 1) << 3;
+            out[3] = u8::from(f.zeroing) << 7 | ll << 5 | u8::from(f.broadcast) << 4
+                | (!(f.vvvv >> 4) & 1) << 3 | f.mask;
             Ok((out, 4))
         }
         3 | 5 => Err(EncodeError::Unsupported),
@@ -438,6 +1315,13 @@ fn effective_operand_bits(mode: Mode, override_: bool, w: bool) -> usize {
     }
 }
 
+fn operand_size_override(mode: Mode, size: u8) -> bool {
+    match mode {
+        Mode::Mode16 => size == 32,
+        Mode::Mode32 | Mode::Mode64 => size == 16,
+    }
+}
+
 fn effective_address_bits(mode: Mode, override_: bool) -> usize {
     match mode {
         Mode::Mode16 => if override_ { 32 } else { 16 },
@@ -476,19 +1360,46 @@ mod tests {
 
     #[test]
     fn representative_decode_and_encode() {
-        let cases: &[(&[u8], &str)] = &[
-            (&[0x90], "NOP"),
-            (&[0x48, 0x01, 0xc8], "ADD"),
-            (&[0xf3, 0x0f, 0x1e, 0xfa], "ENDBR64"),
-            (&[0xc5, 0xed, 0xfe, 0xcb], "VPADDD"),
-            (&[0x62, 0xf1, 0x7d, 0x48, 0xef, 0xc0], "VPXORD"),
+        let cases: &[(&[u8], &str, &str)] = &[
+            (&[0x90], "NOP", "nop"),
+            (&[0x48, 0x01, 0xc8], "ADD", "add rax, rcx"),
+            (&[0xf3, 0x0f, 0x1e, 0xfa], "ENDBR64", "endbr64"),
+            (&[0xc5, 0xed, 0xfe, 0xcb], "VPADDD", "vpaddd ymm1, ymm2, ymm3"),
+            (&[0x62, 0xf1, 0x7d, 0x48, 0xef, 0xc0], "VPXORD", "vpxord zmm0, zmm0, zmm0"),
         ];
-        for (bytes, mnemonic) in cases {
+        for (bytes, mnemonic, expected_text) in cases {
             if !ENCODINGS.iter().any(|e| e.mnemonic == *mnemonic) { continue; }
             let decoded = decode(bytes, Mode::Mode64).unwrap();
             assert_eq!(decoded.encoding().mnemonic, *mnemonic);
             assert_eq!(decoded.length as usize, bytes.len());
+			assert_eq!(decoded.format_intel(0x1000), *expected_text);
         }
+
+		if let Some(memory_add) = find_form("ADD_rm64_r64", 1) {
+			let decoded = decode(&[0x48, 0x01, 0x4c, 0x24, 0x08], Mode::Mode64).unwrap();
+			assert_eq!(decoded.form_index as usize, memory_add);
+			assert_eq!(decoded.format_intel(0x1000), "add qword ptr [rsp+0x8], rcx");
+			assert_eq!(decoded.physical.displacement.signed, 8);
+			assert_eq!(decoded.physical.sib, Some(0x24));
+		}
+
+		if ENCODINGS.iter().any(|e| e.mnemonic == "VPXORD") {
+			let decoded = decode(&[0x62, 0xa1, 0x75, 0x40, 0xef, 0xc2], Mode::Mode64).unwrap();
+			let registers: Vec<u8> = decoded.operands().iter().filter_map(|operand| {
+				operand.register.filter(|register| register.class == RegisterClass::Vector)
+					.map(|register| register.number)
+			}).collect();
+			assert_eq!(registers, vec![16, 17, 18]);
+			assert_eq!(decoded.format_intel(0x1000), "vpxord zmm16, zmm17, zmm18");
+		}
+
+		if ENCODINGS.iter().any(|e| e.mnemonic == "VPGATHERDD") {
+			let decoded = decode(&[0x62, 0xc2, 0x7d, 0x41, 0x90, 0x44, 0x91, 0x08], Mode::Mode64).unwrap();
+			assert_eq!(decoded.format_intel(0x1000),
+				"vpgatherdd zmm16, k1, dword ptr [r9+zmm18*4+0x20]");
+			let memory = decoded.operands().iter().find(|operand| operand.kind == OperandKind::Memory).unwrap().memory;
+			assert_eq!(memory.index, Some(Register { class: RegisterClass::Vector, number: 18, width: 512, high8: false }));
+		}
 
         if let Some(add) = find_form("ADD_rm64_r64", 2) {
             let mut out = [0u8; 15];

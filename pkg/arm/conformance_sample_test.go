@@ -19,6 +19,18 @@ func TestCanonicalizeOptionalGroupDefault(t *testing.T) {
 	}
 }
 
+func TestSatisfyConstraintsClearsDocumentedIgnoredFormulaBits(t *testing.T) {
+	form := &DisasmForm{Parts: []DisasmPart{{Op: &DisasmOperand{
+		Kind: DisasmFormula, FormulaIgnoredZero: []uint32{0x2000},
+		Cols: []BitPart{{Start: 16, End: 20, Width: 5}},
+		Rows: []DisasmRow{{Bits: []string{"xxxxx"}}},
+	}}}}
+	got, ok := form.SatisfyConstraints(0x2000)
+	if !ok || got != 0 {
+		t.Fatalf("ignored formula bits = 0x%08X, %v", got, ok)
+	}
+}
+
 func TestLegalConformanceWordSolvesSemanticOperandRange(t *testing.T) {
 	op := &DisasmOperand{
 		Symbol:   "<index>",

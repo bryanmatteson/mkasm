@@ -13,6 +13,7 @@ import (
 type rustCodegenData struct {
 	Encodings  string
 	Tails      string
+	Operands   string
 	Buckets    string
 	Candidates string
 }
@@ -71,18 +72,44 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE.
 }
 
 func buildRustCodegenData(catalog *Catalog, decoder *Decoder) rustCodegenData {
-	var encodings, tails, buckets, candidates strings.Builder
+	var encodings, tails, operands, buckets, candidates strings.Builder
 	tailOffset := 0
+	operandOffset := 0
 	for _, e := range catalog.Encodings {
-		fmt.Fprintf(&encodings, "    Encoding { id: %s, form_id: %s, mnemonic: %s, syntax: %s, kind: %d, map: %d, opcode: 0x%02x, opcode_plus_reg: %t, mandatory: %d, prefix_mask: %d, prefix_value: %d, modes: %d, w: %d, vector_length: %d, has_modrm: %t, mod_kind: %d, reg_mask: %d, reg_value: %d, rm_mask: %d, rm_value: %d, tail_start: %d, tail_len: %d },\n",
+		fmt.Fprintf(&encodings, "    Encoding { id: %s, form_id: %s, mnemonic: %s, syntax: %s, kind: %d, map: %d, opcode: 0x%02x, opcode_plus_reg: %t, mandatory: %d, prefix_mask: %d, prefix_value: %d, modes: %d, w: %d, operand_size: %d, vector_length: %d, tuple: %s, has_modrm: %t, mod_kind: %d, reg_mask: %d, reg_value: %d, rm_mask: %d, rm_value: %d, tail_start: %d, tail_len: %d, operand_start: %d, operand_len: %d },\n",
 			rustString(e.ID), rustString(e.FormID), rustString(e.Mnemonic), rustString(e.Syntax),
 			e.Kind, e.Map, e.Opcode, e.OpcodePlusReg, e.MandatoryPrefix,
-			e.PrefixMask, e.PrefixValue, e.Modes, e.W, e.VectorLength,
+			e.PrefixMask, e.PrefixValue, e.Modes, e.W, e.OperandSize, e.VectorLength, rustString(e.Tuple),
 			e.HasModRM, e.Mod, e.RegMask, e.RegValue, e.RMMask, e.RMValue,
-			tailOffset, len(e.Tail))
+			tailOffset, len(e.Tail), operandOffset, len(e.Operands))
 		for _, tail := range e.Tail {
 			fmt.Fprintf(&tails, "    %d,\n", tail)
 			tailOffset++
+		}
+		for _, operand := range e.Operands {
+			flags := 0
+			if operand.Read {
+				flags |= 1
+			}
+			if operand.Write {
+				flags |= 2
+			}
+			if operand.Suppressed {
+				flags |= 4
+			}
+			if operand.Zeroing {
+				flags |= 8
+			}
+			if operand.ConditionalRead {
+				flags |= 16
+			}
+			if operand.ConditionalWrite {
+				flags |= 32
+			}
+			fmt.Fprintf(&operands, "    OperandSpec { kind: %s, symbol: %s, encoded_in: %s, data_type: %s, size: %s, value: %s, flags: %d },\n",
+				rustString(operand.Type), rustString(operand.Symbol), rustString(operand.EncodedIn),
+				rustString(operand.DataType), rustString(operand.Size), rustString(operand.Value), flags)
+			operandOffset++
 		}
 	}
 	for _, bucket := range decoder.buckets {
@@ -92,7 +119,7 @@ func buildRustCodegenData(catalog *Catalog, decoder *Decoder) rustCodegenData {
 		fmt.Fprintf(&candidates, "    %d,\n", candidate)
 	}
 	return rustCodegenData{
-		Encodings: encodings.String(), Tails: tails.String(),
+		Encodings: encodings.String(), Tails: tails.String(), Operands: operands.String(),
 		Buckets: buckets.String(), Candidates: candidates.String(),
 	}
 }

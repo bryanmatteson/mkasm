@@ -127,6 +127,17 @@ func TestDisasmFormEnforcesOneHotAlias(t *testing.T) {
 	}
 }
 
+func TestSingleFieldBitCountAliasConstraint(t *testing.T) {
+	form := DisasmForm{}
+	fields := map[string]ir.BitField{"immh": {Name: "immh", Start: 19, End: 22}}
+	if err := addDisasmAliasConstraints(&form, "BitCount(immh) == 1", fields); err != nil {
+		t.Fatal(err)
+	}
+	if len(form.OneHotMasks) != 1 || form.OneHotMasks[0] != 0x00780000 {
+		t.Fatalf("one-hot masks = %#v", form.OneHotMasks)
+	}
+}
+
 func TestParentOptionalGroupKeepsNonDefaultChild(t *testing.T) {
 	form := DisasmForm{
 		GroupParent: map[int]int{2: 1},
@@ -668,8 +679,29 @@ func TestDecodeMemoryOperationRegisterConstraints(t *testing.T) {
 	forbidden, unequal = decodeMemoryOperationRegisterConstraints(
 		[]string{`var memset : SETParams;`}, fields, 0,
 	)
-	if len(forbidden) != 3 || len(unequal) != 1 {
+	if len(forbidden) != 3 || len(unequal) != 3 {
 		t.Fatalf("SET constraints = forbidden %v unequal %v", forbidden, unequal)
+	}
+}
+
+func TestWritebackRegisterConstraintsAreSampleOnly(t *testing.T) {
+	fields := map[string]ir.BitField{
+		"Rt": {Name: "Rt", Start: 0, End: 4},
+		"Rn": {Name: "Rn", Start: 5, End: 9},
+	}
+	got := decodeWritebackSampleRegisterConstraints(
+		[]string{"var wback : boolean = TRUE;"}, fields, 0,
+	)
+	if len(got) != 1 || got[0].RightMutable != 0x1f {
+		t.Fatalf("writeback constraints = %#v", got)
+	}
+	form := DisasmForm{SampleUnequalFields: got}
+	word, ok := form.SatisfyConstraints(uint32(8) | uint32(8)<<5)
+	if !ok || fieldValue(word, 0, 4) == fieldValue(word, 5, 9) {
+		t.Fatalf("sample word = 0x%08X, %v", word, ok)
+	}
+	if !form.matchesConstraints(uint32(8) | uint32(8)<<5) {
+		t.Fatal("sample-only inequality became a decoder validity rule")
 	}
 }
 

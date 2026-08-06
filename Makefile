@@ -19,7 +19,7 @@ COVERAGE_TOOL ?= $(GO) run github.com/vladopajic/go-test-coverage/v2@v2.18.9
 	help fmt-check vet test test-race coverage-source coverage-encodings verify \
 	bench bench-micro bench-rust-decoder bench-x86 bench-x86-rust \
 	generate-go generate-rust generate-x86-rust build \
-	conformance-go conformance-rust conformance-disasm conformance \
+	conformance-go conformance-rust conformance-disasm conformance-x86 conformance \
 	conformance-strict-go conformance-strict-rust conformance-strict-disasm \
 	conformance-strict audit-disasm conformance-asl release-check clean
 
@@ -145,6 +145,12 @@ conformance-disasm: ## Check word-to-text-to-LLVM byte parity
 		$(GO) test ./tests/conformance \
 		-run '^TestDisasmAssemblesBack$$' -v -count=1 -timeout 600s
 
+conformance-x86: ## Compare x86 operands and exact Intel text against iced-x86
+	@test -n "$(X86_CORPUS)" || { echo "X86_CORPUS is required" >&2; exit 2; }
+	MKASM_X86_OPCODESDB="$(X86_CORPUS)" MKASM_X86_ICED_CONFORMANCE=1 \
+		$(GO) test ./tests/conformance \
+		-run '^TestX86IcedConformance$$' -v -count=1 -timeout 600s
+
 conformance: ## Run supported Go, Rust, and disassembler LLVM parity
 	@$(MAKE) --no-print-directory conformance-go
 	@$(MAKE) --no-print-directory conformance-rust
@@ -184,6 +190,7 @@ release-check: ## Verify, build, generate projects, and run LLVM parity
 	@$(MAKE) --no-print-directory generate-rust
 	@$(MAKE) --no-print-directory generate-x86-rust X86_CORPUS="$(X86_CORPUS)"
 	@$(MAKE) --no-print-directory conformance
+	@$(MAKE) --no-print-directory conformance-x86 X86_CORPUS="$(X86_CORPUS)"
 
 clean: ## Remove generated projects and local verification output
 	rm -rf ./output ./output-rs ./aarch64-go ./aarch64-rs ./dist ./.coverage

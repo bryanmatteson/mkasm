@@ -12,6 +12,7 @@ derived from one XML parse prove internal consistency, not architectural truth.
 | `mise run conformance:disasm` | clang and LLVM MC | Every supported rendered sample reproduces exact bytes; rejects and mismatches fail |
 | `mise run conformance:strict` | clang and LLVM MC | The oracle must recognize and verify every generated and printable encoding |
 | `mise run conformance:asl` | Arm ASL from `mra_tools` | Opcode bits and fields agree |
+| `mise run conformance:x86` | iced-x86 1.21.0 | Physical operands agree where structurally comparable and every supported Intel-format string agrees byte-for-byte |
 | `mise run conformance` | clang and LLVM MC | Runs all supported-instruction LLVM byte-parity gates |
 | `mise run audit:disasm` | clang and LLVM MC | Threshold report only; not conformance |
 
@@ -21,6 +22,14 @@ An invalid or unavailable corpus is a hard failure.
 
 Ordinary `go test ./...` compiles these suites but skips their expensive external
 work. The mise tasks set the activation flags and corpus explicitly.
+
+The x86 oracle takes `X86_CORPUS=/path/to/x86_64.json.xz`. It is verification
+only: generated crates retain no iced-x86 dependency. iced's formatter options
+are explicitly pinned, and strings are compared byte-for-byte without
+normalizing whitespace, aliases, case, pointer keywords, or number syntax. The
+gate fails on any mkasm rejection, operand mismatch, or formatter mismatch and
+prints iced-unsupported and structurally incomparable operand forms separately
+instead of counting them as passing.
 
 Rust generation writes typed and exact integration tests under `tests/`; Go
 generation writes its exact ledger under `conformance/`. The exact ledgers

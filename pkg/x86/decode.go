@@ -3,6 +3,7 @@ package x86
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 	"sort"
 )
 
@@ -119,6 +120,7 @@ func (d *Decoder) Decode(src []byte, mode Mode) (Decoded, error) {
 	}
 
 	var best Decoded
+	bestScore := -1
 	matched := uint16(0)
 	for i := uint32(0); i < uint32(bucket.count); i++ {
 		catalogIndex := d.candidates[bucket.start+i]
@@ -130,8 +132,10 @@ func (d *Decoder) Decode(src []byte, mode Mode) (Decoded, error) {
 		if !ok {
 			continue
 		}
-		if matched == 0 {
+		score := encodingSpecificity(encoding)
+		if score > bestScore {
 			best = Decoded{CatalogIndex: catalogIndex, Length: uint8(length)}
+			bestScore = score
 		}
 		matched++
 	}
@@ -145,11 +149,36 @@ func (d *Decoder) Decode(src []byte, mode Mode) (Decoded, error) {
 	return best, nil
 }
 
+// Prefer the form that constrains the most physical bits. opcodesDB retains
+// overlapping legacy and extension spellings (for example BSR/LZCNT); catalog
+// order is not a semantic feature-selection policy.
+func encodingSpecificity(e *Encoding) int {
+	score := bits.OnesCount8(e.PrefixMask) * 16
+	if e.W != BitAny {
+		score += 8
+	}
+	if e.VectorLength != 0 {
+		score += 8
+	}
+	if e.OperandSize != 0 {
+		score += 8
+	}
+	if e.Mod != ModAny {
+		score += 4
+	}
+	score += bits.OnesCount8(e.RegMask) * 2
+	score += bits.OnesCount8(e.RMMask) * 2
+	return score
+}
+
 func matchEncoding(src []byte, mode Mode, head decodedHead, e *Encoding) (length int, matched, short bool) {
 	if !e.Modes.supports(mode) || head.prefixBits&e.PrefixMask != e.PrefixValue {
 		return 0, false, false
 	}
 	if e.W != BitAny && byte(e.W) != head.w {
+		return 0, false, false
+	}
+	if e.OperandSize != 0 && int(e.OperandSize) != effectiveOperandBits(mode, head.prefixBits&1 != 0, head.w != 0) {
 		return 0, false, false
 	}
 	if e.VectorLength != 0 && e.VectorLength != head.vectorLength {
@@ -261,6 +290,11 @@ prefixesDone:
 
 	switch src[pos] {
 	case 0xc5:
+		// C5 is LDS outside 64-bit mode unless the following byte has the
+		// reserved ModR/M.mod=11 pattern required by the VEX encoding.
+		if mode != Mode64 && (pos+1 >= len(src) || src[pos+1]&0xc0 != 0xc0) {
+			break
+		}
 		if pos+2 >= len(src) {
 			return h, ErrShortInstruction
 		}
@@ -270,6 +304,10 @@ prefixesDone:
 		h.vectorLength = 128 << ((p1 >> 2) & 1)
 		pos += 2
 	case 0xc4:
+		// C4 has the same legacy collision with LES in 16/32-bit modes.
+		if mode != Mode64 && (pos+1 >= len(src) || src[pos+1]&0xc0 != 0xc0) {
+			break
+		}
 		if pos+3 >= len(src) {
 			return h, ErrShortInstruction
 		}
@@ -284,6 +322,11 @@ prefixesDone:
 		h.vectorLength = 128 << ((p2 >> 2) & 1)
 		pos += 3
 	case 0x62:
+		// 62 collides with BOUND in 16/32-bit modes. EVEX is selected there
+		// only by its reserved ModR/M.mod=11 discriminator.
+		if mode != Mode64 && (pos+1 >= len(src) || src[pos+1]&0xc0 != 0xc0) {
+			break
+		}
 		if pos+4 >= len(src) {
 			return h, ErrShortInstruction
 		}

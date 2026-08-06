@@ -145,7 +145,9 @@ type Encoding struct {
 	PrefixValue  byte
 	Modes        ModeMask
 	W            BitConstraint
+	OperandSize  uint8
 	VectorLength uint16
+	Tuple        string
 
 	HasModRM bool
 	Mod      ModConstraint
@@ -154,6 +156,26 @@ type Encoding struct {
 	RMMask   byte
 	RMValue  byte
 	Tail     []TailWidth
+	Operands []Operand
+}
+
+// Operand is one syntax operand retained from opcodesDB. Unlike Syntax, which
+// is intentionally human-readable, this is the machine-readable description
+// used by generated decoders to turn physical fields into registers, memory
+// references, immediates, and implicit effects.
+type Operand struct {
+	Type             string
+	Symbol           string
+	EncodedIn        string
+	DataType         string
+	Size             string
+	Value            string
+	Read             bool
+	Write            bool
+	Suppressed       bool
+	Zeroing          bool
+	ConditionalRead  bool
+	ConditionalWrite bool
 }
 
 // Catalog is the normalized, source-independent x86 code-generation model.
@@ -196,6 +218,9 @@ func (c *Catalog) Validate() error {
 		}
 		if len(e.Tail) > 4 {
 			return fmt.Errorf("%s has %d immediate tails; encoder capacity is 4", e.FormID, len(e.Tail))
+		}
+		if len(e.Operands) > 12 {
+			return fmt.Errorf("%s has %d operands; decoder capacity is 12", e.FormID, len(e.Operands))
 		}
 	}
 	return nil

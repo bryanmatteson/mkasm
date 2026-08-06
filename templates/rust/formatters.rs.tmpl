@@ -1,0 +1,492 @@
+//! Intel-like A64 formatter generated from ARM's XML assembly templates.
+
+#![allow(dead_code)]
+
+use crate::decoders::Decoded;
+use std::fmt::Write as _;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormatError { Unknown(u32), Unprintable(u32) }
+
+#[derive(Clone, Copy)]
+enum Kind { Reg, Num, FpImm, SysReg, Table, Derived, Formula, LogicalImm, BitfieldWidth, ByteMaskImm, MoveWideImm, Literal, ElementIndex, TileMask }
+
+#[derive(Clone, Copy)]
+struct BitPart { start: i8, end: i8, width: u8, literal: &'static str, is_lit: bool }
+#[derive(Clone, Copy)]
+struct RegRange { lo: i64, hi: i64, bias: i64 }
+#[derive(Clone, Copy)]
+struct Row { bits: &'static [&'static str], symbol: &'static str }
+#[derive(Clone, Copy)]
+struct Formula { parts: &'static [BitPart], raw_mul: i64, add: i64, negate: i64, size_parts: u8, esize_base: i64, esize_mul: i64 }
+#[derive(Clone, Copy)]
+struct OperandDef {
+    symbol: &'static str, class: &'static str, kind: Kind, parts: &'static [BitPart],
+    scale: i64, bias: i64, negate: i64, raw_mul: i64, signed: bool,
+    ranges: &'static [RegRange], lo: i64, hi: i64, has_range: bool,
+    reg_lo: i64, reg_hi: i64, has_reg_range: bool, reg_multiple: i64,
+    num_prefix: &'static str, num_constant: i64, has_num_constant: bool,
+    when_mask: u32, when_value: u32, cols: &'static [BitPart], rows: &'static [Row],
+    formulas: &'static [Formula], move_wide_invert: bool, logical_invert: bool,
+    data_size: i64, literal: &'static str, index_size_parts: u8, xor: u64,
+    default: i64, has_default: bool, mul: i64, add: i64, modulo: i64,
+}
+#[derive(Clone, Copy)]
+struct TextPart { literal: &'static str, operand: Option<OperandDef>, group: u8 }
+#[derive(Clone, Copy)]
+struct Equality { left_start: u8, left_end: u8, right_start: u8, right_end: u8, add: u32 }
+#[derive(Clone, Copy)]
+struct Inequality { left_start: u8, left_end: u8, right_start: u8, right_end: u8 }
+#[derive(Clone, Copy)]
+struct Forbidden { mask: u32, value: u32 }
+#[derive(Clone, Copy)]
+struct MoveWideGuard { imm16: BitPart, hw: BitPart }
+#[derive(Clone, Copy)]
+struct LogicalGuard { sf: BitPart, n: BitPart, imms: BitPart, immr: BitPart }
+#[derive(Clone, Copy)]
+struct Form {
+    mask: u32, value: u32, encoding_id: &'static str, alias: bool,
+    constraint_mask: u32, constraint_value: u32,
+    equalities: &'static [Equality], inequalities: &'static [Inequality],
+    one_hot: &'static [u32], forbidden: &'static [Forbidden],
+    move_wide_guard: Option<MoveWideGuard>, logical_guard: Option<LogicalGuard>,
+    sve_mask: Option<BitPart>, parts: &'static [TextPart],
+    parents: &'static [(u8, u8)], required: &'static [u8],
+}
+
+static FORMS: &[Form] = &[
+{{.Forms}}];
+
+/// Format `word` with the preferred assembler spelling described by ARM XML.
+/// `address` is accepted for API symmetry; A64 labels are emitted relative to
+/// the current instruction (`.`), preserving round-trip assembler semantics.
+pub fn format(word: u32, _address: u64) -> Result<String, FormatError> {
+    let mut best: Option<&Form> = None;
+    for form in FORMS {
+        if !form_matches(form, word) { continue; }
+        if best.is_none_or(|old| better_form(form, old)) { best = Some(form); }
+    }
+    let form = best.ok_or(FormatError::Unknown(word))?;
+    render_form(form, word).ok_or(FormatError::Unprintable(word))
+}
+
+impl Decoded {
+    pub fn format(&self, address: u64) -> Result<String, FormatError> { format(self.raw, address) }
+}
+
+fn better_form(new: &Form, old: &Form) -> bool {
+    let new_bits = (new.mask | new.constraint_mask).count_ones();
+    let old_bits = (old.mask | old.constraint_mask).count_ones();
+    new_bits > old_bits || (new_bits == old_bits && new.alias && !old.alias) ||
+        (new_bits == old_bits && new.alias == old.alias && new.encoding_id < old.encoding_id)
+}
+
+fn form_matches(form: &Form, word: u32) -> bool {
+    if form.mask == 0 || word & form.mask != form.value ||
+        word & form.constraint_mask != form.constraint_value { return false; }
+    for eq in form.equalities {
+        let width = eq.left_end - eq.left_start + 1;
+        let mask = low_mask(width);
+        if (field(word, eq.left_start, eq.left_end) + eq.add) & mask !=
+            field(word, eq.right_start, eq.right_end) { return false; }
+    }
+    for neq in form.inequalities {
+        if field(word, neq.left_start, neq.left_end) == field(word, neq.right_start, neq.right_end) { return false; }
+    }
+    if form.one_hot.iter().any(|mask| (word & mask).count_ones() != 1) { return false; }
+    if form.forbidden.iter().any(|item| word & item.mask == item.value) { return false; }
+    if let Some(guard) = form.move_wide_guard {
+        if part_value(word, guard.imm16) == 0 && part_value(word, guard.hw) != 0 { return false; }
+    }
+    if let Some(guard) = form.logical_guard {
+        if move_wide_preferred(part_value(word, guard.sf), part_value(word, guard.n),
+            part_value(word, guard.imms), part_value(word, guard.immr)) { return false; }
+    }
+    if let Some(part) = form.sve_mask {
+        if !sve_move_mask_preferred(part_value(word, part)) { return false; }
+    }
+    true
+}
+
+fn render_form(form: &Form, word: u32) -> Option<String> {
+    let mut skipped = [false; 32];
+    for part in form.parts {
+        let group = part.group as usize;
+        if group != 0 && group < skipped.len() { skipped[group] = group_omitted(form, part.group, word); }
+    }
+    let mut output = String::new();
+    for part in form.parts {
+        if part.group != 0 && (skipped[part.group as usize] || ancestor_skipped(form, part.group, &skipped)) { continue; }
+        if let Some(operand) = part.operand { output.push_str(&render_operand(operand, word)?); }
+        else { output.push_str(part.literal); }
+    }
+    Some(canonical_alternatives(&collapse_space(&output)).trim_end().to_string())
+}
+
+fn ancestor_skipped(form: &Form, mut group: u8, skipped: &[bool; 32]) -> bool {
+    loop {
+        group = parent_group(form, group);
+        if group == 0 { return false; }
+        if skipped.get(group as usize).copied().unwrap_or(false) { return true; }
+    }
+}
+
+fn parent_group(form: &Form, group: u8) -> u8 {
+    form.parents.iter().find(|(child, _)| *child == group).map_or(0, |(_, parent)| *parent)
+}
+
+fn contains_group(form: &Form, group: u8, mut candidate: u8) -> bool {
+    while candidate != 0 {
+        if candidate == group { return true; }
+        candidate = parent_group(form, candidate);
+    }
+    false
+}
+
+fn group_omitted(form: &Form, group: u8, word: u32) -> bool {
+    if form.required.contains(&group) || form.encoding_id.contains("addsub_ext") { return false; }
+    for part in form.parts {
+        let Some(op) = part.operand else { continue };
+        if !contains_group(form, group, part.group) { continue; }
+        let mut want = 0u64;
+        if op.has_default && op.default >= 0 {
+            let scale = op.scale.max(1);
+            let mut semantic = op.default / scale;
+            if op.negate != 0 { semantic = op.negate - semantic; } else { semantic -= op.bias; }
+            if semantic >= 0 { want = semantic as u64; }
+        }
+        if raw_value(op, word) != want { return false; }
+    }
+    true
+}
+
+fn render_operand(op: OperandDef, word: u32) -> Option<String> {
+    if op.when_mask != 0 && word & op.when_mask != op.when_value { return Some(String::new()); }
+    match op.kind {
+        Kind::Reg => render_reg(op, word), Kind::Num => render_num(op, word),
+        Kind::FpImm => render_fp_imm(op, word), Kind::SysReg => render_sysreg(op, word),
+        Kind::Table => render_table(op, word), Kind::Derived => render_derived(op, word),
+        Kind::Formula => render_formula(op, word), Kind::LogicalImm => render_logical_imm(op, word),
+        Kind::BitfieldWidth => render_bitfield_width(op, word),
+        Kind::ByteMaskImm => render_byte_mask(op, word), Kind::MoveWideImm => render_move_wide(op, word),
+        Kind::Literal => (!op.literal.is_empty()).then(|| op.literal.to_string()),
+        Kind::ElementIndex => render_element_index(op, word), Kind::TileMask => render_tile_mask(op, word),
+    }
+}
+
+fn render_reg(op: OperandDef, word: u32) -> Option<String> {
+    let raw = raw_value(op, word) as i64;
+    let mut value = raw + op.bias;
+    if !op.ranges.is_empty() {
+        let mut encoded_lo = 0;
+        let mut found = false;
+        for range in op.ranges {
+            let count = range.hi - range.lo + 1;
+            if raw >= encoded_lo && raw < encoded_lo + count { value = raw + range.bias; found = true; break; }
+            encoded_lo += count;
+        }
+        if !found { return None; }
+    }
+    if op.negate != 0 { value = op.negate - raw; }
+    value *= op.scale;
+    if value < 0 || op.has_reg_range && (value < op.reg_lo || value > op.reg_hi) ||
+        op.reg_multiple > 1 && value % op.reg_multiple != 0 { return None; }
+    register_name(op.class, value as u64)
+}
+
+fn render_num(op: OperandDef, word: u32) -> Option<String> {
+    let raw = raw_value(op, word);
+    let mut value = if op.has_num_constant { op.num_constant }
+        else if op.negate != 0 { op.negate - raw as i64 }
+        else if op.signed { sign_extend(raw, total_width(op)) + op.bias }
+        else { raw as i64 + op.bias };
+    if op.raw_mul != 0 { value *= op.raw_mul; }
+    value *= op.scale;
+    if op.has_range && (value < op.lo || value > op.hi) { return None; }
+    if op.class == "label" { return Some(if value < 0 { format!(".-{}", -value) } else { format!(".+{value}") }); }
+    if op.symbol.contains("|SP") && value == 31 { return Some("sp".to_string()); }
+    Some(format!("{}{value}", op.num_prefix))
+}
+
+fn render_fp_imm(op: OperandDef, word: u32) -> Option<String> {
+    let raw = raw_value(op, word);
+    if raw > 0xff { return None; }
+    let sign = if raw & 0x80 != 0 { -1.0 } else { 1.0 };
+    let n = (16 + (raw & 0x0f)) as f64;
+    let exp = ((raw >> 4) & 7) as i32;
+    let power = if exp >= 4 { exp - 7 } else { exp + 1 };
+    Some(format!("{}", sign * n / 16.0 * 2f64.powi(power)))
+}
+
+fn render_sysreg(op: OperandDef, word: u32) -> Option<String> {
+    if op.parts.len() != 5 || op.parts[0].width != 1 || op.parts[1].width != 3 ||
+        op.parts[2].width != 4 || op.parts[3].width != 4 || op.parts[4].width != 3 { return None; }
+    let values: Vec<u32> = op.parts.iter().map(|part| part_value(word, *part)).collect();
+    Some(format!("s{}_{}_c{}_c{}_{}", 2 + values[0], values[1], values[2], values[3], values[4]))
+}
+
+fn render_table(op: OperandDef, word: u32) -> Option<String> {
+    for row in op.rows {
+        if !row_matches(row, op.cols, word, op.xor) { continue; }
+        if numeric_placeholder(row.symbol) { return Some(format!("#{}", raw_value(op, word))); }
+        return match row.symbol.to_ascii_lowercase().as_str() {
+            "[absent]" => Some(String::new()), "[present]" => Some(op.symbol.to_string()),
+            _ => Some(canonical_symbol(row.symbol)),
+        };
+    }
+    None
+}
+
+fn render_derived(op: OperandDef, word: u32) -> Option<String> {
+    let mut value = if op.parts.is_empty() { op.add } else { raw_value(op, word) as i64 * op.mul + op.add };
+    if op.modulo > 0 { value = ((value % op.modulo) + op.modulo) % op.modulo; }
+    if op.class.is_empty() { Some(value.to_string()) } else { register_name(op.class, value as u64) }
+}
+
+fn render_formula(op: OperandDef, word: u32) -> Option<String> {
+    for (index, row) in op.rows.iter().enumerate() {
+        if index >= op.formulas.len() || !row_matches(row, op.cols, word, 0) { continue; }
+        let formula = op.formulas[index];
+        let mut raw = 0u64; let mut size_raw = 0u64;
+        for (part_index, part) in formula.parts.iter().enumerate() {
+            let value = literal_or_field(word, *part);
+            raw = raw << part.width | value;
+            if part_index < formula.size_parts as usize { size_raw = size_raw << part.width | value; }
+        }
+        let raw_mul = if formula.raw_mul == 0 { 1 } else { formula.raw_mul };
+        let mut value = raw as i64 * raw_mul + formula.add;
+        if formula.negate != 0 { value = formula.negate - raw as i64; }
+        if formula.esize_mul != 0 {
+            if size_raw == 0 { return None; }
+            let highest = 63 - size_raw.leading_zeros() as i64;
+            value += formula.esize_mul * (formula.esize_base << highest);
+        }
+        return (value >= 0).then(|| value.to_string());
+    }
+    None
+}
+
+fn render_logical_imm(op: OperandDef, word: u32) -> Option<String> {
+    let (n, immr, imms, sf, packed) = match op.parts {
+        [part] if part.width == 13 => { let raw = part_value(word, *part); (raw >> 12, raw >> 6 & 0x3f, raw & 0x3f, 1, true) }
+        [n, r, s, sf] => (part_value(word, *n), part_value(word, *r), part_value(word, *s), part_value(word, *sf), false),
+        _ => return None,
+    };
+    let data_size = if sf != 0 { 64 } else { 32 };
+    let length = 31 - (n << 6 | (!imms & 0x3f)).leading_zeros();
+    if length < 1 { return None; }
+    let levels = (1u32 << length) - 1; let s = imms & levels; let r = immr & levels;
+    if s == levels { return None; }
+    let element_size = 1u32 << length;
+    if element_size > data_size { return None; }
+    let ones = (1u64 << (s + 1)) - 1;
+    let element_mask = if element_size == 64 { u64::MAX } else { (1u64 << element_size) - 1 };
+    let rotation = r % element_size;
+    let mut element = rotate_element(ones, rotation, element_size) & element_mask;
+    if op.logical_invert { element = !element & element_mask; }
+    if packed { return Some(format!("0x{element:x}")); }
+    let mut value = 0u64; let mut shift = 0;
+    while shift < data_size { value |= element << shift; shift += element_size; }
+    Some(format!("0x{value:x}"))
+}
+
+fn render_bitfield_width(op: OperandDef, word: u32) -> Option<String> {
+    if op.parts.len() != 2 { return None; }
+    let imms = part_value(word, op.parts[0]); let immr = part_value(word, op.parts[1]);
+    if op.data_size > 0 && imms as i64 >= op.data_size { return None; }
+    if op.add == 1 { (imms < immr).then(|| (imms + 1).to_string()) }
+    else { (imms >= immr).then(|| (imms - immr + 1).to_string()) }
+}
+
+fn render_byte_mask(op: OperandDef, word: u32) -> Option<String> {
+    if op.parts.len() != 8 { return None; }
+    let mut value = 0u64;
+    for part in op.parts { value = value << 8 | if part_value(word, *part) != 0 { 0xff } else { 0 }; }
+    Some(format!("0x{value:x}"))
+}
+
+fn render_move_wide(op: OperandDef, word: u32) -> Option<String> {
+    if op.parts.len() != 3 { return None; }
+    let imm16 = part_value(word, op.parts[0]) as u64;
+    let shift = part_value(word, op.parts[1]) * 16;
+    let data_size = if part_value(word, op.parts[2]) != 0 { 64 } else { 32 };
+    if shift >= data_size { return None; }
+    let mut value = imm16 << shift;
+    if op.move_wide_invert { value = !value; if data_size == 32 { value &= 0xffff_ffff; } }
+    Some(format!("0x{value:x}"))
+}
+
+fn render_element_index(op: OperandDef, word: u32) -> Option<String> {
+    if op.index_size_parts == 0 || op.index_size_parts as usize >= op.parts.len() { return None; }
+    let size_start = op.parts.len() - op.index_size_parts as usize;
+    let mut raw = 0u64; let mut size = 0u64;
+    for (index, part) in op.parts.iter().enumerate() {
+        let value = part_value(word, *part) as u64; raw = raw << part.width | value;
+        if index >= size_start { size = size << part.width | value; }
+    }
+    if size == 0 { return None; }
+    Some((raw >> (size.trailing_zeros() + 1)).to_string())
+}
+
+fn render_tile_mask(op: OperandDef, word: u32) -> Option<String> {
+    if op.parts.len() != 1 || op.parts[0].width != 8 { return None; }
+    let mask = part_value(word, op.parts[0]); let mut output = String::new();
+    for index in 0..8 { if mask & (1 << index) != 0 { if !output.is_empty() { output.push_str(", "); } let _ = write!(output, "za{index}.d"); } }
+    Some(output)
+}
+
+fn raw_value(op: OperandDef, word: u32) -> u64 {
+    let parts = if op.parts.is_empty() { op.cols } else { op.parts };
+    let mut value = 0u64;
+    for part in parts { value = value << part.width | literal_or_field(word, *part); }
+    value
+}
+
+fn literal_or_field(word: u32, part: BitPart) -> u64 {
+    if !part.is_lit { return part_value(word, part) as u64; }
+    part.literal.bytes().fold(0, |value, bit| value << 1 | u64::from(bit == b'1'))
+}
+
+fn total_width(op: OperandDef) -> u8 {
+    let parts = if op.parts.is_empty() { op.cols } else { op.parts };
+    parts.iter().map(|part| part.width).sum()
+}
+
+fn part_value(word: u32, part: BitPart) -> u32 { field(word, part.start as u8, part.end as u8) }
+fn field(word: u32, start: u8, end: u8) -> u32 { word >> start & low_mask(end - start + 1) }
+fn low_mask(width: u8) -> u32 { if width >= 32 { u32::MAX } else { (1u32 << width) - 1 } }
+fn sign_extend(value: u64, width: u8) -> i64 { if width == 0 || width >= 64 { value as i64 } else { ((value << (64 - width)) as i64) >> (64 - width) } }
+
+fn row_matches(row: &Row, cols: &[BitPart], word: u32, xor: u64) -> bool {
+    if row.bits.len() != cols.len() { return false; }
+    let total: u8 = cols.iter().map(|part| part.width).sum();
+    let mut selector = 0u64;
+    for part in cols { selector = selector << part.width | part_value(word, *part) as u64; }
+    selector ^= xor;
+    let mut consumed = 0u8;
+    for (pattern, col) in row.bits.iter().zip(cols) {
+        if pattern.len() != col.width as usize { return false; }
+        for (index, expected) in pattern.bytes().enumerate() {
+            if !matches!(expected, b'0' | b'1') { continue; }
+            let bit = total - consumed - index as u8 - 1;
+            if ((selector >> bit) & 1) as u8 != expected - b'0' { return false; }
+        }
+        consumed += col.width;
+    }
+    true
+}
+
+fn register_name(class: &str, number: u64) -> Option<String> {
+    if number == 31 {
+        match class { "gpr32" => return Some("wzr".into()), "gpr64" => return Some("xzr".into()),
+            "gpr32sp" => return Some("wsp".into()), "gpr64sp" => return Some("sp".into()), _ => {} }
+    }
+    let bank = match class { "gpr32" | "gpr32sp" => "w", "gpr64" | "gpr64sp" => "x",
+        "simdb" => "b", "simdh" => "h", "simds" => "s", "simdd" => "d", "simdq" => "q",
+        "simdvec" => "v", "svez" => "z", "svep" => "p", "svepn" => "pn", "smetile" => "za", _ => return None };
+    Some(format!("{bank}{number}"))
+}
+
+fn move_wide_preferred(sf: u32, n: u32, imms: u32, immr: u32) -> bool {
+    let width = if sf != 0 { if n != 1 { return false; } 64 } else { if n != 0 || imms & 0x20 != 0 { return false; } 32 };
+    if imms < 16 { (16 - immr % 16) % 16 <= 15 - imms }
+    else if imms >= width - 15 { immr % 16 <= imms - (width - 15) } else { false }
+}
+
+fn decode_packed_logical(raw: u32) -> Option<u64> {
+    let n = raw >> 12; let immr = raw >> 6 & 0x3f; let imms = raw & 0x3f;
+    let len_value = n << 6 | (!imms & 0x3f); if len_value == 0 { return None; }
+    let length = 31 - len_value.leading_zeros(); if length < 1 { return None; }
+    let levels = (1u32 << length) - 1; let s = imms & levels; let r = immr & levels;
+    if s == levels { return None; }
+    let size = 1u32 << length; let ones = (1u64 << (s + 1)) - 1;
+    let mask = if size == 64 { u64::MAX } else { (1u64 << size) - 1 };
+    let element = rotate_element(ones, r % size, size) & mask; let mut value = 0u64; let mut shift = 0;
+    while shift < 64 { value |= element << shift; shift += size; } Some(value)
+}
+
+fn sve_move_mask_preferred(raw: u32) -> bool {
+    let Some(value) = decode_packed_logical(raw) else { return false };
+    let halves = value as u32 == (value >> 32) as u32;
+    let quarters = value as u16 == (value >> 16) as u16 && halves;
+    if value as u8 != 0 {
+        if zero_or_ones(value, 7, 63) || halves && zero_or_ones(value, 7, 31) ||
+            quarters && zero_or_ones(value, 7, 15) || quarters && (value >> 8) as u8 == value as u8 { return false; }
+        true
+    } else { !zero_or_ones(value, 15, 63) && !(halves && zero_or_ones(value, 15, 31)) && !quarters }
+}
+
+fn zero_or_ones(value: u64, lo: u32, hi: u32) -> bool {
+    let width = hi - lo + 1; let mask = if width == 64 { u64::MAX } else { (1u64 << width) - 1 };
+    let got = value >> lo & mask; got == 0 || got == mask
+}
+
+fn rotate_element(value: u64, rotation: u32, width: u32) -> u64 {
+	if rotation == 0 { value } else { value >> rotation | value << (width - rotation) }
+}
+
+fn numeric_placeholder(symbol: &str) -> bool {
+    let lower = symbol.trim().to_ascii_lowercase();
+    lower.strip_prefix("#uimm").is_some_and(|tail| !tail.is_empty() && tail.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn canonical_symbol(symbol: &str) -> String {
+    let lower = symbol.trim().to_ascii_lowercase();
+    if lower.starts_with('(') && lower.ends_with(')') {
+        if let Some(bar) = lower.find('|') { return lower[1..bar].trim().to_string(); }
+    }
+    if let Some(bar) = lower.find('|') { return if &lower[..bar] == "lsl" { lower[bar + 1..].trim().into() } else { lower[..bar].trim().into() }; }
+    lower
+}
+
+fn canonical_alternatives(input: &str) -> String {
+    let mut output = input.to_string();
+    while let Some(close) = output.find(')') {
+        let Some(open) = output[..close].rfind('(') else { break };
+        let inside = &output[open + 1..close]; let Some(bar) = inside.find('|') else { break };
+        let choice = if inside[..bar].trim().is_empty() { inside[bar + 1..].trim() } else { inside[..bar].trim() }.to_string();
+        output.replace_range(open..=close, &choice);
+    }
+	while let Some(bar) = output.find('|') {
+		let bytes = output.as_bytes();
+		let mut left = bar;
+		while left > 0 && !matches!(bytes[left - 1], b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') { left -= 1; }
+		let mut right = bar + 1;
+		while right < bytes.len() && !matches!(bytes[right], b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') { right += 1; }
+		let choice = if output[left..bar].trim().is_empty() { output[bar + 1..right].trim() } else { output[left..bar].trim() }.to_string();
+		output.replace_range(left..right, &choice);
+	}
+    output
+}
+
+fn collapse_space(input: &str) -> String {
+    let mut output = String::with_capacity(input.len()); let mut space = false;
+    for ch in input.chars() {
+        if ch.is_whitespace() { space = true; continue; }
+        if space && !output.is_empty() { output.push(' '); }
+        space = false; output.push(ch);
+    }
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn representative_formatting() {
+        for (word, expected) in [(0xD503201F, "NOP"), (0xD65F03C0, "RET")] {
+            if FORMS.iter().any(|form| form_matches(form, word)) {
+                assert_eq!(format(word, 0x1000).unwrap().to_ascii_uppercase(), expected);
+            }
+        }
+    }
+
+	#[test]
+	fn generated_formatter_matches_reference_model() {
+		let cases: &[(u32, &str)] = &[
+{{.Cases}}		];
+		for &(word, expected) in cases {
+			assert_eq!(format(word, 0).as_deref(), Ok(expected), "word 0x{word:08x}");
+		}
+	}
+}

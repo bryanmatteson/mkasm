@@ -32,6 +32,9 @@ type opcodesDBTemplate struct {
 		Text     string             `json:"text"`
 		AST      []opcodesDBOperand `json:"ast"`
 	} `json:"syntax"`
+	Metadata struct {
+		Tuple string `json:"tuple"`
+	} `json:"metadata"`
 }
 
 type opcodesDBField struct {
@@ -40,8 +43,18 @@ type opcodesDBField struct {
 }
 
 type opcodesDBOperand struct {
-	Type      string `json:"type"`
-	EncodedIn string `json:"encodedin"`
+	Type             string `json:"type"`
+	Symbol           string `json:"symbol"`
+	EncodedIn        string `json:"encodedin"`
+	DataType         string `json:"datatype"`
+	Size             any    `json:"size"`
+	Value            any    `json:"value"`
+	Read             int    `json:"read"`
+	Write            int    `json:"write"`
+	Suppressed       int    `json:"suppressed"`
+	Zeroing          int    `json:"zeroing"`
+	ConditionalRead  int    `json:"conditional_reading"`
+	ConditionalWrite int    `json:"conditional_writing"`
 }
 
 // ParseOpcodesDB reads an uncompressed opcodesDB v3 JSON document and
@@ -108,10 +121,22 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 		ID: id, FormID: fmt.Sprintf("%s/%d", id, templateIndex),
 		Mnemonic: tmpl.Syntax.Mnemonic, Syntax: tmpl.Syntax.Text,
 		Kind: kind, Map: opcodeMap, Opcode: byte(op), MandatoryPrefix: prefix,
-		Modes: parseModes(fields["MODE"]), W: parseBit(fields["W"]),
+		Modes: parseModes(fields["MODE"]), W: parseBit(fields["W"]), Tuple: tmpl.Metadata.Tuple,
 		Mod: ModAny,
 	}
 	e.PrefixMask, e.PrefixValue = parsePrefixBits(fields)
+	if size, parseErr := strconv.ParseUint(fields["OSZ"], 10, 8); parseErr == nil && (size == 16 || size == 32 || size == 64) {
+		e.OperandSize = uint8(size)
+	}
+	if e.Kind == EncodingLegacy && fields["OSZ"] != "" {
+		// In legacy encodings the physical 66 byte can be the OSZ
+		// override even when P66 (mandatory-prefix role) is zero.
+		e.PrefixMask &^= 1
+		e.PrefixValue &^= 1
+		if strings.EqualFold(fields["OSZ"], "Z") {
+			e.W = BitZero
+		}
+	}
 	if vl, parseErr := strconv.ParseUint(fields["VL"], 10, 16); parseErr == nil {
 		e.VectorLength = uint16(vl)
 	}
@@ -128,15 +153,41 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 	if v, ok := parseThreeBits(fields["RM"]); ok {
 		e.RMMask, e.RMValue = 7, v
 	}
+	hasIS4 := false
 	for _, operand := range tmpl.Syntax.AST {
-		if strings.EqualFold(operand.EncodedIn, "OPCODE") {
-			e.OpcodePlusReg = true
+		if strings.EqualFold(operand.EncodedIn, "IS4") {
+			hasIS4 = true
+			break
 		}
-		if width, ok := tailWidth(operand.Type, operand.EncodedIn); ok {
+	}
+	for _, operand := range tmpl.Syntax.AST {
+		e.Operands = append(e.Operands, Operand{
+			Type: strings.ToUpper(operand.Type), Symbol: operand.Symbol,
+			EncodedIn: strings.ToUpper(operand.EncodedIn), DataType: operand.DataType,
+			Size: scalarString(operand.Size), Value: scalarString(operand.Value),
+			Read: operand.Read != 0, Write: operand.Write != 0,
+			Suppressed: operand.Suppressed != 0, Zeroing: operand.Zeroing != 0,
+			ConditionalRead:  operand.ConditionalRead != 0,
+			ConditionalWrite: operand.ConditionalWrite != 0,
+		})
+		// opcodesDB expands +r opcode families into one ENCODING record per
+		// register (B8, B9, ...), while retaining encodedin=OPCODE on the
+		// operand. The opcode is therefore already exact for this form.
+		// IS4 stores a register in the high nibble of the same byte whose
+		// low nibble is described as IB. It is one physical tail byte, not
+		// two consecutive immediates.
+		if width, ok := tailWidth(operand.Type, operand.EncodedIn); ok && !(hasIS4 && strings.EqualFold(operand.EncodedIn, "IB")) {
 			e.Tail = append(e.Tail, width)
 		}
 	}
 	return e, nil
+}
+
+func scalarString(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
 }
 
 func fieldMap(in []opcodesDBField) map[string]string {

@@ -93,8 +93,11 @@ type DisasmForm struct {
 	ConstraintValue uint32
 	EqualFields     []DisasmFieldEquality
 	UnequalFields   []DisasmFieldInequality
-	OneHotMasks     []uint32
-	Forbidden       []DisasmForbidden
+	// SampleUnequalFields canonicalizes independently assembled probes without
+	// rejecting allocated constrained-unpredictable words from the formatter.
+	SampleUnequalFields []DisasmFieldInequality
+	OneHotMasks         []uint32
+	Forbidden           []DisasmForbidden
 	// SVEMoveMaskField carries the imm13 selected by ARM's
 	// SVEMoveMaskPreferred alias predicate.
 	SVEMoveMaskField            *BitPart
@@ -248,6 +251,7 @@ type DisasmRow struct {
 // BuildDisasmSurface projects resolved IR into the print model.
 func BuildDisasmSurface(instrs []*ir.InstructionIR, load func(*ir.InstructionIR) *ParsedIForm) *DisasmSurface {
 	s := &DisasmSurface{}
+	aliasOf := make(map[string]string)
 	for _, instr := range instrs {
 		if instr == nil || instr.EncodingID == "" {
 			continue
@@ -263,10 +267,49 @@ func BuildDisasmSurface(instrs []*ir.InstructionIR, load func(*ir.InstructionIR)
 			continue
 		}
 		s.Forms = append(s.Forms, *form)
+		if instr.AliasOf != "" {
+			aliasOf[instr.EncodingID] = instr.AliasOf
+		}
 	}
+	inheritCanonicalDisasmConstraints(s.Forms, aliasOf)
 	sort.Slice(s.Forms, func(i, j int) bool { return s.Forms[i].EncodingID < s.Forms[j].EncodingID })
 	sort.Slice(s.Skipped, func(i, j int) bool { return s.Skipped[i].EncodingID < s.Skipped[j].EncodingID })
 	return s
+}
+
+// inheritCanonicalDisasmConstraints carries architectural validity conditions
+// from a canonical encoding into its separately documented aliases. Alias XML
+// generally contains only the alias predicate; Decode_UNDEF and constrained
+// register rules live on the canonical instruction page.
+func inheritCanonicalDisasmConstraints(forms []DisasmForm, aliasOf map[string]string) {
+	byID := make(map[string]int, len(forms))
+	for i := range forms {
+		byID[forms[i].EncodingID] = i
+	}
+	state := make(map[int]uint8, len(forms))
+	var inherit func(int)
+	inherit = func(index int) {
+		if state[index] == 2 {
+			return
+		}
+		if state[index] == 1 {
+			return
+		}
+		state[index] = 1
+		parentID := aliasOf[forms[index].EncodingID]
+		parentIndex, ok := byID[parentID]
+		if ok {
+			inherit(parentIndex)
+			parent := &forms[parentIndex]
+			forms[index].Forbidden = append(forms[index].Forbidden, parent.Forbidden...)
+			forms[index].UnequalFields = append(forms[index].UnequalFields, parent.UnequalFields...)
+			forms[index].SampleUnequalFields = append(forms[index].SampleUnequalFields, parent.SampleUnequalFields...)
+		}
+		state[index] = 2
+	}
+	for i := range forms {
+		inherit(i)
+	}
 }
 
 func buildDisasmForm(instr *ir.InstructionIR, p *ParsedIForm) (*DisasmForm, *DisasmSkip) {
@@ -294,6 +337,8 @@ func buildDisasmForm(instr *ir.InstructionIR, p *ParsedIForm) (*DisasmForm, *Dis
 	)
 	form.Forbidden = append(form.Forbidden, memoryForbidden...)
 	form.UnequalFields = append(form.UnequalFields, memoryUnequal...)
+	form.SampleUnequalFields = append(form.SampleUnequalFields,
+		decodeWritebackSampleRegisterConstraints(p.Pseudocode, byName, fixedMask)...)
 	if err := addDisasmAliasConstraints(form, p.AliasCond, byName); err != nil {
 		return nil, &DisasmSkip{instr.EncodingID, "", err.Error()}
 	}

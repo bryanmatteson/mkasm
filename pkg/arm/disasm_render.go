@@ -114,6 +114,7 @@ func (f *DisasmForm) matchesConstraints(word uint32) bool {
 // alias predicate. It is useful when constructing a legal representative of an
 // encoding; Render independently checks the same predicate.
 func (f *DisasmForm) SatisfyConstraints(word uint32) (uint32, bool) {
+	word = canonicalizeDocumentedIgnoredBits(f, word, 0, 0)
 	word = word&^f.ConstraintMask | f.ConstraintValue
 	for _, eq := range f.EqualFields {
 		width := eq.LeftEnd - eq.LeftStart + 1
@@ -127,6 +128,11 @@ func (f *DisasmForm) SatisfyConstraints(word uint32) (uint32, bool) {
 		word = word&^mask | value<<uint(eq.RightStart)
 	}
 	if candidate, ok := f.satisfyInequalities(word); ok {
+		word = candidate
+	} else {
+		return 0, false
+	}
+	if candidate, ok := satisfyInequalitySet(word, f.SampleUnequalFields); ok {
 		word = candidate
 	} else {
 		return 0, false
@@ -207,11 +213,24 @@ func (f *DisasmForm) inequalitiesMatch(word uint32) bool {
 }
 
 func (f *DisasmForm) satisfyInequalities(word uint32) (uint32, bool) {
-	if f.inequalitiesMatch(word) {
+	return satisfyInequalitySet(word, f.UnequalFields)
+}
+
+func satisfyInequalitySet(word uint32, constraints []DisasmFieldInequality) (uint32, bool) {
+	match := func(candidate uint32) bool {
+		for _, neq := range constraints {
+			if fieldValue(candidate, neq.LeftStart, neq.LeftEnd) ==
+				fieldValue(candidate, neq.RightStart, neq.RightEnd) {
+				return false
+			}
+		}
+		return true
+	}
+	if match(word) {
 		return word, true
 	}
 	var mutable uint32
-	for _, neq := range f.UnequalFields {
+	for _, neq := range constraints {
 		mutable |= neq.RightMutable
 	}
 	if mutable == 0 || bits.OnesCount32(mutable) > 16 {
@@ -230,7 +249,7 @@ func (f *DisasmForm) satisfyInequalities(word uint32) (uint32, bool) {
 				candidate ^= uint32(1) << uint(pos)
 			}
 		}
-		if f.inequalitiesMatch(candidate) {
+		if match(candidate) {
 			return candidate, true
 		}
 	}

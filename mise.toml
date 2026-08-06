@@ -205,6 +205,14 @@ MKASM_DISASM_LLVM_PARITY=1 \
     -run '^TestDisasmAssemblesBack$' -v -count=1 -timeout 600s
 '''
 
+[tasks."conformance:x86"]
+description = "Exact iced-x86 operand and Intel-formatter comparison"
+run = '''
+corpus="${X86_CORPUS:?set X86_CORPUS to an opcodesDB v3 JSON or .json.xz file}"
+MKASM_X86_OPCODESDB="$corpus" MKASM_X86_ICED_CONFORMANCE=1 \
+  go test ./tests/conformance -run '^TestX86IcedConformance$' -v -count=1 -timeout 600s
+'''
+
 [tasks.conformance]
 description = "Run supported-instruction Go, Rust, and disassembler LLVM parity"
 run = [

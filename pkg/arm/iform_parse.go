@@ -1319,7 +1319,7 @@ func decodeMemoryOperationRegisterConstraints(
 		})
 	}
 
-	pairs := [][2]int{{1, 2}} // SET: source and size must differ.
+	pairs := [][2]int{{0, 1}, {0, 2}, {1, 2}} // SET roles must all differ.
 	if copyOperation {
 		pairs = [][2]int{{0, 1}, {0, 2}, {1, 2}}
 	}
@@ -1333,6 +1333,40 @@ func decodeMemoryOperationRegisterConstraints(
 		})
 	}
 	return forbidden, unequal
+}
+
+// decodeWritebackSampleRegisterConstraints avoids constrained-unpredictable
+// load/store representatives. Register 31 can legally mean ZR versus SP, so
+// these constraints are sample-only rather than formatter validity rules.
+func decodeWritebackSampleRegisterConstraints(
+	pseudocode []string,
+	byName map[string]ir.BitField,
+	fixedMask uint32,
+) []DisasmFieldInequality {
+	if !strings.Contains(strings.Join(pseudocode, "\n"), "wback : boolean = TRUE") {
+		return nil
+	}
+	base, ok := lookupField("Rn", byName)
+	if !ok || base.End-base.Start+1 != 5 {
+		return nil
+	}
+	var out []DisasmFieldInequality
+	for _, name := range []string{"Rt", "Rt2"} {
+		transfer, found := lookupField(name, byName)
+		if !found || transfer.End-transfer.Start+1 != 5 {
+			continue
+		}
+		mutable := fieldRangeMask(transfer.Start, transfer.End) &^ fixedMask
+		if mutable == 0 {
+			continue
+		}
+		out = append(out, DisasmFieldInequality{
+			LeftStart: base.Start, LeftEnd: base.End,
+			RightStart: transfer.Start, RightEnd: transfer.End,
+			RightMutable: mutable,
+		})
+	}
+	return out
 }
 
 // decodeFieldNegates extracts exact countdown encodings from Decode
