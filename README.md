@@ -5,6 +5,11 @@ generator. It reads Arm's XML corpus from a directory, tarball, stdin, or URL,
 resolves the instruction model, and emits standalone assembler and decoder
 projects.
 
+The x86 backend imports opcodesDB v3 into a variable-length catalog and emits a
+standalone Rust crate with allocation-free legacy/REX, VEX, XOP, and EVEX
+dispatch plus exact physical-field encoding. A64 supports Go and Rust output;
+x86-64 currently supports Rust output.
+
 The implementation favors explicit data flow, bounded memory, hand-written
 parsers, deterministic output, and independent verification over generated
 framework machinery.
@@ -19,6 +24,8 @@ Using `ISA_A64_xml_A_profile-2026-06.tar.gz`:
 | IForm resolution | 4,623 / 4,623 |
 | Go unit, vet, and generated-project checks | Passing |
 | Rust generated-project checks | Passing |
+| x86 opcodesDB import | 3,509 records / 7,289 syntax forms |
+| x86 generated Rust checks | Passing; zero-allocation decode and encode |
 | Independent LLVM parity for supported instructions | 100%; zero mismatches |
 | Strict all-instruction LLVM parity | Open; 5 LLVM-unknown encodings |
 
@@ -42,6 +49,10 @@ mkasm --codegen rust --output ./output-rs "$CORPUS"
 
 # Emit deterministic IR JSON.
 mkasm --json "$CORPUS" > arm-ir.json
+
+# Generate the x86-64 Rust crate from opcodesDB's compressed JSON export.
+xz -dc x86_64.json.xz | mkasm --arch x86_64 \
+  --codegen rust --output ./x86_64-rs -
 ```
 
 From a source checkout:
@@ -53,9 +64,9 @@ go run ./cmd/mkasm --codegen go --output ./output "$CORPUS"
 ## CLI contract
 
 ```text
-mkasm --codegen rust --output DIR INPUT
-mkasm --codegen go   --output DIR INPUT
-mkasm --json INPUT
+mkasm [--arch aarch64|x86_64] --codegen rust --output DIR INPUT
+mkasm [--arch aarch64]        --codegen go   --output DIR INPUT
+mkasm [--arch aarch64|x86_64] --json INPUT
 mkasm --version
 mkasm --help
 ```
@@ -66,6 +77,9 @@ mkasm --help
 - a `.tar` or `.tar.gz` filepath;
 - an HTTP(S) URL;
 - `-`, for a tar stream on stdin.
+
+For `--arch x86_64`, `INPUT` is uncompressed opcodesDB v3 JSON from a file,
+URL, or stdin. Pipe `.json.xz` inputs through `xz -dc` as shown above.
 
 Progress and statistics are written to stderr. JSON mode writes only JSON to
 stdout. Code generation writes only below `--output` and leaves stdout empty.
@@ -141,6 +155,8 @@ output-rs/
   tests/
     conformance.rs        typed-call ledger consumed by the LLVM oracle
     exact_conformance.rs  all-encoding ledger consumed by the LLVM oracle
+  examples/
+    decode_bench.rs       decoder throughput and allocation measurement
 ```
 
 Generated project directories are verification products and are not committed.
@@ -161,8 +177,12 @@ Additional explicit gates:
 make build
 make bench
 make bench-micro
+make bench-rust-decoder
+make bench-x86 X86_CORPUS=/path/to/x86_64.json.xz
+make bench-x86-rust X86_CORPUS=/path/to/x86_64.json.xz
 make generate-go
 make generate-rust
+make generate-x86-rust X86_CORPUS=/path/to/x86_64.json.xz
 
 make coverage-encodings
 make conformance
@@ -176,7 +196,7 @@ make conformance-asl ASL=/path/to/arm-asl-parser/asl
 Before tagging a release, run the complete supported-toolchain gate:
 
 ```bash
-make release-check
+make release-check X86_CORPUS=/path/to/x86_64.json.xz
 make build VERSION=v0.1.0
 ./dist/mkasm --version
 ```
@@ -216,6 +236,7 @@ and current results are documented in
 | [`Makefile`](Makefile) / [`mise.toml`](mise.toml) | Portable and version-pinned verification workflows |
 | [`cmd/mkasm`](cmd/mkasm) | Public CLI and JSON export |
 | [`pkg/arm`](pkg/arm) | Corpus loading, orchestration, IForm parsing, code generation |
+| [`pkg/x86`](pkg/x86) | opcodesDB normalization and variable-length x86 encode/decode core |
 | [`pkg/parse`](pkg/parse) | Streaming XML event engine |
 | [`pkg/ir`](pkg/ir) | Architecture-neutral instruction and bit-field model |
 | [`pkg/decoder`](pkg/decoder) | Decoder-tree construction and matching |
@@ -227,7 +248,9 @@ and current results are documented in
 
 ## Scope
 
-`mkasm` targets A64 XML and deterministic assembler/decoder generation. It does
+`mkasm` ships A64 XML project generation plus opcodesDB-backed x86-64 Rust
+generation. The x86 backend does not yet emit Go projects or model MVEX/3DNow
+encoding. It does
 not execute architecture pseudocode cycle-for-cycle, replace an architectural
 simulator, or treat internal encoder/decoder round trips as independent proof.
 Arm's corpus is downloaded or supplied by the user and is not redistributed by

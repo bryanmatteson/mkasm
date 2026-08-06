@@ -86,6 +86,39 @@ go test ./pkg/arm -run '^$' \
   -benchmem -benchtime "$benchtime" -count "$benchcount"
 '''
 
+[tasks."bench:rust-decoder"]
+description = "Benchmark generated Rust decode time and allocations"
+run = [
+  { task = "generate:rust" },
+  '''
+out="${OUT:-./output-rs}"
+iterations="${ITERATIONS:-1000000}"
+(cd "$out" && cargo run --release --quiet --example decode_bench -- "$iterations")
+''',
+]
+
+[tasks."bench:x86"]
+description = "Benchmark allocation-free x86 decoding and encoding"
+run = '''
+corpus="${X86_CORPUS:?set X86_CORPUS to an opcodesDB v3 .json.xz file}"
+benchtime="${BENCHTIME:-{{vars.benchtime}}}"
+benchcount="${BENCHCOUNT:-{{vars.benchcount}}}"
+MKASM_X86_OPCODESDB="$corpus" go test ./pkg/x86 -run '^$' \
+  -bench '^Benchmark(DecodeCorpus|Encode)$' -benchmem \
+  -benchtime "$benchtime" -count "$benchcount"
+'''
+
+[tasks."bench:x86-rust"]
+description = "Benchmark the generated x86 Rust decoder"
+run = [
+  { task = "generate:x86-rust" },
+  '''
+out="${OUT:-./output-x86-rs}"
+iterations="${ITERATIONS:-1000000}"
+(cd "$out" && cargo run --release --quiet --example decode_bench -- "$iterations")
+''',
+]
+
 [tasks."generate:go"]
 description = "Generate and test the standalone Go project"
 run = '''
@@ -101,6 +134,15 @@ run = '''
 corpus="${CORPUS:-{{vars.corpus}}}"
 out="${OUT:-./output-rs}"
 go run ./cmd/mkasm --codegen rust --output "$out" "$corpus"
+(cd "$out" && RUSTFLAGS="-D warnings" cargo test)
+'''
+
+[tasks."generate:x86-rust"]
+description = "Generate and test the standalone x86 Rust crate"
+run = '''
+corpus="${X86_CORPUS:?set X86_CORPUS to an opcodesDB v3 .json.xz file}"
+out="${OUT:-./output-x86-rs}"
+xz -dc "$corpus" | go run ./cmd/mkasm --arch x86_64 --codegen rust --output "$out" -
 (cd "$out" && RUSTFLAGS="-D warnings" cargo test)
 '''
 

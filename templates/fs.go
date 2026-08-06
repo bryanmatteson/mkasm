@@ -11,5 +11,5 @@ import "embed"
 // codegen path, so a template that no longer matches the data model fails the
 // build rather than sitting unreachable.
 //
-//go:embed go/*.tmpl rust/*.tmpl
+//go:embed go/*.tmpl rust/*.tmpl x86_rust/*.tmpl
 var FS embed.FS

@@ -160,6 +160,10 @@ type ExactEncoding struct {
 	FixedWord  uint32
 	Pattern    string
 	Fields     []RawField
+	// FixedLegal reports whether the zeroed settable fields satisfy this
+	// encoding's bitdiff constraints. Some exact encoders have no legal zero
+	// base (for example, SIMD shifts require immh != 0).
+	FixedLegal bool
 	// AliasOf names the encoding this one is an alias of, empty when canonical.
 	AliasOf string
 	// Typed is true when this encoding also has an operand-typed method.
@@ -300,7 +304,7 @@ func BuildAsmSurface(instrs []*ir.InstructionIR, load func(*ir.InstructionIR) *P
 		s.Exact = append(s.Exact, ExactEncoding{
 			Fn: fn, EncodingID: instr.EncodingID, Mnemonic: mnem,
 			AsmSyntax: asm, FixedWord: fw, Pattern: instr.BitPattern,
-			Fields: rawFields(instr), AliasOf: instr.AliasOf,
+			Fields: rawFields(instr), FixedLegal: ir.MatchWord(instr, fw), AliasOf: instr.AliasOf,
 		})
 	}
 

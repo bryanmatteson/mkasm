@@ -7,6 +7,9 @@ CARGO ?= cargo
 CORPUS ?= https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2026-06.tar.gz
 BENCHTIME ?= 1s
 BENCHCOUNT ?= 1
+ITERATIONS ?= 1000000
+X86_CORPUS ?=
+X86_RUST_OUT ?= ./output-x86-rs
 GO_OUT ?= ./output
 RUST_OUT ?= ./output-rs
 ASL ?= ../arm-asl-parser/asl
@@ -14,7 +17,8 @@ COVERAGE_TOOL ?= $(GO) run github.com/vladopajic/go-test-coverage/v2@v2.18.9
 
 .PHONY: \
 	help fmt-check vet test test-race coverage-source coverage-encodings verify \
-	bench bench-micro generate-go generate-rust build \
+	bench bench-micro bench-rust-decoder bench-x86 bench-x86-rust \
+	generate-go generate-rust generate-x86-rust build \
 	conformance-go conformance-rust conformance-disasm conformance \
 	conformance-strict-go conformance-strict-rust conformance-strict-disasm \
 	conformance-strict audit-disasm conformance-asl release-check clean
@@ -37,7 +41,7 @@ test: ## Run the deterministic offline test suite
 	$(GO) test ./... -count=1 -timeout 180s
 
 test-race: ## Run race-sensitive core and conformance packages
-	$(GO) test -race ./pkg/decoder ./pkg/arm ./pkg/coverage ./tests/conformance
+	$(GO) test -race ./pkg/decoder ./pkg/arm ./pkg/x86 ./pkg/coverage ./tests/conformance
 
 coverage-source: ## Measure source coverage and enforce configured floors
 	mkdir -p .coverage
@@ -69,6 +73,18 @@ bench-micro: ## Run parser hot-path microbenchmarks
 		-bench '^Benchmark(ParseIForm|ParseAsmTemplate|PseudocodeParser|TarCorpusPreparedIFormLookup)$$' \
 		-benchmem -benchtime "$(BENCHTIME)" -count "$(BENCHCOUNT)"
 
+bench-rust-decoder: generate-rust ## Benchmark generated Rust decode time and allocations
+	cd "$(RUST_OUT)" && $(CARGO) run --release --quiet --example decode_bench -- "$(ITERATIONS)"
+
+bench-x86: ## Benchmark the x86 codec against opcodesDB v3 (X86_CORPUS=...json.xz)
+	@test -n "$(X86_CORPUS)" || { echo "X86_CORPUS is required" >&2; exit 2; }
+	MKASM_X86_OPCODESDB="$(X86_CORPUS)" $(GO) test ./pkg/x86 -run '^$$' \
+		-bench '^Benchmark(DecodeCorpus|Encode)$$' -benchmem \
+		-benchtime "$(BENCHTIME)" -count "$(BENCHCOUNT)"
+
+bench-x86-rust: generate-x86-rust ## Benchmark the generated x86 Rust decoder
+	cd "$(X86_RUST_OUT)" && $(CARGO) run --release --quiet --example decode_bench -- "$(ITERATIONS)"
+
 generate-go: ## Generate and test the standalone Go project
 	$(GO) run ./cmd/mkasm --codegen go --output "$(GO_OUT)" "$(CORPUS)"
 	cd "$(GO_OUT)" && $(GO) test ./...
@@ -76,6 +92,12 @@ generate-go: ## Generate and test the standalone Go project
 generate-rust: ## Generate and test the standalone Rust crate
 	$(GO) run ./cmd/mkasm --codegen rust --output "$(RUST_OUT)" "$(CORPUS)"
 	cd "$(RUST_OUT)" && RUSTFLAGS="-D warnings" $(CARGO) test
+
+generate-x86-rust: ## Generate and test x86 Rust (X86_CORPUS=...json.xz)
+	@test -n "$(X86_CORPUS)" || { echo "X86_CORPUS is required" >&2; exit 2; }
+	xz -dc "$(X86_CORPUS)" | $(GO) run ./cmd/mkasm --arch x86_64 \
+		--codegen rust --output "$(X86_RUST_OUT)" -
+	cd "$(X86_RUST_OUT)" && RUSTFLAGS="-D warnings" $(CARGO) test
 
 build: ## Build and package mkasm for the current platform
 	@set -eu; \
@@ -155,10 +177,12 @@ conformance-asl: ## Cross-check opcode bits and fields against Arm ASL
 		-run 'Corpus|Coverage|CrossCheck' -v -count=1
 
 release-check: ## Verify, build, generate projects, and run LLVM parity
+	@test -n "$(X86_CORPUS)" || { echo "X86_CORPUS is required for the release gate" >&2; exit 2; }
 	@$(MAKE) --no-print-directory verify
 	@$(MAKE) --no-print-directory build
 	@$(MAKE) --no-print-directory generate-go
 	@$(MAKE) --no-print-directory generate-rust
+	@$(MAKE) --no-print-directory generate-x86-rust X86_CORPUS="$(X86_CORPUS)"
 	@$(MAKE) --no-print-directory conformance
 
 clean: ## Remove generated projects and local verification output

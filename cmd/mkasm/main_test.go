@@ -62,6 +62,50 @@ func TestRunCodegenWritesOnlyRequestedProject(t *testing.T) {
 	}
 }
 
+func TestRunX86JSONAndRustCodegen(t *testing.T) {
+	const corpus = `{"version":"3","arch":"x86","records":[{"id":"NOP","rectype":"ENCODING","diagram":{"fields":[{"name":"OP","value":"0x90"}]},"templates":[{"syntax":{"mnem":"NOP","text":"NOP","ast":[]}}]}]}`
+	t.Run("json", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if err := run(context.Background(), []string{"--arch", "x86_64", "--json", "-"}, strings.NewReader(corpus), &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			Schema       string `json:"schema"`
+			Architecture string `json:"architecture"`
+			Encodings    []any  `json:"encodings"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &document); err != nil {
+			t.Fatal(err)
+		}
+		if document.Schema != "mkasm.x86.v1" || document.Architecture != "x86_64" || len(document.Encodings) != 1 {
+			t.Fatalf("bad x86 document: %#v", document)
+		}
+		if !strings.Contains(stderr.String(), "Forms: 1") {
+			t.Fatalf("stderr lacks x86 stats: %s", stderr.String())
+		}
+	})
+
+	t.Run("rust", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "x86-rs")
+		if err := run(context.Background(), []string{"--arch", "amd64", "--codegen", "rust", "--output", output, "-"}, strings.NewReader(corpus), io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"Cargo.toml", "LICENSE", "src/lib.rs"} {
+			if _, err := os.Stat(filepath.Join(output, name)); err != nil {
+				t.Errorf("generated x86 project missing %s: %v", name, err)
+			}
+		}
+	})
+}
+
+func TestRunRejectsX86GoCodegen(t *testing.T) {
+	err := run(context.Background(), []string{"--arch", "x86_64", "--codegen", "go", "--output", t.TempDir(), "-"}, strings.NewReader("{}"), io.Discard, io.Discard)
+	var badUsage *usageError
+	if !errors.As(err, &badUsage) || !strings.Contains(err.Error(), "supports rust") {
+		t.Fatalf("error = %v, want x86 rust-only usage error", err)
+	}
+}
+
 func TestRunAcceptsFileAndURLInputs(t *testing.T) {
 	archive := testCorpus(t)
 	filename := filepath.Join(t.TempDir(), "isa.tar")

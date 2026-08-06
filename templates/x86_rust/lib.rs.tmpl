@@ -1,0 +1,499 @@
+//! Generated allocation-free x86 instruction codec.
+
+const KIND_COUNT: usize = 6;
+const MAP_COUNT: usize = 8;
+const DISPATCH_SIZE: usize = KIND_COUNT * MAP_COUNT * 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Mode {
+    Mode16,
+    Mode32,
+    Mode64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Encoding {
+    pub id: &'static str,
+    pub form_id: &'static str,
+    pub mnemonic: &'static str,
+    pub syntax: &'static str,
+    kind: u8,
+    map: u8,
+    opcode: u8,
+    opcode_plus_reg: bool,
+    mandatory: u8,
+    prefix_mask: u8,
+    prefix_value: u8,
+    modes: u8,
+    w: i8,
+    vector_length: u16,
+    has_modrm: bool,
+    mod_kind: u8,
+    reg_mask: u8,
+    reg_value: u8,
+    rm_mask: u8,
+    rm_value: u8,
+    tail_start: u32,
+    tail_len: u8,
+}
+
+#[derive(Clone, Copy)]
+struct Bucket {
+    start: u32,
+    count: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DecodeError {
+    Truncated,
+    TooLong,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EncodeError {
+    BadForm,
+    BadField,
+    TooLong,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Decoded {
+    pub form_index: u32,
+    pub length: u8,
+    pub alternatives: u16,
+}
+
+impl Decoded {
+    pub fn encoding(&self) -> &'static Encoding {
+        &ENCODINGS[self.form_index as usize]
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EncodeFields {
+    pub mode: Mode,
+    pub address_override: bool,
+    pub mod_bits: u8,
+    pub reg: u8,
+    pub rm: u8,
+    pub scale: u8,
+    pub index: u8,
+    pub base: u8,
+    pub use_sib: bool,
+    pub vvvv: u8,
+    pub opcode_reg: u8,
+    pub displacement: i64,
+    pub immediate: [u64; 4],
+}
+
+impl Default for EncodeFields {
+    fn default() -> Self {
+        Self {
+            mode: Mode::Mode64,
+            address_override: false,
+            mod_bits: 0,
+            reg: 0,
+            rm: 0,
+            scale: 0,
+            index: 0,
+            base: 0,
+            use_sib: false,
+            vvvv: 0,
+            opcode_reg: 0,
+            displacement: 0,
+            immediate: [0; 4],
+        }
+    }
+}
+
+static ENCODINGS: &[Encoding] = &[
+{{.Encodings}}];
+
+static TAILS: &[u8] = &[
+{{.Tails}}];
+
+static BUCKETS: [Bucket; DISPATCH_SIZE] = [
+{{.Buckets}}];
+
+static CANDIDATES: &[u32] = &[
+{{.Candidates}}];
+
+#[derive(Clone, Copy)]
+struct Head {
+    kind: u8,
+    map: u8,
+    opcode: u8,
+    prefix_bits: u8,
+    w: u8,
+    vector_length: u16,
+    address_override: bool,
+    modrm_offset: usize,
+}
+
+pub fn encoding_count() -> usize {
+    ENCODINGS.len()
+}
+
+pub fn encoding(index: usize) -> Option<&'static Encoding> {
+    ENCODINGS.get(index)
+}
+
+pub fn decode(src: &[u8], mode: Mode) -> Result<Decoded, DecodeError> {
+    let head = parse_head(src, mode)?;
+    let bucket = BUCKETS[dispatch_index(head.kind, head.map, head.opcode)];
+    if bucket.count == 0 {
+        return Err(DecodeError::Unknown);
+    }
+    let mut first = None;
+    let mut matches = 0u16;
+    let mut saw_short = false;
+    for offset in 0..bucket.count as usize {
+        let index = CANDIDATES[bucket.start as usize + offset];
+        match match_encoding(src, mode, head, &ENCODINGS[index as usize]) {
+            Match::Yes(length) => {
+                if first.is_none() {
+                    first = Some((index, length));
+                }
+                matches += 1;
+            }
+            Match::Short => saw_short = true,
+            Match::No => {}
+        }
+    }
+    if let Some((form_index, length)) = first {
+        Ok(Decoded { form_index, length: length as u8, alternatives: matches - 1 })
+    } else if saw_short {
+        Err(DecodeError::Truncated)
+    } else {
+        Err(DecodeError::Unknown)
+    }
+}
+
+enum Match {
+    No,
+    Short,
+    Yes(usize),
+}
+
+fn match_encoding(src: &[u8], mode: Mode, head: Head, e: &Encoding) -> Match {
+    if !supports(e.modes, mode)
+        || head.prefix_bits & e.prefix_mask != e.prefix_value
+        || (e.w >= 0 && e.w as u8 != head.w)
+        || (e.vector_length != 0 && e.vector_length != head.vector_length)
+    {
+        return Match::No;
+    }
+    let mut end = head.modrm_offset;
+    if e.has_modrm {
+        match modrm_length(src, mode, head.address_override, head.modrm_offset, e) {
+            Match::Yes(length) => end = length,
+            other => return other,
+        }
+    }
+    for i in 0..e.tail_len as usize {
+        let tail = TAILS[e.tail_start as usize + i];
+        end += tail_bytes(tail, mode, head.prefix_bits & 1 != 0, head.w != 0, head.address_override);
+    }
+    if end > 15 {
+        Match::No
+    } else if end > src.len() {
+        Match::Short
+    } else {
+        Match::Yes(end)
+    }
+}
+
+fn modrm_length(src: &[u8], mode: Mode, address_override: bool, offset: usize, e: &Encoding) -> Match {
+    let Some(&modrm) = src.get(offset) else { return Match::Short };
+    let mod_bits = modrm >> 6;
+    let reg = (modrm >> 3) & 7;
+    let rm = modrm & 7;
+    if (e.mod_kind == 1 && mod_bits == 3)
+        || (e.mod_kind == 2 && mod_bits != 3)
+        || reg & e.reg_mask != e.reg_value
+        || rm & e.rm_mask != e.rm_value
+    {
+        return Match::No;
+    }
+    let mut end = offset + 1;
+    if mod_bits == 3 {
+        return Match::Yes(end);
+    }
+    if effective_address_bits(mode, address_override) == 16 {
+        if mod_bits == 0 && rm == 6 { end += 2; }
+        else if mod_bits == 1 { end += 1; }
+        else if mod_bits == 2 { end += 2; }
+    } else {
+        if rm == 4 {
+            let Some(&sib) = src.get(end) else { return Match::Short };
+            end += 1;
+            if mod_bits == 0 && sib & 7 == 5 { end += 4; }
+        }
+        if mod_bits == 0 && rm == 5 { end += 4; }
+        else if mod_bits == 1 { end += 1; }
+        else if mod_bits == 2 { end += 4; }
+    }
+    if end > src.len() { Match::Short } else { Match::Yes(end) }
+}
+
+fn parse_head(src: &[u8], mode: Mode) -> Result<Head, DecodeError> {
+    if src.is_empty() { return Err(DecodeError::Truncated); }
+    let mut h = Head { kind: 0, map: 0, opcode: 0, prefix_bits: 0, w: 0, vector_length: 0, address_override: false, modrm_offset: 0 };
+    let mut pos = 0usize;
+    while pos < src.len() && pos < 15 {
+        match src[pos] {
+            0x66 => h.prefix_bits |= 1,
+            0xf3 => h.prefix_bits |= 2,
+            0xf2 => h.prefix_bits |= 4,
+            0x67 => h.address_override = true,
+            0xf0 | 0x2e | 0x36 | 0x3e | 0x26 | 0x64 | 0x65 => {}
+            _ => break,
+        }
+        pos += 1;
+    }
+    if pos >= 15 { return Err(DecodeError::TooLong); }
+    if pos >= src.len() { return Err(DecodeError::Truncated); }
+    if mode == Mode::Mode64 && (0x40..=0x4f).contains(&src[pos]) {
+        h.w = (src[pos] >> 3) & 1;
+        pos += 1;
+        if pos >= src.len() { return Err(DecodeError::Truncated); }
+    }
+    match src[pos] {
+        0xc5 => {
+            if pos + 2 >= src.len() { return Err(DecodeError::Truncated); }
+            h.kind = 1; h.map = 1;
+            let p1 = src[pos + 1];
+            h.prefix_bits = prefix_bits_from_pp(p1 & 3);
+            h.vector_length = 128 << ((p1 >> 2) & 1);
+            pos += 2;
+        }
+        0xc4 => {
+            if pos + 3 >= src.len() { return Err(DecodeError::Truncated); }
+            h.kind = 1;
+            h.map = map_from_mmmmm(src[pos + 1] & 0x1f).ok_or(DecodeError::Unknown)?;
+            let p2 = src[pos + 2];
+            h.w = p2 >> 7; h.prefix_bits = prefix_bits_from_pp(p2 & 3);
+            h.vector_length = 128 << ((p2 >> 2) & 1);
+            pos += 3;
+        }
+        0x62 => {
+            if pos + 4 >= src.len() { return Err(DecodeError::Truncated); }
+            h.kind = 2;
+            h.map = map_from_mmmmm(src[pos + 1] & 7).ok_or(DecodeError::Unknown)?;
+            let p1 = src[pos + 2]; let p2 = src[pos + 3];
+            h.w = p1 >> 7; h.prefix_bits = prefix_bits_from_pp(p1 & 3);
+            h.vector_length = match (p2 >> 5) & 3 { 0 => 128, 1 => 256, 2 => 512, _ => return Err(DecodeError::Unknown) };
+            pos += 4;
+        }
+        0x8f if pos + 1 < src.len() && src[pos + 1] & 0x1f >= 8 => {
+            if pos + 3 >= src.len() { return Err(DecodeError::Truncated); }
+            h.kind = 4;
+            h.map = map_from_mmmmm(src[pos + 1] & 0x1f).ok_or(DecodeError::Unknown)?;
+            let p2 = src[pos + 2];
+            h.w = p2 >> 7; h.prefix_bits = prefix_bits_from_pp(p2 & 3);
+            h.vector_length = 128 << ((p2 >> 2) & 1);
+            pos += 3;
+        }
+        _ => {}
+    }
+    if h.kind == 0 && src[pos] == 0x0f {
+        pos += 1;
+        if pos >= src.len() { return Err(DecodeError::Truncated); }
+        match src[pos] {
+            0x38 => { h.map = 2; pos += 1; }
+            0x3a => { h.map = 3; pos += 1; }
+            0x0f => return Err(DecodeError::Unknown),
+            _ => h.map = 1,
+        }
+    }
+    if pos >= src.len() { return Err(DecodeError::Truncated); }
+    h.opcode = src[pos];
+    h.modrm_offset = pos + 1;
+    Ok(h)
+}
+
+pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Result<usize, EncodeError> {
+    let e = ENCODINGS.get(form_index).ok_or(EncodeError::BadForm)?;
+    if !supports(e.modes, fields.mode)
+        || fields.reg > 31 || fields.rm > 31 || fields.index > 31 || fields.base > 31
+        || fields.vvvv > 31 || fields.opcode_reg > 15 || fields.mod_bits > 3 || fields.scale > 3
+        || (e.kind != 2 && (fields.reg > 15 || fields.rm > 15 || fields.index > 15 || fields.base > 15 || fields.vvvv > 15))
+        || (e.reg_mask != 0 && fields.reg & e.reg_mask != e.reg_value)
+        || (e.rm_mask != 0 && fields.rm & e.rm_mask != e.rm_value)
+        || (e.mod_kind == 1 && fields.mod_bits == 3)
+        || (e.mod_kind == 2 && fields.mod_bits != 3)
+    {
+        return Err(EncodeError::BadField);
+    }
+    let mut pos = 0usize;
+    if fields.address_override { push(out, &mut pos, 0x67)?; }
+    if e.kind == 0 {
+        if let Some(prefix) = mandatory_prefix_byte(e.mandatory) { push(out, &mut pos, prefix)?; }
+        let mut rex = 0u8;
+        if fields.mode == Mode::Mode64 {
+            if e.w == 1 { rex |= 8; }
+            rex |= (fields.reg >> 3 & 1) << 2;
+            if e.opcode_plus_reg { rex |= fields.opcode_reg >> 3 & 1; }
+            else if fields.use_sib { rex |= (fields.index >> 3 & 1) << 1; rex |= fields.base >> 3 & 1; }
+            else { rex |= fields.rm >> 3 & 1; }
+        }
+        if rex != 0 { push(out, &mut pos, 0x40 | rex)?; }
+        put_opcode_map(out, &mut pos, e.map)?;
+        push(out, &mut pos, e.opcode | if e.opcode_plus_reg { fields.opcode_reg & 7 } else { 0 })?;
+    } else {
+        let (prefix, count) = vector_prefix(e, fields)?;
+        for byte in prefix.iter().take(count) { push(out, &mut pos, *byte)?; }
+        push(out, &mut pos, e.opcode)?;
+    }
+    if e.has_modrm {
+        push(out, &mut pos, fields.mod_bits << 6 | (fields.reg & 7) << 3 | fields.rm & 7)?;
+        if fields.mod_bits != 3 {
+            let address_bits = effective_address_bits(fields.mode, fields.address_override);
+            let base = if fields.use_sib {
+                if address_bits == 16 || fields.rm & 7 != 4 { return Err(EncodeError::BadField); }
+                push(out, &mut pos, fields.scale << 6 | (fields.index & 7) << 3 | fields.base & 7)?;
+                fields.base & 7
+            } else { fields.rm & 7 };
+            let width = displacement_bytes(fields.mod_bits, base, address_bits);
+            write_little(out, &mut pos, fields.displacement as u64, width)?;
+        }
+    }
+    for i in 0..e.tail_len as usize {
+        let tail = TAILS[e.tail_start as usize + i];
+        let width = tail_bytes(tail, fields.mode, e.mandatory == 1, e.w == 1, fields.address_override);
+        write_little(out, &mut pos, fields.immediate[i], width)?;
+    }
+    Ok(pos)
+}
+
+fn vector_prefix(e: &Encoding, f: EncodeFields) -> Result<([u8; 4], usize), EncodeError> {
+    let mut out = [0u8; 4];
+    let map = mmmmm_from_map(e.map).ok_or(EncodeError::BadField)?;
+    let pp = pp_from_mandatory(e.mandatory);
+    let w = u8::from(e.w == 1);
+    let l = u8::from(e.vector_length == 256);
+    let r = f.reg >> 3 & 1;
+    let x = if e.kind == 2 && f.mod_bits == 3 { f.rm >> 4 & 1 } else { f.index >> 3 & 1 };
+    let b = if f.use_sib { f.base >> 3 & 1 } else { f.rm >> 3 & 1 };
+    match e.kind {
+        1 if e.map == 1 && w == 0 && x == 0 && b == 0 => {
+            out[0] = 0xc5; out[1] = (!r & 1) << 7 | (!f.vvvv & 15) << 3 | l << 2 | pp;
+            Ok((out, 2))
+        }
+        1 | 4 => {
+            out[0] = if e.kind == 1 { 0xc4 } else { 0x8f };
+            out[1] = (!r & 1) << 7 | (!x & 1) << 6 | (!b & 1) << 5 | map;
+            out[2] = w << 7 | (!f.vvvv & 15) << 3 | l << 2 | pp;
+            Ok((out, 3))
+        }
+        2 => {
+            let ll = match e.vector_length { 256 => 1, 512 => 2, _ => 0 };
+            out[0] = 0x62;
+            out[1] = (!(f.reg >> 4) & 1) << 7 | (!x & 1) << 6 | (!b & 1) << 5 | (!r & 1) << 4 | map & 3;
+            out[2] = w << 7 | (!f.vvvv & 15) << 3 | 1 << 2 | pp;
+            out[3] = ll << 5 | (!(f.vvvv >> 4) & 1) << 3;
+            Ok((out, 4))
+        }
+        3 | 5 => Err(EncodeError::Unsupported),
+        _ => Err(EncodeError::BadField),
+    }
+}
+
+fn push(out: &mut [u8; 15], pos: &mut usize, byte: u8) -> Result<(), EncodeError> {
+    if *pos >= 15 { return Err(EncodeError::TooLong); }
+    out[*pos] = byte; *pos += 1; Ok(())
+}
+
+fn write_little(out: &mut [u8; 15], pos: &mut usize, value: u64, width: usize) -> Result<(), EncodeError> {
+    if *pos + width > 15 { return Err(EncodeError::TooLong); }
+    for i in 0..width { out[*pos + i] = (value >> (8 * i)) as u8; }
+    *pos += width; Ok(())
+}
+
+fn put_opcode_map(out: &mut [u8; 15], pos: &mut usize, map: u8) -> Result<(), EncodeError> {
+    match map {
+        0 => Ok(()),
+        1 => push(out, pos, 0x0f),
+        2 => { push(out, pos, 0x0f)?; push(out, pos, 0x38) }
+        3 => { push(out, pos, 0x0f)?; push(out, pos, 0x3a) }
+        _ => Err(EncodeError::BadField),
+    }
+}
+
+fn dispatch_index(kind: u8, map: u8, opcode: u8) -> usize { (kind as usize * MAP_COUNT + map as usize) * 256 + opcode as usize }
+fn supports(mask: u8, mode: Mode) -> bool { mask & match mode { Mode::Mode16 => 1, Mode::Mode32 => 2, Mode::Mode64 => 4 } != 0 }
+fn prefix_bits_from_pp(pp: u8) -> u8 { match pp { 1 => 1, 2 => 2, 3 => 4, _ => 0 } }
+fn map_from_mmmmm(map: u8) -> Option<u8> { match map { 1 => Some(1), 2 => Some(2), 3 => Some(3), 8 => Some(5), 9 => Some(6), 10 => Some(7), _ => None } }
+fn mmmmm_from_map(map: u8) -> Option<u8> { match map { 1 => Some(1), 2 => Some(2), 3 => Some(3), 5 => Some(8), 6 => Some(9), 7 => Some(10), _ => None } }
+fn mandatory_prefix_byte(prefix: u8) -> Option<u8> { match prefix { 1 => Some(0x66), 2 => Some(0xf3), 3 => Some(0xf2), _ => None } }
+fn pp_from_mandatory(prefix: u8) -> u8 { match prefix { 1 => 1, 2 => 2, 3 => 3, _ => 0 } }
+
+fn effective_operand_bits(mode: Mode, override_: bool, w: bool) -> usize {
+    match mode {
+        Mode::Mode16 => if override_ { 32 } else { 16 },
+        Mode::Mode32 => if override_ { 16 } else { 32 },
+        Mode::Mode64 => if w { 64 } else if override_ { 16 } else { 32 },
+    }
+}
+
+fn effective_address_bits(mode: Mode, override_: bool) -> usize {
+    match mode {
+        Mode::Mode16 => if override_ { 32 } else { 16 },
+        Mode::Mode32 => if override_ { 16 } else { 32 },
+        Mode::Mode64 => if override_ { 32 } else { 64 },
+    }
+}
+
+fn tail_bytes(tail: u8, mode: Mode, operand_override: bool, w: bool, address_override: bool) -> usize {
+    match tail {
+        1 => 1, 2 => 2, 3 => 4, 4 => 8,
+        5 => if effective_operand_bits(mode, operand_override, w) == 16 { 2 } else { 4 },
+        6 => effective_operand_bits(mode, operand_override, w) / 8,
+        7 => effective_address_bits(mode, address_override) / 8,
+        8 => if effective_operand_bits(mode, operand_override, w) == 16 { 4 } else { 6 },
+        _ => 0,
+    }
+}
+
+fn displacement_bytes(mod_bits: u8, base: u8, address_bits: usize) -> usize {
+    if address_bits == 16 {
+        if mod_bits == 0 && base == 6 { 2 } else if mod_bits == 1 { 1 } else if mod_bits == 2 { 2 } else { 0 }
+    } else if mod_bits == 0 && base == 5 { 4 }
+    else if mod_bits == 1 { 1 }
+    else if mod_bits == 2 { 4 }
+    else { 0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn find_form(id: &str, mod_kind: u8) -> Option<usize> {
+        ENCODINGS.iter().position(|e| e.id == id && e.mod_kind == mod_kind)
+    }
+
+    #[test]
+    fn representative_decode_and_encode() {
+        let cases: &[(&[u8], &str)] = &[
+            (&[0x90], "NOP"),
+            (&[0x48, 0x01, 0xc8], "ADD"),
+            (&[0xf3, 0x0f, 0x1e, 0xfa], "ENDBR64"),
+            (&[0xc5, 0xed, 0xfe, 0xcb], "VPADDD"),
+            (&[0x62, 0xf1, 0x7d, 0x48, 0xef, 0xc0], "VPXORD"),
+        ];
+        for (bytes, mnemonic) in cases {
+            if !ENCODINGS.iter().any(|e| e.mnemonic == *mnemonic) { continue; }
+            let decoded = decode(bytes, Mode::Mode64).unwrap();
+            assert_eq!(decoded.encoding().mnemonic, *mnemonic);
+            assert_eq!(decoded.length as usize, bytes.len());
+        }
+
+        if let Some(add) = find_form("ADD_rm64_r64", 2) {
+            let mut out = [0u8; 15];
+            let length = encode(add, EncodeFields { mod_bits: 3, reg: 1, rm: 0, ..Default::default() }, &mut out).unwrap();
+            assert_eq!(&out[..length], &[0x48, 0x01, 0xc8]);
+        }
+    }
+}

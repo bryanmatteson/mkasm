@@ -92,8 +92,9 @@ func emitRustInsnTests(s *AsmSurface) string {
 //
 // The typed methods cover the encodings whose operands could be typed; this
 // covers all of them, which is what makes "every encoding in the spec" a checked
-// claim rather than a count of generated functions. Each encoder is called with
-// zero in every settable field and the word decoded back.
+// claim rather than a count of generated functions. A zero-field word is decoded
+// back only when it satisfies the encoding's bitdiff constraints; every encoder
+// is independently cross-checked against the table encoder with non-zero fields.
 func emitExactEncoderTests(s *AsmSurface) string {
 	var b strings.Builder
 	b.WriteString(`
@@ -139,8 +140,10 @@ fn chk(bad: &mut Vec<String>, id: &'static str, alias_of: &'static str, w: u32) 
 			for range e.Fields {
 				args = append(args, "0")
 			}
-			fmt.Fprintf(&b, "    chk(&mut bad, %q, %q, { let mut a = Assembler::new(); a.%s(%s); a.words()[0] });\n",
-				e.EncodingID, e.AliasOf, e.Fn, strings.Join(args, ", "))
+			if e.FixedLegal {
+				fmt.Fprintf(&b, "    chk(&mut bad, %q, %q, { let mut a = Assembler::new(); a.%s(%s); a.words()[0] });\n",
+					e.EncodingID, e.AliasOf, e.Fn, strings.Join(args, ", "))
+			}
 
 			// Same encoder again with a distinct value per field, cross-checked
 			// against the table-driven encoder. A field written at the wrong

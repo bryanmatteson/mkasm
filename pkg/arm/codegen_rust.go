@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
+	"github.com/bryanmatteson/mkasm/pkg/decoder"
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 	"github.com/bryanmatteson/mkasm/templates"
 )
 
@@ -51,7 +54,10 @@ func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
 		return err
 	}
 
-	decData := struct{ Table string }{Table: emitRustDecodeTable(catalog)}
+	decData, err := buildRustDecoderData(catalog)
+	if err != nil {
+		return err
+	}
 	if err := execTmplWrite(tmpl, "decoders.rs.tmpl", filepath.Join(srcDir, "decoders.rs"), decData); err != nil {
 		return err
 	}
@@ -73,6 +79,9 @@ func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
 		example = "example.rs.tmpl"
 	}
 	if err := execTmplWrite(tmpl, example, filepath.Join(exDir, "hello.rs"), cargoData); err != nil {
+		return err
+	}
+	if err := execTmplWrite(tmpl, "decode_bench.rs.tmpl", filepath.Join(exDir, "decode_bench.rs"), cargoData); err != nil {
 		return err
 	}
 	// Operand placement checked against LLVM's assembler. The round-trip tests
@@ -219,26 +228,263 @@ func emitRustDecodeTable(c *Catalog) string {
 		var fields []string
 		for _, f := range e.Fields {
 			fields = append(fields, fmt.Sprintf(
-				"FieldDef { name: %s, start: %d, end: %d, fixed: %v }",
-				rustStringLiteral(f.Name), f.Start, f.End, f.Fixed))
+				"FieldDef { name: %s, start: %d, end: %d }",
+				rustStringLiteral(f.Name), f.Start, f.End))
 		}
 		fieldLit := "&[]"
 		if len(fields) > 0 {
 			fieldLit = "&[" + strings.Join(fields, ", ") + "]"
 		}
 		fmt.Fprintf(&b,
-			"    Entry { mask: 0x%08X, value: 0x%08X, mnemonic: %s, encoding_id: %s, class: %s, pattern: %s, alias_of: %s, fields: %s },\n",
+			"    Entry { mask: 0x%08X, value: 0x%08X, mnemonic: %s, encoding_id: %s, class: %s, alias_of: %s, fields: %s, bitdiff: %s },\n",
 			e.Mask, e.Value,
 			rustStringLiteral(e.Mnemonic),
 			rustStringLiteral(e.EncodingID),
 			rustStringLiteral(e.Class),
-			rustStringLiteral(e.Pattern),
 			rustStringLiteral(e.AliasOf),
 			fieldLit,
+			emitRustBitDiff(e.BitDiffs),
 		)
 	}
 	b.WriteString("];\n")
 	return b.String()
+}
+
+type rustDecoderData struct {
+	Table      string
+	Nodes      string
+	Edges      string
+	Candidates string
+	Untreed    string
+	Root       string
+}
+
+type rustFlatNode struct {
+	mask       uint32
+	edges      []rustEdge
+	candidates []uint16
+}
+
+type rustEdge struct {
+	value uint32
+	node  uint32
+}
+
+// buildRustDecoderData emits the same wildcard-aware decision tree used by the
+// generated Go decoder. Rust used to ignore this tree and linearly scan the
+// complete catalog while allocating a Vec and BTreeMap for every instruction.
+func buildRustDecoderData(c *Catalog) (rustDecoderData, error) {
+	if c == nil || len(c.Entries) == 0 {
+		return rustDecoderData{}, fmt.Errorf("rust decoder: empty catalog")
+	}
+	if len(c.Entries) > int(^uint16(0)) {
+		return rustDecoderData{}, fmt.Errorf("rust decoder: %d encodings exceed u16 index capacity", len(c.Entries))
+	}
+
+	instructions := make([]*ir.InstructionIR, 0, len(c.Entries))
+	for _, e := range c.Entries {
+		fields := make([]ir.BitField, 0, len(e.Fields))
+		for _, f := range e.Fields {
+			var fixed *uint64
+			if f.Fixed {
+				value := uint64(0)
+				fixed = &value
+			}
+			fields = append(fields, ir.BitField{
+				Name: f.Name, Start: f.Start, End: f.End, Fixed: fixed,
+			})
+		}
+		instructions = append(instructions, &ir.InstructionIR{
+			Mnemonic: e.Mnemonic, EncodingID: e.EncodingID, IClass: e.Class,
+			BitPattern: e.Pattern, AliasOf: e.AliasOf, BitDiffsTree: e.BitDiffs,
+			Encoding: ir.EncodingMask{Width: 32, Fields: fields},
+		})
+	}
+
+	tree := (&decoder.DecoderTreeBuilder{}).BuildTree(instructions, nil)
+	idIndex := make(map[string]uint16, len(c.Entries))
+	for i, e := range c.Entries {
+		idIndex[e.EncodingID] = uint16(i)
+	}
+
+	covered := make([]bool, len(c.Entries))
+	var nodes []rustFlatNode
+	var flatten func(*ir.DecoderNode) uint32
+	flatten = func(n *ir.DecoderNode) uint32 {
+		idx := uint32(len(nodes))
+		nodes = append(nodes, rustFlatNode{})
+		flat := rustFlatNode{mask: n.Mask}
+		if n.Instruction != nil {
+			if entry, ok := idIndex[n.Instruction.EncodingID]; ok {
+				flat.candidates = append(flat.candidates, entry)
+				covered[entry] = true
+			}
+		}
+		for _, candidate := range n.Ambiguous {
+			if candidate == nil {
+				continue
+			}
+			if entry, ok := idIndex[candidate.EncodingID]; ok {
+				flat.candidates = append(flat.candidates, entry)
+				covered[entry] = true
+			}
+		}
+		type child struct {
+			value uint32
+			node  *ir.DecoderNode
+		}
+		children := make([]child, 0, len(n.Children))
+		for _, c := range n.Children {
+			if c != nil {
+				children = append(children, child{value: c.Value, node: c})
+			}
+		}
+		sort.Slice(children, func(i, j int) bool { return children[i].value < children[j].value })
+		for _, c := range children {
+			flat.edges = append(flat.edges, rustEdge{value: c.value, node: flatten(c.node)})
+		}
+		nodes[idx] = flat
+		return idx
+	}
+
+	root := "None"
+	if tree != nil && tree.Root != nil {
+		root = fmt.Sprintf("Some(%d)", flatten(tree.Root))
+	}
+
+	var edges []rustEdge
+	var candidates []uint16
+	var nodesLit strings.Builder
+	nodesLit.WriteString("static NODES: &[Node] = &[\n")
+	for _, node := range nodes {
+		edgeStart := len(edges)
+		candidateStart := len(candidates)
+		edges = append(edges, node.edges...)
+		candidates = append(candidates, node.candidates...)
+		fmt.Fprintf(&nodesLit,
+			"    Node { mask: 0x%08X, edge_start: %d, edge_len: %d, candidate_start: %d, candidate_len: %d },\n",
+			node.mask, edgeStart, len(node.edges), candidateStart, len(node.candidates))
+	}
+	nodesLit.WriteString("];\n")
+
+	var edgesLit strings.Builder
+	edgesLit.WriteString("static EDGES: &[Edge] = &[\n")
+	for _, edge := range edges {
+		fmt.Fprintf(&edgesLit, "    Edge { value: 0x%08X, node: %d },\n", edge.value, edge.node)
+	}
+	edgesLit.WriteString("];\n")
+
+	var candidatesLit strings.Builder
+	candidatesLit.WriteString("static CANDIDATES: &[u16] = &[")
+	for i, candidate := range candidates {
+		if i > 0 {
+			candidatesLit.WriteString(", ")
+		}
+		fmt.Fprintf(&candidatesLit, "%d", candidate)
+	}
+	candidatesLit.WriteString("];\n")
+
+	var untreedLit strings.Builder
+	untreedLit.WriteString("static UNTRED: &[u16] = &[")
+	first := true
+	for i, ok := range covered {
+		if ok {
+			continue
+		}
+		if !first {
+			untreedLit.WriteString(", ")
+		}
+		first = false
+		fmt.Fprintf(&untreedLit, "%d", i)
+	}
+	untreedLit.WriteString("];\n")
+
+	return rustDecoderData{
+		Table:      emitRustDecodeTable(c),
+		Nodes:      nodesLit.String(),
+		Edges:      edgesLit.String(),
+		Candidates: candidatesLit.String(),
+		Untreed:    untreedLit.String(),
+		Root:       root,
+	}, nil
+}
+
+func emitRustBitDiff(n *ir.BitDiffNode) string {
+	if n == nil {
+		return "None"
+	}
+	return "Some(&" + emitRustBitDiffNode(n) + ")"
+}
+
+func emitRustBitDiffNode(n *ir.BitDiffNode) string {
+	if n == nil {
+		return "BitDiff::Always"
+	}
+	switch n.Kind {
+	case ir.BitDiffAnd:
+		parts := make([]string, 0, len(n.Kids))
+		for _, child := range n.Kids {
+			parts = append(parts, emitRustBitDiffNode(child))
+		}
+		return "BitDiff::And(&[" + strings.Join(parts, ", ") + "])"
+	case ir.BitDiffNot:
+		if len(n.Kids) == 0 {
+			return "BitDiff::Always"
+		}
+		return "BitDiff::Not(&" + emitRustBitDiffNode(n.Kids[0]) + ")"
+	default:
+		if n.Atom == nil || n.Atom.Start < 0 || n.Atom.End < n.Atom.Start || n.Atom.End > 31 {
+			return "BitDiff::Always"
+		}
+		a := n.Atom
+		op := "Eq"
+		switch a.Op {
+		case ir.BitDiffNe:
+			op = "Ne"
+		case ir.BitDiffIn:
+			op = "In"
+		}
+		width := a.End - a.Start + 1
+		alts := make([]string, 0, len(a.Alts))
+		for _, alt := range a.Alts {
+			mask, value := rustBitPattern(alt, width)
+			alts = append(alts, fmt.Sprintf("BitPattern { mask: 0x%08X, value: 0x%08X }", mask, value))
+		}
+		mask, value := rustBitPattern(a.Bits, width)
+		return fmt.Sprintf(
+			"BitDiff::Atom { start: %d, end: %d, op: BitDiffOp::%s, bits: BitPattern { mask: 0x%08X, value: 0x%08X }, alts: &[%s] }",
+			a.Start, a.End, op, mask, value, strings.Join(alts, ", "))
+	}
+}
+
+// rustBitPattern mirrors ir's bitdiff normalization and compiles a textual
+// MSB-first 0/1/x value into a mask/value pair over the extracted field.
+func rustBitPattern(pattern string, width int) (mask, value uint32) {
+	pattern = strings.TrimSpace(pattern)
+	pattern = strings.Trim(pattern, "'\"()")
+	var normalized strings.Builder
+	for _, r := range pattern {
+		if r == '0' || r == '1' || r == 'x' || r == 'X' {
+			normalized.WriteRune(r)
+		}
+	}
+	pattern = normalized.String()
+	if len(pattern) < width {
+		pattern = strings.Repeat("0", width-len(pattern)) + pattern
+	} else if len(pattern) > width {
+		pattern = pattern[len(pattern)-width:]
+	}
+	for i := 0; i < len(pattern); i++ {
+		shift := uint(len(pattern) - 1 - i)
+		switch pattern[i] {
+		case '0':
+			mask |= 1 << shift
+		case '1':
+			mask |= 1 << shift
+			value |= 1 << shift
+		}
+	}
+	return mask, value
 }
 
 func emitRustRegistryTable(c *Catalog) string {

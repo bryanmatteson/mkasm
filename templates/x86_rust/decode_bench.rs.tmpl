@@ -1,0 +1,51 @@
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::hint::black_box;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
+use x86_64::{decode, Mode};
+
+struct CountingAllocator;
+static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+fn main() {
+    let iterations = std::env::args().nth(1).and_then(|s| s.parse::<usize>().ok()).unwrap_or(1_000_000);
+    let probes: &[&[u8]] = &[
+        &[0x90],
+        &[0x48, 0x01, 0xc8],
+        &[0x48, 0x01, 0x4c, 0x24, 0x08],
+        &[0xf3, 0x0f, 0x1e, 0xfa],
+        &[0xc5, 0xed, 0xfe, 0xcb],
+        &[0x62, 0xf1, 0x7d, 0x48, 0xef, 0xc0],
+    ];
+    for bytes in probes { black_box(decode(bytes, Mode::Mode64).unwrap()); }
+    ALLOCATIONS.store(0, Ordering::SeqCst);
+    let started = Instant::now();
+    let mut checksum = 0u64;
+    for i in 0..iterations {
+        let decoded = decode(black_box(probes[i % probes.len()]), Mode::Mode64).unwrap();
+        checksum = checksum.wrapping_add(decoded.form_index as u64);
+    }
+    let elapsed = started.elapsed();
+    println!(
+        "iterations={} elapsed_ns={} ns_per_decode={:.2} allocations={} checksum={}",
+        iterations,
+        elapsed.as_nanos(),
+        elapsed.as_nanos() as f64 / iterations as f64,
+        ALLOCATIONS.load(Ordering::SeqCst),
+        black_box(checksum),
+    );
+}

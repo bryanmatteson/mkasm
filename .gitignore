@@ -9,3 +9,4 @@ coverage.out
 /dist/
 /output/
 /output-rs/
+/output-x86-rs/
