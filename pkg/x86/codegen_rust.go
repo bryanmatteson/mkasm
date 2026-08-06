@@ -76,8 +76,9 @@ func buildRustCodegenData(catalog *Catalog, decoder *Decoder) rustCodegenData {
 	tailOffset := 0
 	operandOffset := 0
 	for _, e := range catalog.Encodings {
-		fmt.Fprintf(&encodings, "    Encoding { id: %s, form_id: %s, mnemonic: %s, syntax: %s, kind: %d, map: %d, opcode: 0x%02x, opcode_plus_reg: %t, mandatory: %d, prefix_mask: %d, prefix_value: %d, modes: %d, w: %d, operand_size: %d, vector_length: %d, tuple: %s, has_modrm: %t, mod_kind: %d, reg_mask: %d, reg_value: %d, rm_mask: %d, rm_value: %d, tail_start: %d, tail_len: %d, operand_start: %d, operand_len: %d },\n",
+		fmt.Fprintf(&encodings, "    Encoding { id: %s, form_id: %s, mnemonic: %s, syntax: %s, flow_control: FlowControl::%s, kind: %d, map: %d, opcode: 0x%02x, opcode_plus_reg: %t, mandatory: %d, prefix_mask: %d, prefix_value: %d, modes: %d, w: %d, operand_size: %d, vector_length: %d, tuple: %s, has_modrm: %t, mod_kind: %d, reg_mask: %d, reg_value: %d, rm_mask: %d, rm_value: %d, tail_start: %d, tail_len: %d, operand_start: %d, operand_len: %d },\n",
 			rustString(e.ID), rustString(e.FormID), rustString(e.Mnemonic), rustString(e.Syntax),
+			classifyFlowControl(e),
 			e.Kind, e.Map, e.Opcode, e.OpcodePlusReg, e.MandatoryPrefix,
 			e.PrefixMask, e.PrefixValue, e.Modes, e.W, e.OperandSize, e.VectorLength, rustString(e.Tuple),
 			e.HasModRM, e.Mod, e.RegMask, e.RegValue, e.RMMask, e.RMValue,
@@ -122,6 +123,47 @@ func buildRustCodegenData(catalog *Catalog, decoder *Decoder) rustCodegenData {
 		Encodings: encodings.String(), Tails: tails.String(), Operands: operands.String(),
 		Buckets: buckets.String(), Candidates: candidates.String(),
 	}
+}
+
+func classifyFlowControl(encoding Encoding) string {
+	mnemonic := strings.ToUpper(encoding.Mnemonic)
+	direct := false
+	for _, operand := range encoding.Operands {
+		if operand.Suppressed {
+			continue
+		}
+		direct = operand.Type == "REL" || operand.Type == "PTR"
+		break
+	}
+	switch mnemonic {
+	case "CALL", "SYSCALL", "SYSENTER", "VMCALL", "VMLAUNCH", "VMRESUME", "VMMCALL", "VMRUN":
+		if direct {
+			return "Call"
+		}
+		if mnemonic == "CALL" {
+			return "IndirectCall"
+		}
+		return "Call"
+	case "JMP":
+		if direct {
+			return "UnconditionalBranch"
+		}
+		return "IndirectBranch"
+	case "RET", "RETF", "IRET", "IRETD", "IRETQ", "RSM", "SKINIT", "SYSEXIT", "SYSRET":
+		return "Return"
+	case "INT", "INT1", "INT3", "INTO":
+		return "Interrupt"
+	case "UD0", "UD1", "UD2":
+		return "Exception"
+	case "XBEGIN":
+		return "Transactional"
+	case "JCXZ", "JECXZ", "JRCXZ", "LOOP", "LOOPE", "LOOPNE", "LOOPNZ", "LOOPZ":
+		return "ConditionalBranch"
+	}
+	if strings.HasPrefix(mnemonic, "J") {
+		return "ConditionalBranch"
+	}
+	return "Next"
 }
 
 func executeRustTemplate(tmpl *template.Template, name, path string, data any) error {

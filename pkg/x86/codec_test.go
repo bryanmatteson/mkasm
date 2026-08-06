@@ -35,6 +35,13 @@ func codecCatalog() *Catalog {
 		{ID: "PUSH_r64", FormID: "PUSH_r64/0", Mnemonic: "PUSH", Kind: EncodingLegacy, Map: MapPrimary, Opcode: 0x50, OpcodePlusReg: true, Modes: mode64, W: BitAny, Operands: []Operand{
 			{Type: "REG", Symbol: "GPR64", EncodedIn: "OPCODE", Read: true},
 		}},
+		{ID: "CALL_rel32", FormID: "CALL_rel32/0", Mnemonic: "CALL", Kind: EncodingLegacy, Map: MapPrimary, Opcode: 0xe8, Modes: mode64, W: BitAny, Tail: []TailWidth{Tail32}, Operands: []Operand{
+			{Type: "REL", Symbol: "REL", EncodedIn: "RD", Read: true},
+		}},
+		{ID: "LEA_r64_m", FormID: "LEA_r64_m/0", Mnemonic: "LEA", Kind: EncodingLegacy, Map: MapPrimary, Opcode: 0x8d, Modes: mode64, W: BitOne, HasModRM: true, Mod: ModMemory, Operands: []Operand{
+			{Type: "REG", Symbol: "GPR64", EncodedIn: "REG", Write: true},
+			{Type: "AGEN", Symbol: "MEM", EncodedIn: "RM", Size: "64", Read: true},
+		}},
 	}}
 }
 

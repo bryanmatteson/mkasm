@@ -185,8 +185,8 @@ func writeTestFile(t *testing.T, path, contents string) {
 	}
 }
 
-const icedOperandOracleSource = `use iced_x86::{CC_a, CC_ae, CC_e, CC_g, CC_ge, CC_ne, Decoder, DecoderOptions, Formatter, IntelFormatter, MemorySizeOptions, NumberBase, OpKind};
-use mkasm::{Mode, OperandKind, RegisterClass};
+const icedOperandOracleSource = `use iced_x86::{CC_a, CC_ae, CC_e, CC_g, CC_ge, CC_ne, Decoder, DecoderOptions, Encoder, FlowControl as IcedFlowControl, Formatter, InstructionInfoFactory, IntelFormatter, MemorySizeOptions, NumberBase, OpAccess, OpKind};
+use mkasm::{FlowControl, Mode, OperandKind, RegisterClass, RelocateError};
 
 include!("cases.rs");
 
@@ -283,9 +283,52 @@ fn iced_register_view_quirk(code: &str) -> bool {
         code.starts_with("Verr_r32m16") || code.starts_with("Verw_r32m16")
 }
 
+fn flow_equal(ours: FlowControl, iced: IcedFlowControl) -> bool {
+    matches!((ours, iced),
+        (FlowControl::Next, IcedFlowControl::Next) |
+        (FlowControl::Call, IcedFlowControl::Call) |
+        (FlowControl::Return, IcedFlowControl::Return) |
+        (FlowControl::UnconditionalBranch, IcedFlowControl::UnconditionalBranch) |
+        (FlowControl::ConditionalBranch, IcedFlowControl::ConditionalBranch) |
+        (FlowControl::IndirectCall, IcedFlowControl::IndirectCall) |
+        (FlowControl::IndirectBranch, IcedFlowControl::IndirectBranch) |
+        (FlowControl::Interrupt, IcedFlowControl::Interrupt) |
+        (FlowControl::Exception, IcedFlowControl::Exception) |
+        (FlowControl::Transactional, IcedFlowControl::XbeginXabortXend))
+}
+
+fn access_equal(ours: mkasm::Access, iced: OpAccess) -> bool {
+    let read = matches!(iced, OpAccess::Read | OpAccess::CondRead | OpAccess::ReadWrite | OpAccess::ReadCondWrite);
+    let write = matches!(iced, OpAccess::Write | OpAccess::CondWrite | OpAccess::ReadWrite | OpAccess::ReadCondWrite);
+    (ours.read || ours.conditional_read) == read &&
+        (ours.write || ours.conditional_write) == write
+}
+
+fn access_oracle_mnemonic(mnemonic: &str) -> bool {
+    matches!(mnemonic, "mov" | "movsx" | "movsxd" | "movzx" | "lea" | "add" | "sub" |
+        "and" | "sal" | "sar" | "shl" | "shr" | "cmp" | "test" | "div" | "idiv" | "mul" | "imul")
+}
+
+fn implicit_oracle_mnemonic(mnemonic: &str) -> bool {
+    matches!(mnemonic, "div" | "idiv" | "mul" | "imul" | "cwd" | "cdq" | "cqo")
+}
+
+fn gpr_number(name: &str) -> Option<u8> {
+    match name {
+        "al" | "ah" | "ax" | "eax" | "rax" => Some(0),
+        "cl" | "ch" | "cx" | "ecx" | "rcx" => Some(1),
+        "dl" | "dh" | "dx" | "edx" | "rdx" => Some(2),
+        "bl" | "bh" | "bx" | "ebx" | "rbx" => Some(3),
+        _ => None,
+    }
+}
+
 fn main() {
     let (mut checked, mut skipped, mut unsupported, mut bad) = (0usize, 0usize, 0usize, 0usize);
     let (mut formatted, mut format_bad) = (0usize, 0usize);
+    let (mut flow_checked, mut flow_bad, mut access_checked, mut access_bad, mut access_incomparable) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut target_checked, mut target_bad, mut implicit_checked, mut implicit_bad, mut implicit_incomparable) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut info_factory = InstructionInfoFactory::new();
     for (bytes, bits) in CASES {
         let mode = match bits { 16 => Mode::Mode16, 32 => Mode::Mode32, _ => Mode::Mode64 };
         let ours = match mkasm::decode(bytes, mode) { Ok(value) => value, Err(error) => {
@@ -294,6 +337,9 @@ fn main() {
         let mut decoder = Decoder::with_ip(*bits, bytes, 0x1000, DecoderOptions::MPX | DecoderOptions::KNC);
         let iced = decoder.decode();
         if iced.is_invalid() || iced.len() != bytes.len() { unsupported += 1; continue; }
+        if flow_equal(ours.flow_control(), iced.flow_control()) { flow_checked += 1; }
+        else { eprintln!("flow mismatch {:02x?}: mkasm={:?} iced={:?}", bytes, ours.flow_control(), iced.flow_control()); flow_bad += 1; }
+        let info = info_factory.info(&iced);
         let mkasm_text = ours.format_intel(0x1000);
         let iced_text = format_iced(&iced);
         if mkasm_text == iced_text { formatted += 1; }
@@ -302,6 +348,57 @@ fn main() {
             format_bad += 1;
         }
         let explicit: Vec<_> = ours.operands().iter().filter(|operand| !operand.implicit && operand.kind != OperandKind::Mask).collect();
+        for (index, operand) in explicit.iter().enumerate().take(iced.op_count() as usize) {
+            let iced_access = info.op_access(index as u32);
+            if !access_oracle_mnemonic(&ours.encoding().mnemonic.to_lowercase()) ||
+                !matches!(operand.kind, OperandKind::Register | OperandKind::Memory) ||
+                matches!(iced_access, OpAccess::None | OpAccess::NoMemAccess) ||
+                operand.access.conditional_read || operand.access.conditional_write {
+                access_incomparable += 1;
+            } else if access_equal(operand.access, iced_access) { access_checked += 1; }
+            else { eprintln!("access mismatch {:02x?} operand {index}: mkasm={:?} iced={:?}", bytes, operand.access, info.op_access(index as u32)); access_bad += 1; }
+        }
+        let implicit_registers: Vec<_> = ours.operands().iter().filter(|operand| operand.implicit && operand.kind == OperandKind::Register).collect();
+        if !implicit_oracle_mnemonic(&ours.encoding().mnemonic.to_lowercase()) {
+            implicit_incomparable += implicit_registers.len();
+        } else {
+            for number in 0u8..=3 {
+                let ours_family: Vec<_> = implicit_registers.iter().filter(|operand| operand.register.is_some_and(|register| register.class == RegisterClass::Gpr && register.number == number)).collect();
+                if ours_family.is_empty() { continue; }
+                if explicit.iter().any(|operand| {
+                    operand.register.is_some_and(|register| register.class == RegisterClass::Gpr && register.number == number) ||
+                        operand.memory.base.is_some_and(|register| register.class == RegisterClass::Gpr && register.number == number) ||
+                        operand.memory.index.is_some_and(|register| register.class == RegisterClass::Gpr && register.number == number)
+                }) {
+                    implicit_incomparable += ours_family.len();
+                    continue;
+                }
+                let iced_family: Vec<_> = info.used_registers().iter().filter(|used| gpr_number(&format!("{:?}", used.register()).to_lowercase()) == Some(number)).collect();
+                let ours_read = ours_family.iter().any(|operand| operand.access.read || operand.access.conditional_read);
+                let ours_write = ours_family.iter().any(|operand| operand.access.write || operand.access.conditional_write);
+                let iced_read = iced_family.iter().any(|used| matches!(used.access(), OpAccess::Read | OpAccess::CondRead | OpAccess::ReadWrite | OpAccess::ReadCondWrite));
+                let iced_write = iced_family.iter().any(|used| matches!(used.access(), OpAccess::Write | OpAccess::CondWrite | OpAccess::ReadWrite | OpAccess::ReadCondWrite));
+                if !iced_family.is_empty() && ours_read == iced_read && ours_write == iced_write {
+                    implicit_checked += ours_family.len();
+                } else {
+                    eprintln!("implicit register family mismatch {:02x?}: gpr{number} mkasm=({ours_read},{ours_write}) iced=({iced_read},{iced_write})", bytes);
+                    implicit_bad += ours_family.len();
+                }
+            }
+        }
+        if matches!(ours.flow_control(), FlowControl::Call | FlowControl::UnconditionalBranch | FlowControl::ConditionalBranch) &&
+            iced.op_count() != 0 && matches!(iced.op0_kind(), OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64) {
+            if let Some(relative) = ours.operands().iter().find(|operand| operand.kind == OperandKind::Relative) {
+                let ours_target = 0x1000u64.wrapping_add(ours.length as u64).wrapping_add_signed(relative.immediate.signed);
+                if ours_target == iced.near_branch_target() { target_checked += 1; }
+                else { eprintln!("branch target mismatch {:02x?}: mkasm=0x{ours_target:x} iced=0x{:x}", bytes, iced.near_branch_target()); target_bad += 1; }
+            }
+        }
+        if let Some(memory) = ours.operands().iter().find(|operand| operand.kind == OperandKind::Memory && operand.memory.rip_relative) {
+            let ours_target = 0x1000u64.wrapping_add(ours.length as u64).wrapping_add_signed(memory.memory.displacement);
+            if ours_target == iced.ip_rel_memory_address() { target_checked += 1; }
+            else { eprintln!("RIP target mismatch {:02x?}: mkasm=0x{ours_target:x} iced=0x{:x}", bytes, iced.ip_rel_memory_address()); target_bad += 1; }
+        }
         if explicit.iter().any(|operand| matches!(operand.kind, OperandKind::Other | OperandKind::FarPointer | OperandKind::None)) || explicit.len() != iced.op_count() as usize {
             skipped += 1; continue;
         }
@@ -341,7 +438,28 @@ fn main() {
         else if iced_register_view_quirk(&format!("{:?}", iced.code())) { skipped += 1; }
         else { eprintln!("operand mismatch {:02x?}: {} vs {:?}", bytes, ours.format_intel(0x1000), iced.code()); bad += 1; }
     }
-    println!("iced oracle: cases={} operands_checked={} operands_skipped={} formatted={} iced_unsupported={} operand_mismatches={} formatter_mismatches={}", CASES.len(), checked, skipped, formatted, unsupported, bad, format_bad);
-    if CASES.len() < 6_000 || checked < 6_000 || bad != 0 || format_bad != 0 { std::process::exit(1); }
+    let mut relocation_checks = 0usize;
+    for (original, old_ip, new_ip) in [
+        (&[0xe8, 0x00, 0x01, 0x00, 0x00][..], 0x1000u64, 0x2000u64),
+        (&[0x48, 0x8d, 0x05, 0x10, 0x00, 0x00, 0x00][..], 0x1000u64, 0x2000u64),
+        (&[0x90][..], 0x1000u64, 0x2000u64),
+    ] {
+        let decoded = mkasm::decode(original, Mode::Mode64).unwrap();
+        let mut ours_bytes = [0u8; 15];
+        let ours_len = mkasm::relocate(&decoded, original, old_ip, new_ip, &mut ours_bytes).unwrap();
+        let mut decoder = Decoder::with_ip(64, original, old_ip, DecoderOptions::NONE);
+        let instruction = decoder.decode();
+        let mut encoder = Encoder::new(64);
+        let iced_len = encoder.encode(&instruction, new_ip).unwrap();
+        assert_eq!(&ours_bytes[..ours_len], &encoder.take_buffer()[..iced_len]);
+        relocation_checks += 1;
+    }
+    let original = [0xe8, 0, 0, 0, 0];
+    let decoded = mkasm::decode(&original, Mode::Mode64).unwrap();
+    let mut relocated = [0u8; 15];
+    assert_eq!(mkasm::relocate(&decoded, &original, 0, 0x1_0000_0000, &mut relocated), Err(RelocateError::OutOfRange));
+    relocation_checks += 1;
+    println!("iced oracle: cases={} operands_checked={} operands_skipped={} formatted={} flow_checked={} access_checked={} access_incomparable={} implicit_checked={} implicit_incomparable={} targets_checked={} relocation_checks={} iced_unsupported={} operand_mismatches={} formatter_mismatches={} flow_mismatches={} access_mismatches={} implicit_mismatches={} target_mismatches={}", CASES.len(), checked, skipped, formatted, flow_checked, access_checked, access_incomparable, implicit_checked, implicit_incomparable, target_checked, relocation_checks, unsupported, bad, format_bad, flow_bad, access_bad, implicit_bad, target_bad);
+    if CASES.len() < 6_000 || checked < 6_000 || bad != 0 || format_bad != 0 || flow_bad != 0 || access_bad != 0 || implicit_bad != 0 || target_bad != 0 { std::process::exit(1); }
 }
 `

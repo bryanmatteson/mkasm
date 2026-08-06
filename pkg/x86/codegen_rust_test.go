@@ -24,7 +24,8 @@ func TestGenerateRust(t *testing.T) {
 	}
 	for _, required := range []string{
 		"static BUCKETS", "static OPERANDS", "pub fn decode", "pub fn encode", "static CANDIDATES",
-		"pub struct PhysicalDecode", "pub fn operands", "pub fn format_intel",
+		"pub struct PhysicalDecode", "pub fn operands", "pub fn format_intel", "pub enum FlowControl",
+		"pub fn encode_relative_branch", "pub fn relocate",
 	} {
 		if !strings.Contains(string(source), required) {
 			t.Errorf("generated Rust lacks %q", required)
