@@ -6,11 +6,13 @@ resolves the instruction model, and emits standalone assembler and decoder
 projects.
 
 The x86 backend imports opcodesDB v3 into a variable-length catalog and emits a
-standalone Rust crate with allocation-free legacy/REX, VEX, XOP, and EVEX
-dispatch, structured physical operands, Intel formatting, and exact
-physical-field encoding. A64 Rust output includes an XML-derived formatter with
-preferred aliases; A64 supports Go and Rust output, while x86-64 currently
-supports Rust output.
+standalone Rust crate with allocation-free legacy/REX, 3DNow, VEX, XOP, and EVEX
+dispatch, structured physical operands, Intel formatting, flow-control and
+semantic-access summaries, relative-branch encode plus RIP/relative relocate,
+and exact physical-field encoding. A64 Rust output includes an XML-derived
+formatter with preferred aliases and exposes both the encoding mnemonic and the
+assembler mnemonic on each decode; A64 supports Go and Rust output, while
+x86-64 currently supports Rust output.
 
 The implementation favors explicit data flow, bounded memory, hand-written
 parsers, deterministic output, and independent verification over generated
@@ -28,7 +30,7 @@ Using `ISA_A64_xml_A_profile-2026-06.tar.gz`:
 | Rust generated-project checks | Passing |
 | x86 opcodesDB import | 3,509 records / 7,289 syntax forms |
 | x86 generated Rust checks | Passing; zero-allocation structured decode and encode |
-| Independent iced-x86 comparison | Passing; 6,411 operand cases and 6,584 exact formatter strings, zero mismatches |
+| Independent iced-x86 comparison | Passing; 6,411 operand cases and 6,584 exact formatter strings, plus flow-control, access, target, and relocation checks, zero mismatches |
 | Independent LLVM parity for supported instructions | 100%; zero mismatches |
 | Strict all-instruction LLVM parity | Open; 5 LLVM-unknown encodings |
 
@@ -151,8 +153,9 @@ output-rs/
     insns.rs
     encodings.rs
     raw.rs
-    decoders.rs
+    decoders.rs           decision-tree decode; exposes mnemonic and asm_mnemonic
     encoders.rs
+    formatters.rs         XML-derived disassembly with preferred aliases
     registry.rs
     insns_test.rs
   tests/
@@ -222,11 +225,14 @@ threshold report and is not presented as conformance.
 `make conformance-x86` generates representative bytes across the full
 opcodesDB catalog. It compares independently representable registers, memory
 addressing, scales, and immediates with iced-x86, then requires byte-for-byte
-Intel formatter output with a fully pinned option set. The observed 2026-08-06
-run checked 6,411 operand cases and all 6,584 iced-supported formatter strings
-with zero mismatches. The 173 forms with oracle-incomparable structured
-operands were reported separately, as were 20 encodings not recognized by
-iced-x86 1.21.0; formatter comparison does not skip the 173.
+Intel formatter output with a fully pinned option set. The same gate also
+checks flow-control classification, selected explicit and implicit access
+summaries, near-branch and RIP-relative targets, and a small relocate corpus.
+The observed 2026-08-06 run checked 6,411 operand cases and all 6,584
+iced-supported formatter strings with zero mismatches. The 173 forms with
+oracle-incomparable structured operands were reported separately, as were 20
+encodings not recognized by iced-x86 1.21.0; formatter comparison does not skip
+the 173.
 
 `make coverage-encodings` proves that the Go and Rust exact ledgers each
 contain every resolved encoding exactly once. Source statement coverage is a
@@ -262,9 +268,9 @@ and current results are documented in
 ## Scope
 
 `mkasm` ships A64 XML project generation plus opcodesDB-backed x86-64 Rust
-generation. The x86 backend does not yet emit Go projects or model MVEX/3DNow
-encoding. It does
-not execute architecture pseudocode cycle-for-cycle, replace an architectural
+generation. The x86 backend does not yet emit Go projects or model MVEX; the
+generated Rust crate does cover 3DNow's trailing-selector encoding. It does not
+execute architecture pseudocode cycle-for-cycle, replace an architectural
 simulator, or treat internal encoder/decoder round trips as independent proof.
 Arm's corpus is downloaded or supplied by the user and is not redistributed by
 this repository.
