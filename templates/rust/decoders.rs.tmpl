@@ -124,6 +124,7 @@ impl Iterator for AmbiguousIter {
 #[derive(Debug, Clone)]
 pub struct Decoded {
     pub mnemonic: &'static str,
+    pub asm_mnemonic: &'static str,
     pub encoding_id: &'static str,
     pub class: &'static str,
     pub raw: u32,
@@ -147,6 +148,7 @@ struct Entry {
     mask: u32,
     value: u32,
     mnemonic: &'static str,
+    asm_mnemonic: &'static str,
     encoding_id: &'static str,
     class: &'static str,
     alias_of: &'static str,
@@ -318,6 +320,7 @@ fn decoded_from(index: u16, word: u32, source: CandidateSource) -> Decoded {
     let entry = &TABLE[index as usize];
     Decoded {
         mnemonic: entry.mnemonic,
+        asm_mnemonic: entry.asm_mnemonic,
         encoding_id: entry.encoding_id,
         class: entry.class,
         raw: word,

@@ -247,9 +247,10 @@ func emitRustDecodeTable(c *Catalog) string {
 			fieldLit = "&[" + strings.Join(fields, ", ") + "]"
 		}
 		fmt.Fprintf(&b,
-			"    Entry { mask: 0x%08X, value: 0x%08X, mnemonic: %s, encoding_id: %s, class: %s, alias_of: %s, fields: %s, bitdiff: %s },\n",
+			"    Entry { mask: 0x%08X, value: 0x%08X, mnemonic: %s, asm_mnemonic: %s, encoding_id: %s, class: %s, alias_of: %s, fields: %s, bitdiff: %s },\n",
 			e.Mask, e.Value,
 			rustStringLiteral(e.Mnemonic),
+			rustStringLiteral(e.AsmMnemonic),
 			rustStringLiteral(e.EncodingID),
 			rustStringLiteral(e.Class),
 			rustStringLiteral(e.AliasOf),

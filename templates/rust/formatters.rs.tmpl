@@ -273,7 +273,7 @@ fn render_logical_imm(op: OperandDef, word: u32) -> Option<String> {
         _ => return None,
     };
     let data_size = if sf != 0 { 64 } else { 32 };
-    let length = 31 - (n << 6 | (!imms & 0x3f)).leading_zeros();
+    let length = 31u32.checked_sub((n << 6 | (!imms & 0x3f)).leading_zeros())?;
     if length < 1 { return None; }
     let levels = (1u32 << length) - 1; let s = imms & levels; let r = immr & levels;
     if s == levels { return None; }

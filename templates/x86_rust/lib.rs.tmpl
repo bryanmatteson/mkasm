@@ -204,6 +204,18 @@ pub struct Decoded {
 	operand_count: u8,
 }
 
+/// Generated summary of explicit and implicit architectural accesses.
+/// Registers used only to form memory addresses count as reads.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SemanticAccess {
+    pub register_read: bool,
+    pub register_write: bool,
+    pub memory_read: bool,
+    pub memory_write: bool,
+    pub conditional: bool,
+    pub atomic: bool,
+}
+
 impl Decoded {
     pub fn encoding(&self) -> &'static Encoding {
         &ENCODINGS[self.form_index as usize]
@@ -215,6 +227,31 @@ impl Decoded {
 
     pub fn flow_control(&self) -> FlowControl {
         self.encoding().flow_control
+    }
+
+    pub fn semantic_access(&self) -> SemanticAccess {
+        let mut summary = SemanticAccess::default();
+        for operand in self.operands() {
+            summary.conditional |= operand.access.conditional_read || operand.access.conditional_write;
+            match operand.kind {
+                OperandKind::Register => {
+                    summary.register_read |= operand.access.read || operand.access.conditional_read;
+                    summary.register_write |= operand.access.write || operand.access.conditional_write;
+                }
+                OperandKind::Memory => {
+                    summary.memory_read |= operand.access.read || operand.access.conditional_read;
+                    summary.memory_write |= operand.access.write || operand.access.conditional_write;
+                    summary.register_read |= operand.memory.segment.is_some()
+                        || operand.memory.base.is_some()
+                        || operand.memory.index.is_some();
+                }
+                _ => {}
+            }
+        }
+        let memory_rmw = summary.memory_read && summary.memory_write;
+        summary.atomic = memory_rmw
+            && (self.physical.lock || self.encoding().mnemonic == "XCHG");
+        summary
     }
 
     /// Format the instruction in Intel syntax. Relative targets are resolved
@@ -446,6 +483,9 @@ fn match_encoding(src: &[u8], mode: Mode, head: Head, e: &Encoding) -> Match {
             other => return other,
         }
     }
+    if e.kind == 5 {
+        end += 1; // 3DNow selects the operation with a trailing byte.
+    }
     for i in 0..e.tail_len as usize {
         let tail = TAILS[e.tail_start as usize + i];
         end += tail_bytes(tail, mode, head.prefix_bits & 1 != 0, head.w != 0, head.address_override);
@@ -594,7 +634,15 @@ fn parse_head(src: &[u8], mode: Mode) -> Result<Head, DecodeError> {
         match src[pos] {
             0x38 => { h.map = 2; pos += 1; }
             0x3a => { h.map = 3; pos += 1; }
-            0x0f => return Err(DecodeError::Unknown),
+            0x0f => {
+                let modrm_offset = pos + 1;
+                let selector_offset = three_d_now_selector_offset(src, mode, h.address_override, modrm_offset)?;
+                h.kind = 5;
+                h.map = 4;
+                h.opcode = src[selector_offset];
+                h.modrm_offset = modrm_offset;
+                return Ok(h);
+            }
             _ => h.map = 1,
         }
     }
@@ -602,6 +650,33 @@ fn parse_head(src: &[u8], mode: Mode) -> Result<Head, DecodeError> {
     h.opcode = src[pos];
     h.modrm_offset = pos + 1;
     Ok(h)
+}
+
+fn three_d_now_selector_offset(
+    src: &[u8], mode: Mode, address_override: bool, modrm_offset: usize,
+) -> Result<usize, DecodeError> {
+    let Some(&modrm) = src.get(modrm_offset) else { return Err(DecodeError::Truncated) };
+    let mod_bits = modrm >> 6;
+    let rm = modrm & 7;
+    let mut end = modrm_offset + 1;
+    if mod_bits != 3 {
+        if effective_address_bits(mode, address_override) == 16 {
+            if mod_bits == 0 && rm == 6 { end += 2; }
+            else if mod_bits == 1 { end += 1; }
+            else if mod_bits == 2 { end += 2; }
+        } else {
+            if rm == 4 {
+                let Some(&sib) = src.get(end) else { return Err(DecodeError::Truncated) };
+                end += 1;
+                if mod_bits == 0 && sib & 7 == 5 { end += 4; }
+            }
+            if mod_bits == 0 && rm == 5 { end += 4; }
+            else if mod_bits == 1 { end += 1; }
+            else if mod_bits == 2 { end += 4; }
+        }
+    }
+    if end >= 15 { return Err(DecodeError::TooLong); }
+    src.get(end).map(|_| end).ok_or(DecodeError::Truncated)
 }
 
 fn decoded_details(
@@ -1314,6 +1389,20 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
         if rex != 0 { push(out, &mut pos, 0x40 | rex)?; }
         put_opcode_map(out, &mut pos, e.map)?;
         push(out, &mut pos, e.opcode | if e.opcode_plus_reg { fields.opcode_reg & 7 } else { 0 })?;
+    } else if e.kind == 5 {
+        let mut rex = 0u8;
+        if fields.mode == Mode::Mode64 {
+            rex |= (fields.reg >> 3 & 1) << 2;
+            if fields.use_sib {
+                rex |= (fields.index >> 3 & 1) << 1;
+                rex |= fields.base >> 3 & 1;
+            } else {
+                rex |= fields.rm >> 3 & 1;
+            }
+        }
+        if rex != 0 { push(out, &mut pos, 0x40 | rex)?; }
+        push(out, &mut pos, 0x0f)?;
+        push(out, &mut pos, 0x0f)?;
     } else {
         let (prefix, count) = vector_prefix(e, fields)?;
         for byte in prefix.iter().take(count) { push(out, &mut pos, *byte)?; }
@@ -1337,6 +1426,7 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
         let width = tail_bytes(tail, fields.mode, e.mandatory == 1 || operand_size_override(fields.mode, e.operand_size), e.w == 1 || e.operand_size == 64, fields.address_override);
         write_little(out, &mut pos, fields.immediate[i], width)?;
     }
+    if e.kind == 5 { push(out, &mut pos, e.opcode)?; }
     Ok(pos)
 }
 
@@ -1398,8 +1488,8 @@ fn put_opcode_map(out: &mut [u8; 15], pos: &mut usize, map: u8) -> Result<(), En
 fn dispatch_index(kind: u8, map: u8, opcode: u8) -> usize { (kind as usize * MAP_COUNT + map as usize) * 256 + opcode as usize }
 fn supports(mask: u8, mode: Mode) -> bool { mask & match mode { Mode::Mode16 => 1, Mode::Mode32 => 2, Mode::Mode64 => 4 } != 0 }
 fn prefix_bits_from_pp(pp: u8) -> u8 { match pp { 1 => 1, 2 => 2, 3 => 4, _ => 0 } }
-fn map_from_mmmmm(map: u8) -> Option<u8> { match map { 1 => Some(1), 2 => Some(2), 3 => Some(3), 8 => Some(5), 9 => Some(6), 10 => Some(7), _ => None } }
-fn mmmmm_from_map(map: u8) -> Option<u8> { match map { 1 => Some(1), 2 => Some(2), 3 => Some(3), 5 => Some(8), 6 => Some(9), 7 => Some(10), _ => None } }
+fn map_from_mmmmm(map: u8) -> Option<u8> { match map { 0 => Some(0), 1 => Some(1), 2 => Some(2), 3 => Some(3), 8 => Some(5), 9 => Some(6), 10 => Some(7), _ => None } }
+fn mmmmm_from_map(map: u8) -> Option<u8> { match map { 0 => Some(0), 1 => Some(1), 2 => Some(2), 3 => Some(3), 5 => Some(8), 6 => Some(9), 7 => Some(10), _ => None } }
 fn mandatory_prefix_byte(prefix: u8) -> Option<u8> { match prefix { 1 => Some(0x66), 2 => Some(0xf3), 3 => Some(0xf2), _ => None } }
 fn pp_from_mandatory(prefix: u8) -> u8 { match prefix { 1 => 1, 2 => 2, 3 => 3, _ => 0 } }
 
@@ -1449,6 +1539,61 @@ fn displacement_bytes(mod_bits: u8, base: u8, address_bits: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_supported_64_bit_encoder_form_decodes() {
+        let mut failures = Vec::new();
+        for (form_index, encoding) in ENCODINGS.iter().enumerate() {
+            if encoding.modes & 4 == 0 { continue; }
+            let mut fields = EncodeFields {
+                mode: Mode::Mode64,
+                mod_bits: if encoding.mod_kind == 1 { 0 } else { 3 },
+                reg: encoding.reg_value,
+                rm: encoding.rm_value,
+                ..EncodeFields::default()
+            };
+            if fields.mod_bits != 3 && fields.rm & 7 == 4 { fields.use_sib = true; }
+            let mut bytes = [0u8; 15];
+            let length = match encode(form_index, fields, &mut bytes) {
+                Ok(length) => length,
+                Err(EncodeError::Unsupported) => continue,
+                Err(error) => {
+                    failures.push(format!("{}: encode {error:?}", encoding.form_id));
+                    continue;
+                }
+            };
+            match decode(&bytes[..length], Mode::Mode64) {
+                Ok(decoded) if decoded.length as usize == length => {}
+                Ok(decoded) => failures.push(format!(
+                    "{}: encoded {:02x?}, decoded {} bytes as {}",
+                    encoding.form_id, &bytes[..length], decoded.length, decoded.encoding().form_id,
+                )),
+                Err(error) => failures.push(format!(
+                    "{}: encoded {:02x?}, decode {error:?}", encoding.form_id, &bytes[..length],
+                )),
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} generated forms failed their own encode/decode coverage:\n{}",
+            failures.len(), failures.join("\n")
+        );
+    }
+
+    #[test]
+    fn decodes_trailing_selector_3dnow_and_vex_map_zero() {
+        if ENCODINGS.iter().any(|encoding| encoding.mnemonic == "PFADD") {
+            let pfadd = decode(&[0x0f, 0x0f, 0xc1, 0x9e], Mode::Mode64).unwrap();
+            assert_eq!(pfadd.encoding().mnemonic, "PFADD");
+            assert_eq!(pfadd.length, 4);
+        }
+
+        if ENCODINGS.iter().any(|encoding| encoding.mnemonic == "JKZD") {
+            let jkzd = decode(&[0xc4, 0xe0, 0x70, 0x74, 0], Mode::Mode64).unwrap();
+            assert_eq!(jkzd.encoding().mnemonic, "JKZD");
+            assert_eq!(jkzd.length, 5);
+        }
+    }
 
     fn find_form(id: &str, mod_kind: u8) -> Option<usize> {
         ENCODINGS.iter().position(|e| e.id == id && e.mod_kind == mod_kind)

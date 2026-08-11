@@ -18,6 +18,9 @@ func TestRustDecoderUsesStaticTreeAndLazyViews(t *testing.T) {
 	if data.Root == "None" {
 		t.Fatal("decoder tree has no root")
 	}
+	if !strings.Contains(data.Table, `mnemonic: "A_group", asm_mnemonic: "A"`) {
+		t.Fatalf("decoder table lost the assembler mnemonic:\n%s", data.Table)
+	}
 	if !strings.Contains(data.Nodes, "static NODES: &[Node]") ||
 		!strings.Contains(data.Edges, "static EDGES: &[Edge]") ||
 		!strings.Contains(data.Candidates, "static CANDIDATES: &[u16]") {
@@ -40,6 +43,7 @@ func TestRustDecoderUsesStaticTreeAndLazyViews(t *testing.T) {
 	}
 	for _, required := range []string{
 		"binary_search_by_key", "CandidateSource::Leaf", "pub struct Fields", "pub struct Ambiguous",
+		"pub asm_mnemonic: &'static str",
 	} {
 		if !strings.Contains(generated, required) {
 			t.Fatalf("generated decoder is missing %q", required)
@@ -96,7 +100,7 @@ func rustDecoderWildcardFixture() []*ir.InstructionIR {
 	}
 	return []*ir.InstructionIR{
 		{
-			Mnemonic: "A", EncodingID: "A", IClass: "test",
+			Mnemonic: "A_group", AsmMnemonic: "A", EncodingID: "A", IClass: "test",
 			BitPattern: "11" + strings.Repeat("x", 26) + "0001",
 			Encoding: ir.EncodingMask{Width: 32, Fields: []ir.BitField{
 				field("top", 30, 31, fixed(3)),

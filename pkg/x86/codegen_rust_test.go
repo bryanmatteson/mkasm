@@ -25,6 +25,7 @@ func TestGenerateRust(t *testing.T) {
 	for _, required := range []string{
 		"static BUCKETS", "static OPERANDS", "pub fn decode", "pub fn encode", "static CANDIDATES",
 		"pub struct PhysicalDecode", "pub fn operands", "pub fn format_intel", "pub enum FlowControl",
+		"pub struct SemanticAccess", "pub fn semantic_access",
 		"pub fn encode_relative_branch", "pub fn relocate",
 	} {
 		if !strings.Contains(string(source), required) {
