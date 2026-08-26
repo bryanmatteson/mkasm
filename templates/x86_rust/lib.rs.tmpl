@@ -417,6 +417,46 @@ pub fn encoding(index: usize) -> Option<&'static Encoding> {
     ENCODINGS.get(index)
 }
 
+/// Report whether one generated form is available in an execution mode.
+pub fn encoding_supports_mode(index: usize, mode: Mode) -> bool {
+    ENCODINGS
+        .get(index)
+        .is_some_and(|encoding| encoding_is_available_in_mode(encoding, mode))
+}
+
+fn encoding_is_available_in_mode(encoding: &Encoding, mode: Mode) -> bool {
+    supports(encoding.modes, mode)
+        && (encoding.operand_size != 64 || mode == Mode::Mode64)
+        && (encoding.kind != 0 || encoding.w != 1 || mode == Mode::Mode64)
+}
+
+/// Encode the decoder-owned representative for one generated form.
+///
+/// The representative is derived from the same generated form record used by
+/// [`decode`], allowing exhaustive consumers to traverse the catalog without
+/// maintaining a second opcode parser or byte corpus.
+pub fn encode_representative(
+    form_index: usize,
+    mode: Mode,
+    output: &mut [u8; 15],
+) -> Result<usize, EncodeError> {
+    let encoding = ENCODINGS.get(form_index).ok_or(EncodeError::BadForm)?;
+    if !encoding_is_available_in_mode(encoding, mode) {
+        return Err(EncodeError::Unsupported);
+    }
+    let mut fields = EncodeFields {
+        mode,
+        mod_bits: if encoding.mod_kind == 1 { 0 } else { 3 },
+        reg: encoding.reg_value,
+        rm: encoding.rm_value,
+        ..EncodeFields::default()
+    };
+    if mode != Mode::Mode16 && fields.mod_bits != 3 && fields.rm & 7 == 4 {
+        fields.use_sib = true;
+    }
+    encode(form_index, fields, output)
+}
+
 pub fn decode(src: &[u8], mode: Mode) -> Result<Decoded, DecodeError> {
     let head = parse_head(src, mode)?;
     let bucket = BUCKETS[dispatch_index(head.kind, head.map, head.opcode)];
@@ -1541,42 +1581,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_supported_64_bit_encoder_form_decodes() {
+    fn every_supported_encoder_form_decodes() {
         let mut failures = Vec::new();
-        for (form_index, encoding) in ENCODINGS.iter().enumerate() {
-            if encoding.modes & 4 == 0 { continue; }
-            let mut fields = EncodeFields {
-                mode: Mode::Mode64,
-                mod_bits: if encoding.mod_kind == 1 { 0 } else { 3 },
-                reg: encoding.reg_value,
-                rm: encoding.rm_value,
-                ..EncodeFields::default()
-            };
-            if fields.mod_bits != 3 && fields.rm & 7 == 4 { fields.use_sib = true; }
-            let mut bytes = [0u8; 15];
-            let length = match encode(form_index, fields, &mut bytes) {
-                Ok(length) => length,
-                Err(EncodeError::Unsupported) => continue,
-                Err(error) => {
-                    failures.push(format!("{}: encode {error:?}", encoding.form_id));
-                    continue;
+        for mode in [Mode::Mode16, Mode::Mode32, Mode::Mode64] {
+            for (form_index, encoding) in ENCODINGS.iter().enumerate() {
+                if !encoding_supports_mode(form_index, mode) { continue; }
+                let mut bytes = [0u8; 15];
+                let length = match encode_representative(form_index, mode, &mut bytes) {
+                    Ok(length) => length,
+                    Err(EncodeError::Unsupported) => continue,
+                    Err(error) => {
+                        failures.push(format!("{mode:?} {}: encode {error:?}", encoding.form_id));
+                        continue;
+                    }
+                };
+                match decode(&bytes[..length], mode) {
+                    Ok(decoded) if decoded.length as usize == length => {}
+                    Ok(decoded) => failures.push(format!(
+                        "{mode:?} {}: encoded {:02x?}, decoded {} bytes as {}",
+                        encoding.form_id, &bytes[..length], decoded.length, decoded.encoding().form_id,
+                    )),
+                    Err(error) => failures.push(format!(
+                        "{mode:?} {}: encoded {:02x?}, decode {error:?}",
+                        encoding.form_id, &bytes[..length],
+                    )),
                 }
-            };
-            match decode(&bytes[..length], Mode::Mode64) {
-                Ok(decoded) if decoded.length as usize == length => {}
-                Ok(decoded) => failures.push(format!(
-                    "{}: encoded {:02x?}, decoded {} bytes as {}",
-                    encoding.form_id, &bytes[..length], decoded.length, decoded.encoding().form_id,
-                )),
-                Err(error) => failures.push(format!(
-                    "{}: encoded {:02x?}, decode {error:?}", encoding.form_id, &bytes[..length],
-                )),
             }
         }
         assert!(
             failures.is_empty(),
             "{} generated forms failed their own encode/decode coverage:\n{}",
             failures.len(), failures.join("\n")
+        );
+        assert!(!encoding_supports_mode(ENCODINGS.len(), Mode::Mode64));
+        assert_eq!(
+            encode_representative(ENCODINGS.len(), Mode::Mode64, &mut [0; 15]),
+            Err(EncodeError::BadForm),
         );
     }
 

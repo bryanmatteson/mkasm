@@ -1,6 +1,7 @@
 package decoder
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"math"
@@ -118,6 +119,9 @@ func (b *DecoderTreeBuilder) collectFieldMasks(instructions []*ir.InstructionIR)
 			masks = append(masks, &ir.BitMask{Mask: mask})
 		}
 	}
+	slices.SortFunc(masks, func(a, b *ir.BitMask) int {
+		return cmp.Compare(a.Mask, b.Mask)
+	})
 	return masks
 }
 
@@ -162,7 +166,8 @@ func normalizedEntropy(counts map[uint32]int, total int) float64 {
 		return 0
 	}
 	entropy := 0.0
-	for _, c := range counts {
+	for _, key := range slices.Sorted(maps.Keys(counts)) {
+		c := counts[key]
 		p := float64(c) / float64(total)
 		entropy -= p * math.Log2(p)
 	}

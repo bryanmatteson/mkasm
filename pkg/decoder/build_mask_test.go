@@ -1,6 +1,8 @@
 package decoder
 
 import (
+	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -30,6 +32,54 @@ func TestCollectFieldMasksSkipsInvalidRanges(t *testing.T) {
 	}
 	if masks[0].Mask != 0xf0000000 {
 		t.Fatalf("unexpected mask %#x", masks[0].Mask)
+	}
+}
+
+func TestNormalizedEntropyIsStableAcrossMapLayouts(t *testing.T) {
+	entries := make([]int, 64)
+	total := 0
+	for index := range entries {
+		entries[index] = index%17 + 1
+		total += entries[index]
+	}
+
+	var expected uint64
+	for rotation := range entries {
+		counts := make(map[uint32]int, len(entries))
+		for offset := range entries {
+			index := (rotation + offset) % len(entries)
+			counts[uint32(index)] = entries[index]
+		}
+		got := math.Float64bits(normalizedEntropy(counts, total))
+		if rotation == 0 {
+			expected = got
+		} else if got != expected {
+			t.Fatalf("layout %d produced entropy bits %#x, want %#x", rotation, got, expected)
+		}
+	}
+}
+
+func TestBuildTreeIsIndependentOfInputOrder(t *testing.T) {
+	zero, one := uint64(0), uint64(1)
+	a := &ir.InstructionIR{
+		Mnemonic: "A", EncodingID: "A", BitPattern: strings.Repeat("x", 30) + "00",
+		Encoding: ir.EncodingMask{Width: 32, Fields: []ir.BitField{
+			{Name: "low", Start: 0, End: 0, Fixed: &zero},
+			{Name: "high", Start: 1, End: 1, Fixed: &zero},
+		}},
+	}
+	b := &ir.InstructionIR{
+		Mnemonic: "B", EncodingID: "B", BitPattern: strings.Repeat("x", 30) + "11",
+		Encoding: ir.EncodingMask{Width: 32, Fields: []ir.BitField{
+			{Name: "high", Start: 1, End: 1, Fixed: &one},
+			{Name: "low", Start: 0, End: 0, Fixed: &one},
+		}},
+	}
+
+	forward := (&DecoderTreeBuilder{}).BuildTree([]*ir.InstructionIR{a, b}, nil)
+	reverse := (&DecoderTreeBuilder{}).BuildTree([]*ir.InstructionIR{b, a}, nil)
+	if !reflect.DeepEqual(forward, reverse) {
+		t.Fatalf("tree depends on input order:\nforward=%#v\nreverse=%#v", forward.Root, reverse.Root)
 	}
 }
 

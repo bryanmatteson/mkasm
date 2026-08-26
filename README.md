@@ -11,7 +11,9 @@ dispatch, structured physical operands, Intel formatting, flow-control and
 semantic-access summaries, relative-branch encode plus RIP/relative relocate,
 and exact physical-field encoding. A64 Rust output includes an XML-derived
 formatter with preferred aliases and exposes both the encoding mnemonic and the
-assembler mnemonic on each decode; A64 supports Go and Rust output, while
+assembler mnemonic on each decode. Generated A64 decoders expose their stable
+catalog order, and generated x86 codecs expose mode queries and representative
+bytes for exhaustive form traversal. A64 supports Go and Rust output, while
 x86-64 currently supports Rust output.
 
 The implementation favors explicit data flow, bounded memory, hand-written

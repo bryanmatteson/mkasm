@@ -230,8 +230,12 @@ func writeEncodeDecodeCorpusTest(decoderDir, modPath string, instrs []*ir.Instru
 		fixedLegal  bool
 		packedLegal bool
 	}
+	sorted := append([]*ir.InstructionIR(nil), instrs...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].EncodingID < sorted[j].EncodingID
+	})
 	var samples []sample
-	for _, instr := range instrs {
+	for _, instr := range sorted {
 		if instr == nil || instr.EncodingID == "" {
 			continue
 		}

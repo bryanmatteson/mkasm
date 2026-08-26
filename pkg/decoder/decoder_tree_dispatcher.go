@@ -1,8 +1,10 @@
 package decoder
 
 import (
-	"github.com/bryanmatteson/mkasm/pkg/ir"
+	"cmp"
 	"slices"
+
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 const (
@@ -51,6 +53,21 @@ func (b *DecoderTreeBuilder) filterAndDetermineStrategy(instructions []*ir.Instr
 		fixed += sliceCount(instr.Encoding.Fields, func(f ir.BitField) bool { return f.Fixed != nil })
 		out = append(out, instr)
 	}
+	slices.SortFunc(out, func(a, b *ir.InstructionIR) int {
+		if order := cmp.Compare(a.EncodingID, b.EncodingID); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(a.Mnemonic, b.Mnemonic); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(a.IClass, b.IClass); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(a.AliasOf, b.AliasOf); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.BitPattern, b.BitPattern)
+	})
 
 	if total == 0 || float64(fixed)/float64(total) < 0.6 {
 		return out, EntropyStrategy

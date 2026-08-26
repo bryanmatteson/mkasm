@@ -43,7 +43,8 @@ func TestRustDecoderUsesStaticTreeAndLazyViews(t *testing.T) {
 	}
 	for _, required := range []string{
 		"binary_search_by_key", "CandidateSource::Leaf", "pub struct Fields", "pub struct Ambiguous",
-		"pub asm_mnemonic: &'static str",
+		"pub asm_mnemonic: &'static str", "pub struct CatalogEntry", "pub fn catalog_entry_count()",
+		"pub fn catalog_entry(index: usize) -> Option<CatalogEntry>",
 	} {
 		if !strings.Contains(generated, required) {
 			t.Fatalf("generated decoder is missing %q", required)

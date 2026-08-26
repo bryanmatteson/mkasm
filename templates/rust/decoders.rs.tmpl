@@ -144,6 +144,19 @@ impl Decoded {
     }
 }
 
+/// Stable decoder-owned catalog view of one generated entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CatalogEntry {
+    pub ordinal: u32,
+    pub mask: u32,
+    pub value: u32,
+    pub mnemonic: &'static str,
+    pub asm_mnemonic: &'static str,
+    pub encoding_id: &'static str,
+    pub class: &'static str,
+    pub alias_of: &'static str,
+}
+
 struct Entry {
     mask: u32,
     value: u32,
@@ -203,6 +216,26 @@ enum BitDiff {
 }
 
 {{.Table}}
+
+/// Number of generated entries the AArch64 decoder may emit.
+pub fn catalog_entry_count() -> usize {
+    TABLE.len()
+}
+
+/// Reopen one generated decoder entry in stable table order.
+pub fn catalog_entry(index: usize) -> Option<CatalogEntry> {
+    let entry = TABLE.get(index)?;
+    Some(CatalogEntry {
+        ordinal: u32::try_from(index).ok()?,
+        mask: entry.mask,
+        value: entry.value,
+        mnemonic: entry.mnemonic,
+        asm_mnemonic: entry.asm_mnemonic,
+        encoding_id: entry.encoding_id,
+        class: entry.class,
+        alias_of: entry.alias_of,
+    })
+}
 
 {{.Nodes}}
 
@@ -367,6 +400,23 @@ fn matches_pattern(field: u32, pattern: BitPattern) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_view_reopens_the_decoder_table_in_order() {
+        assert_eq!(catalog_entry_count(), TABLE.len());
+        assert!(catalog_entry(TABLE.len()).is_none());
+        for (index, expected) in TABLE.iter().enumerate() {
+            let entry = catalog_entry(index).expect("catalog index");
+            assert_eq!(entry.ordinal, index as u32);
+            assert_eq!(entry.mask, expected.mask);
+            assert_eq!(entry.value, expected.value);
+            assert_eq!(entry.mnemonic, expected.mnemonic);
+            assert_eq!(entry.asm_mnemonic, expected.asm_mnemonic);
+            assert_eq!(entry.encoding_id, expected.encoding_id);
+            assert_eq!(entry.class, expected.class);
+            assert_eq!(entry.alias_of, expected.alias_of);
+        }
+    }
 
     #[test]
     fn clrex_when_present() {
