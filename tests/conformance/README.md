@@ -1,75 +1,81 @@
 # Conformance
 
-This directory contains corpus-scale verification against independent tools.
-It is separate from `pkg/arm` unit tests because encoder/decoder round trips
-derived from one XML parse prove internal consistency, not architectural truth.
+This directory checks generated code against independent tools at corpus
+scale. It is separate from the `pkg/arm` unit tests. Encoder and decoder round
+trips derived from one XML parse prove internal consistency, not architectural
+truth.
 
 | Gate | Independent oracle | Contract |
 |---|---|---|
-| `mise run coverage:encodings` | `pkg/coverage` | Go and Rust exact ledgers contain every encoding exactly once |
-| `mise run conformance:go` | clang and LLVM MC | Every supported Go exact encoder reproduces exact bytes; rejects and mismatches fail |
-| `mise run conformance:rust` | clang and LLVM MC | Supported typed and exact Rust encoders reproduce exact bytes; rejects and mismatches fail |
-| `mise run conformance:disasm` | clang and LLVM MC | Every supported rendered sample reproduces exact bytes; rejects and mismatches fail |
-| `mise run conformance:strict` | clang and LLVM MC | The oracle must recognize and verify every generated and printable encoding |
-| `mise run conformance:asl` | Arm ASL from `mra_tools` | Opcode bits and fields agree |
-| `mise run conformance` | clang and LLVM MC | Runs all supported-instruction LLVM byte-parity gates |
-| `mise run audit:disasm` | clang and LLVM MC | Threshold report only; not conformance |
+| `make coverage-encodings` | `pkg/coverage` | Go and Rust exact ledgers contain every encoding exactly once |
+| `make conformance-go` | clang and LLVM MC | Every supported Go exact encoder reproduces exact bytes; rejects and mismatches fail |
+| `make conformance-rust` | clang and LLVM MC | Supported typed and exact Rust encoders reproduce exact bytes; rejects and mismatches fail |
+| `make conformance-disasm` | clang and LLVM MC | Every supported rendered sample reassembles to its word; PC-relative labels keep their displacement sign |
+| `make conformance` | clang and LLVM MC | All three supported-instruction gates above |
+| `make conformance-strict` | clang and LLVM MC | The oracle must also recognize every generated and printable encoding |
+| `make conformance-asl` | Arm ASL from `mra_tools` | Opcode bits and fields agree |
+| `make audit-disasm` | clang and LLVM MC | Threshold report only; not conformance |
 
-Every gate consumes the exact `CORPUS` value from `mise.toml` or the environment.
-The default is Arm's current compressed A64 XML release; no extracted directory is required.
-An invalid or unavailable corpus is a hard failure.
+Each target is also a mise task, with `:` in place of `-`
+(`mise run conformance:strict:go`).
 
-Ordinary `go test ./...` compiles these suites but skips their expensive external
-work. The mise tasks set the activation flags and corpus explicitly.
+Every gate reads the A64 corpus from `CORPUS`. The default is Arm's current
+compressed A64 XML release, and nothing is extracted. An invalid or
+unavailable corpus is a hard failure.
+
+Ordinary `go test ./...` compiles these suites but skips their expensive
+external work. The targets set the activation variables and the corpus
+explicitly.
 
 Rust generation writes typed and exact integration tests under `tests/`; Go
 generation writes its exact ledger under `conformance/`. The exact ledgers
-contain all 4,623 resolved encodings, while the typed Rust ledger contains the
-4,524 unique calls supported by the operand-typed surface. The repository gates
-run these generated tests and feed every emitted word through the independent
-LLVM oracle. They do not patch or add source after generation.
+contain all 4,623 resolved encodings. The typed Rust ledger contains the 4,524
+unique calls the operand-typed surface supports. The gates run these generated
+tests and feed every emitted word through the independent LLVM oracle. They do
+not patch or add source after generation.
 
 Toolchain overrides:
 
 ```bash
-MKASM_CLANG=/path/to/clang MKASM_LLVM_MC=/path/to/llvm-mc mise run conformance:rust
-ASL=/path/to/arm-asl-parser/asl mise run conformance:asl
+make conformance-rust MKASM_CLANG=/path/to/clang MKASM_LLVM_MC=/path/to/llvm-mc
+make conformance-asl ASL=/path/to/arm-asl-parser/asl
 ```
 
-The normal LLVM gates prove byte parity over the complete subset the installed
-oracle recognizes. Unsupported instructions are listed and excluded, never
-counted as passing. `mise run conformance:strict` additionally requires
-toolchain coverage of every case and therefore answers the separate question
-“can this installed LLVM verify the entire selected corpus?”
+Without overrides, the gates use `xcrun --find clang` or `clang` from `PATH`,
+and `llvm-mc` from `PATH` or Homebrew's LLVM.
 
-The disassembler gate is complementary: it includes printable exact-only
-encodings. Use `mise run audit:disasm` when developing coverage; its
-threshold-based result is intentionally not labeled conformance.
+The normal LLVM gates prove byte parity over everything the installed oracle
+recognizes. Unsupported instructions are listed and excluded, never counted as
+passing. `make conformance-strict` also requires toolchain coverage of every
+case. It answers a separate question: can this installed LLVM verify the whole
+selected corpus?
+
+The disassembler gate complements the encoder gates. It also covers printable
+encodings that only have exact encoders. Use `make audit-disasm` while
+developing coverage; its threshold result is deliberately not called
+conformance.
 
 ## Current result
 
-The supported-instruction gates are green against
-`ISA_A64_xml_A_profile-2026-06.tar.gz`. The all-opcode toolchain-coverage gate
-is red, so the repository does not claim independent LLVM proof for all 4,623
+The supported-instruction gates pass against
+`ISA_A64_xml_A_profile-2026-06`. The all-opcode toolchain-coverage gate fails,
+so the repository does not claim independent LLVM proof for all 4,623
 encodings.
 
-Observed on 2026-07-26 with Apple clang 21.0.0 and Homebrew LLVM MC 22.1.8:
+Observed on 2026-10-06 with Apple clang 21.0.0 and Homebrew LLVM MC 22.1.8:
 
-- Go exact ledger coverage and rendering: 4,623/4,623; LLVM accepted and
-  verified 4,618 byte-identically, rejected 0, and did not support 5;
-- typed Rust rendering: 4,524/4,524 calls; LLVM accepted and verified 4,523
-  byte-identically, rejected 0, and did not support 1;
-- Rust exact ledger coverage and rendering: 4,623/4,623; LLVM accepted and
-  verified 4,618 byte-identically, rejected 0, and did not support 5;
-- disassembly audit: 4,562 samples rendered; LLVM accepted and verified all
-  4,557 toolchain-supported samples byte-identically, rejected 0, and did not
-  support 5.
+| Gate | Rendered | Byte-identical | Rejected | Unsupported by LLVM |
+|---|---:|---:|---:|---:|
+| Go exact ledger | 4,623 | 4,618 | 0 | 5 |
+| Typed Rust calls | 4,524 | 4,523 | 0 | 1 |
+| Rust exact ledger | 4,623 | 4,618 | 0 | 5 |
+| Disassembly samples | 4,578 | 4,573 | 0 | 5 |
 
-There are zero byte mismatches among cases accepted by the independent
-assemblers and no generated spelling is rejected. The remaining unsupported
-cases are `HINTE` and four authenticated PC-relative forms that LLVM MC 22.1.8
-does not recognize; they remain unverified, so `mise run conformance:strict`
-intentionally remains red.
+None of the cases the independent assemblers accept differs by a single byte,
+and they reject no generated spelling. The unsupported cases are `HINTE` and
+the four authenticated PC-relative forms `RETAASPPC`, `RETABSPPC`, `AUTIASPPC`
+and `AUTIBSPPC`, which LLVM MC 22.1.8 does not recognize. They remain
+unverified, so `make conformance-strict` deliberately stays red.
 
-These numbers are a work ledger, not a waiver. The strict task fails until the
-installed independent oracle can verify every case.
+These numbers record the work left to do; they waive nothing. The strict gate
+fails until the installed independent oracle can verify every case.

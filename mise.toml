@@ -33,7 +33,7 @@ run = "go test ./... -count=1 -timeout 180s"
 
 [tasks."test:race"]
 description = "Run race-sensitive core and conformance packages"
-run = "go test -race ./pkg/decoder ./pkg/arm ./pkg/coverage ./tests/conformance"
+run = "go test -race ./pkg/decoder ./pkg/arm ./pkg/x86 ./pkg/coverage ./tests/conformance"
 
 [tasks."coverage:source"]
 description = "Measure source coverage and enforce configured regression floors"
@@ -258,9 +258,10 @@ run = [
   { task = "build" },
   { task = "generate:go" },
   { task = "generate:rust" },
+  { task = "generate:x86-rust" },
   { task = "conformance" },
 ]
 
 [tasks.clean]
 description = "Remove generated projects and local coverage output"
-run = "rm -rf ./output ./output-rs ./aarch64-go ./aarch64-rs ./dist ./.coverage"
+run = "rm -rf ./output ./output-rs ./output-x86-rs ./aarch64-go ./aarch64-rs ./x86_64-rs ./dist ./.coverage"

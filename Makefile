@@ -186,4 +186,4 @@ release-check: ## Verify, build, generate projects, and run LLVM parity
 	@$(MAKE) --no-print-directory conformance
 
 clean: ## Remove generated projects and local verification output
-	rm -rf ./output ./output-rs ./aarch64-go ./aarch64-rs ./dist ./.coverage
+	rm -rf ./output ./output-rs ./output-x86-rs ./aarch64-go ./aarch64-rs ./x86_64-rs ./dist ./.coverage

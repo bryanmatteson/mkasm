@@ -10,3 +10,4 @@ coverage.out
 /output/
 /output-rs/
 /output-x86-rs/
+/x86_64-rs/

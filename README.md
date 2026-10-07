@@ -1,73 +1,120 @@
 # mkasm
 
-`mkasm` is a streaming Arm A64 instruction-set parser and Go/Rust code
-generator. It reads Arm's XML corpus from a directory, tarball, stdin, or URL,
-resolves the instruction model, and emits standalone assembler and decoder
-projects.
+`mkasm` generates instruction-set codecs from machine-readable specifications.
+From Arm's A64 XML release it writes a Rust crate or a Go module. From an
+opcodesDB v3 export it writes an x86-64 Rust crate. Generated projects have no
+dependencies, build on their own, and ship with their own tests.
 
-The x86 backend imports opcodesDB v3 into a variable-length catalog and emits a
-standalone Rust crate with allocation-free legacy/REX, 3DNow, VEX, XOP, and EVEX
-dispatch, structured physical operands, Intel formatting, flow-control and
-semantic-access summaries, relative-branch encode plus RIP/relative relocate,
-and exact physical-field encoding. A64 Rust output includes an XML-derived
-formatter with preferred aliases and exposes both the encoding mnemonic and the
-assembler mnemonic on each decode. Generated A64 decoders expose their stable
-catalog order, and generated x86 codecs expose mode queries and representative
-bytes for exhaustive form traversal. A64 supports Go and Rust output, while
-x86-64 currently supports Rust output.
+| Output | Built from | Provides |
+|---|---|---|
+| A64 Rust crate | Arm A64 XML | A typed assembler with labels, an exact encoder for every encoding, an allocation-free decision-tree decoder, a disassembler that prints Arm's preferred spelling, and the encoding registry |
+| A64 Go module | Arm A64 XML | Typed and exact encoders, a decision-tree decoder with a table fallback, and the encoding registry |
+| x86-64 Rust crate | opcodesDB v3 JSON | An allocation-free decoder for legacy/REX, 3DNow, VEX, XOP and EVEX with structured operands, Intel-syntax formatting, flow-control and access summaries, exact encoding, and RIP/relative relocation |
 
-The implementation favors explicit data flow, bounded memory, hand-written
-parsers, deterministic output, and independent verification over generated
-framework machinery.
+`mkasm --json` writes the resolved instruction model instead of code.
 
 ## Status
 
-Using `ISA_A64_xml_A_profile-2026-06.tar.gz`:
+Measured on 2026-10-06 against `ISA_A64_xml_A_profile-2026-06` and opcodesDB
+v3, with Apple clang 21.0.0 and Homebrew LLVM MC 22.1.8 as the independent
+assemblers:
 
-| Stage | Current result |
-|---|---:|
-| Index parse | 4,334 canonical encodings + 291 aliases |
-| IForm resolution | 4,623 / 4,623 |
-| Go unit, vet, and generated-project checks | Passing |
-| Rust generated-project checks | Passing |
-| x86 opcodesDB import | 3,509 records / 7,289 syntax forms |
-| x86 generated Rust checks | Passing; zero-allocation structured decode and encode |
-| Independent LLVM parity for supported instructions | 100%; zero mismatches |
-| Strict all-instruction LLVM parity | Open; 5 LLVM-unknown encodings |
+| Check | Result |
+|---|---|
+| A64 encoding index | 4,334 canonical encodings and 291 aliases |
+| Encodings resolved from their instruction pages | 4,623 of 4,623 |
+| Exact encoders, Go and Rust | 4,623 each; every encoding exactly once |
+| LLVM byte parity, exact encoders (Go and Rust) | 4,618 of the 4,618 that LLVM recognizes |
+| LLVM byte parity, typed Rust calls | 4,523 of the 4,523 that LLVM recognizes |
+| LLVM byte parity, disassembly text | 4,573 of the 4,573 that LLVM recognizes |
+| x86 opcodesDB import | 3,509 encoding records, 7,289 syntax forms |
+| Generated Go, Rust and x86 Rust project tests | Passing |
 
-Every encoding recognized by the installed LLVM oracle is byte-identical. Five
-newer encodings are not recognized by that toolchain and remain explicitly
-unverified; the strict gate stays red until an independent oracle accepts them.
-Current results and toolchain versions are recorded in
-[`tests/conformance`](tests/conformance/README.md).
+Every case LLVM accepts matches byte for byte, and LLVM rejects no generated
+spelling. LLVM MC 22.1.8 does not recognize five encodings: `HINTE` and the
+authenticated PC-relative `RETAASPPC`, `RETABSPPC`, `AUTIASPPC` and
+`AUTIBSPPC`. They remain unverified, so the
+strict all-encoding gate stays red until an independent assembler accepts them.
+The full ledger is in [`tests/conformance`](tests/conformance/README.md).
 
 ## Quick start
 
-Requires Go 1.24.2 or newer.
+`mkasm` needs Go 1.24.2 or newer.
 
 ```bash
 go install github.com/bryanmatteson/mkasm/cmd/mkasm@latest
 
 CORPUS='https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-A64-ISA/ISA_A64/ISA_A64_xml_A_profile-2026-06.tar.gz'
 
-# Generate a standalone Rust crate.
-mkasm --codegen rust --output ./output-rs "$CORPUS"
-
-# Emit deterministic IR JSON.
+mkasm --codegen rust --output ./aarch64-rs "$CORPUS"
+mkasm --codegen go --output ./aarch64-go "$CORPUS"
 mkasm --json "$CORPUS" > arm-ir.json
-
-# Generate the x86-64 Rust crate from opcodesDB's compressed JSON export.
-xz -dc x86_64.json.xz | mkasm --arch x86_64 \
-  --codegen rust --output ./x86_64-rs -
 ```
 
-From a source checkout:
+For x86-64, pass the `x86.json` that
+[opcodesDB](https://github.com/MahdiSafsafi/opcodesDB)'s `x86.pl` writes, or
+pipe a compressed copy through `xz`:
 
 ```bash
-go run ./cmd/mkasm --codegen go --output ./output "$CORPUS"
+xz -dc x86_64.json.xz | mkasm --arch x86_64 --codegen rust --output ./x86_64-rs -
 ```
 
-## CLI contract
+From a source checkout, use `go run ./cmd/mkasm` in place of `mkasm`.
+
+## Using the generated code
+
+The A64 crate assembles with typed operands, decodes a word to its encoding,
+and prints the spelling Arm's XML prefers:
+
+```rust
+use aarch64::*;
+
+let mut asm = Assembler::new();
+asm.ldr(X2, Mem::offset(X1, 16));
+asm.add(X0, X2, 8);
+asm.ret();
+let code = asm.finish().unwrap();
+assert_eq!(code, [0xf9400822, 0x91002040, 0xd65f03c0]);
+
+let insn = decode(0x53083d00).unwrap();
+assert_eq!(insn.encoding_id, "UBFM_32M_bitfield");
+assert_eq!(insn.format(0).unwrap(), "UBFX w0, w8, #8, #8");
+
+// Every encoding also has an exact encoder over its fields.
+let word = encode_with_fields(
+    "UBFM_32M_bitfield",
+    &[("immr", 8), ("imms", 15), ("Rn", 8), ("Rd", 0)],
+)
+.unwrap();
+assert_eq!(word, 0x53083d00);
+```
+
+A decoded instruction also carries its assembler mnemonic, its field values,
+and any other encodings that match the same word. `catalog_entry` lists the
+decoder's encodings in a stable order.
+
+The x86-64 crate decodes into fixed-size values and can move an instruction
+without changing its target:
+
+```rust
+use x86_64::*;
+
+let bytes = [0xff, 0x15, 0x00, 0x20, 0x00, 0x00];
+let insn = decode(&bytes, Mode::Mode64).unwrap();
+assert_eq!(insn.format_intel(0x1000), "call qword ptr [rip+0x2000]");
+assert_eq!(insn.flow_control(), FlowControl::IndirectCall);
+
+let mut moved = [0u8; 15];
+let len = relocate(&insn, &bytes, 0x1000, 0x5000, &mut moved).unwrap();
+let moved = decode(&moved[..len], Mode::Mode64).unwrap();
+assert_eq!(moved.format_intel(0x5000), "call qword ptr [rip-0x2000]");
+```
+
+`encoding_count`, `encoding_supports_mode` and `encode_representative` walk
+every form. `FormInstruction` changes a decoded instruction's operands and
+encodes it again.
+
+## Command line
 
 ```text
 mkasm [--arch aarch64|x86_64] --codegen rust --output DIR INPUT
@@ -77,131 +124,177 @@ mkasm --version
 mkasm --help
 ```
 
-`INPUT` may be:
+For A64, `INPUT` is an extracted XML directory, a `.tar` or `.tar.gz` file, an
+HTTP(S) URL, or `-` for a tar stream on stdin. For x86-64 it is uncompressed
+opcodesDB v3 JSON from a file, a URL or stdin. An `.xz` input is refused with
+the `xz -dc` command to run instead. `--arch` also accepts `arm64`, `arm64e`,
+`amd64`, `x86-64` and `x64`.
 
-- an extracted ISA XML directory;
-- a `.tar` or `.tar.gz` filepath;
-- an HTTP(S) URL;
-- `-`, for a tar stream on stdin.
+- Progress and statistics go to stderr.
+- `--json` writes only JSON to stdout: schema `mkasm.ir.v1` for A64, sorted by
+  encoding ID, and `mkasm.x86.v1` for x86-64.
+- `--codegen` writes only below `--output` and leaves stdout empty.
+- Invalid flags exit with status 2 and print the help text after the error on
+  stderr. Input, parse, validation and generation failures exit with status 1.
+- No arguments, `-h` or `--help` print the help text to stdout.
 
-For `--arch x86_64`, `INPUT` is uncompressed opcodesDB v3 JSON from a file,
-URL, or stdin. Pipe `.json.xz` inputs through `xz -dc` as shown above.
+## How it works
 
-Progress and statistics are written to stderr. JSON mode writes only JSON to
-stdout. Code generation writes only below `--output` and leaves stdout empty.
-Invalid flag combinations exit with status 2; input, parse, validation, or
-generation failures exit with status 1. Running `mkasm` without arguments,
-`mkasm -h`, or `mkasm --help` prints the complete help screen to stdout.
-
-## Architecture
+### A64
 
 ```text
-directory | tar | gzip | URL | stdin
-                  |
-          bounded corpus loader
-                  |
-       Pass 1: encoding index
-                  |
-       Pass 2: parallel IForms
-                  |
-         resolved A64 IR
-             /         \
-      JSON export    Pass 3 codegen
-                       /      \
-                     Go       Rust
+directory | .tar | .tar.gz | URL | stdin
+                    |
+            bounded corpus loader
+                    |
+  Pass 1   encodingindex.xml -> encoding index
+                    |
+  Pass 2   instruction pages, in parallel -> resolved IR
+                    |
+               validation
+              /          \
+      --json export    Pass 3: decoder tree, typed operands,
+                       disassembly forms -> Go | Rust
 ```
 
-The compressed-corpus path is one pass:
+The loader streams a compressed corpus in one pass:
 
-- gzip and tar are read sequentially; no extraction directory is created;
-- XML members are parsed by a bounded worker pool;
-- reusable power-of-two slabs bound queued expanded XML;
-- compact parsed IForms are retained instead of raw instruction pages;
-- `encodingindex.xml` is released after Pass 1;
-- per-member and total expanded-size limits reject malformed archives.
+- gzip and tar are read sequentially, and nothing is extracted to disk;
+- a bounded worker pool parses the XML members under a 32 MiB budget for
+  expanded XML in flight;
+- compact parsed instruction pages are kept instead of raw XML, and
+  `encodingindex.xml` is released after Pass 1;
+- members larger than 64 MiB, or archives that expand beyond 512 MiB, are
+  rejected as malformed.
 
-Arm release bundles may include both the previous and current corpus. For named
-archives, `mkasm` selects the dated root named by the archive and avoids
-preparing the older release. For stdin, it selects the unique newest root only
-when all roots belong to one dated product series. Unrelated roots remain an
-error rather than being merged.
+Arm release bundles can hold both the previous and the current corpus. For a
+named archive, `mkasm` reads the dated root the archive name gives and skips the
+older one. On stdin it picks the newest root only when every root belongs to
+one dated release series; unrelated roots are an error, never merged. The
+similarly named `AARCHMRS_A_profile-*` archives carry Arm's JSON model rather
+than the instruction XML, and `mkasm` rejects them with a diagnostic saying so.
 
-The similarly named `AARCHMRS_A_profile-2026-06_mc.tar.gz` contains feature
-metadata, not instruction XML, and is rejected with a specific diagnostic.
+### Preferred disassembly
+
+Arm's XML gives each alias (`UBFX`, `LSL`, `MOV`, `CMP` and so on) its own
+encoding, with an `aliascond` stating when the alias is the preferred
+disassembly. `mkasm` compiles each condition into checks on the decoded word,
+and the formatter prints the most specific form whose checks hold. Compiled
+conditions:
+
+- fixed field values;
+- field equalities, including `x + 1 == y`;
+- `BitCount(x) == 1`;
+- `MoveWidePreferred` and `SVEMoveMaskPreferred`;
+- the bitfield orders `UInt(imms) < UInt(immr)` and `UInt(imms) >= UInt(immr)`;
+- `BFXPreferred`.
+
+The decoder reports `0x53083d00` as `UBFM_32M_bitfield`, and the formatter
+prints it as `UBFX w0, w8, #8, #8`. Words that `UBFIZ`, `LSL`, `LSR`, `ASR`,
+`UXT*`, `SXT*`, `BFI`, `BFC` or `BFXIL` describe print with those names.
+
+### x86-64
+
+Every template of every opcodesDB `ENCODING` record becomes one syntax form.
+The generated decoder normalizes legacy and vector prefixes once, then indexes a
+fixed prefix-family/map/opcode table. Each bucket checks only its own mode,
+prefix, ModR/M and trailing-byte-width constraints. Decoding returns a
+fixed-size value and encoding writes into the caller's 15-byte buffer. Neither
+allocates.
 
 ## Generated projects
 
-Go output contains:
+Generated projects are build outputs. To change one, change the generator or
+its templates and regenerate rather than editing the output.
+
+A64 Rust:
 
 ```text
-output/
-  LICENSE
-  go.mod
-  encoders/     typed, exact, and checked-field encoding
-  decoders/     decision-tree decode and generated tests
-  registry/     lookup by encoding ID and mnemonic
-  conformance/  all-encoding external-oracle ledger
-```
-
-Rust output contains:
-
-```text
-output-rs/
-  LICENSE
-  Cargo.toml
+aarch64-rs/
+  Cargo.toml, LICENSE
   src/
-    asm_support.rs
-    insns.rs
-    encodings.rs
-    raw.rs
-    decoders.rs           decision-tree decode; exposes mnemonic and asm_mnemonic
-    encoders.rs
-    formatters.rs         XML-derived disassembly with preferred aliases
-    registry.rs
-    insns_test.rs
+    lib.rs                public API
+    asm_support.rs        Assembler, registers, memory operands, labels, errors
+    insns.rs              typed methods, one per mnemonic across its operand shapes
+    encodings.rs          exact encoders, one per Arm encoding ID
+    raw.rs                field-level emitters for encodings without typed operands
+    encoders.rs           encode_fixed and encode_with_fields by encoding ID
+    decoders.rs           decision-tree decode and the decoder catalog
+    formatters.rs         preferred-spelling disassembly
+    registry.rs           encoding registry
+    insns_test.rs         typed-surface tests
   tests/
-    conformance.rs        typed-call ledger consumed by the LLVM oracle
-    exact_conformance.rs  all-encoding ledger consumed by the LLVM oracle
+    conformance.rs        typed-call ledger for the LLVM gate
+    exact_conformance.rs  all-encoding ledger for the LLVM gate
   examples/
-    decode_bench.rs       decoder throughput and allocation measurement
+    hello.rs              worked assembler example
+    llvm_check.rs         operand placements checked against clang
+    decode_bench.rs       decode time and allocation count
 ```
 
-Generated project directories are verification products and are not committed.
+A64 Go (module `aarch64`, Go 1.22):
 
-## Verification
-
-The repository can be built and verified with standard Go/Rust tools and
-`make`; `mise` is optional:
-
-```bash
-make verify
-make help
+```text
+aarch64-go/
+  go.mod, LICENSE
+  encoders/     InstructionEncoder.Encode, EncodeFixed, EncodeWithFields
+  decoders/     Decode, DecodeTree and DecodeTable, with golden and round-trip tests
+  registry/     Lookup by encoding ID
+  conformance/  all-encoding ledger for the LLVM gate
 ```
 
-Additional explicit gates:
+The Go module has no disassembler.
 
-```bash
-make build
-make bench
-make bench-micro
-make bench-rust-decoder
-make bench-x86 X86_CORPUS=/path/to/x86_64.json.xz
-make bench-x86-rust X86_CORPUS=/path/to/x86_64.json.xz
-make generate-go
-make generate-rust
-make generate-x86-rust X86_CORPUS=/path/to/x86_64.json.xz
+x86-64 Rust:
 
-make coverage-encodings
-make conformance
-make conformance-go
-make conformance-rust
-make conformance-disasm
-make conformance-x86 X86_CORPUS=/path/to/x86_64.json.xz
-make conformance-strict
-make conformance-asl ASL=/path/to/arm-asl-parser/asl
+```text
+x86_64-rs/
+  Cargo.toml, LICENSE
+  src/lib.rs              decoder, Intel formatter, encoders, relocation, tests
+  examples/decode_bench.rs
 ```
 
-Before tagging a release, run the complete supported-toolchain gate:
+The Rust crates use edition 2021 and are tested on Rust 1.97.1.
+
+## Development
+
+Day-to-day work needs Go and `make`. Generated-project targets also need
+`cargo`. LLVM gates need `clang` and `llvm-mc`. x86 targets need `xz`.
+`make help` lists every target.
+
+| Target | Checks |
+|---|---|
+| `make verify` | gofmt, vet, unit and race tests, source-coverage floors, and exact-ledger coverage |
+| `make generate-go`, `generate-rust`, `generate-x86-rust` | generate a project and run its tests (`-D warnings` for Rust) |
+| `make conformance` | Go, Rust and disassembly byte parity against clang and LLVM MC |
+| `make conformance-strict` | the same, but LLVM must also recognize every encoding |
+| `make conformance-asl` | opcode bits and fields against Arm's ASL |
+| `make bench`, `bench-micro`, `bench-rust-decoder`, `bench-x86`, `bench-x86-rust` | benchmarks; see [`tests/benchmarks`](tests/benchmarks/README.md) |
+| `make release-check` | verify, build, all three generated projects, then `conformance` |
+| `make build` | a packaged release binary in `dist/` |
+
+Variables:
+
+- `CORPUS`: an A64 archive path or URL. It defaults to the download URL for
+  Arm's 2026-06 release; point it at a local copy to work offline.
+- `X86_CORPUS`: an opcodesDB `.json.xz` file; required by the x86 targets.
+- `ASL`: an Arm ASL directory; defaults to `../arm-asl-parser/asl`.
+- `MKASM_CLANG` and `MKASM_LLVM_MC`: override the independent assemblers.
+- `GO_OUT`, `RUST_OUT` and `X86_RUST_OUT`: generated-project directories.
+
+`make conformance` fails on any rejected spelling or byte mismatch. Encodings
+the installed LLVM does not recognize are listed but never counted as passing.
+`make conformance-strict` answers the separate question of whether that LLVM can
+verify the whole corpus. `make audit-disasm` is a coverage-threshold report, not
+a conformance gate. `make coverage-encodings` proves that each exact ledger
+contains every resolved encoding exactly once. Source statement coverage, a
+separate measure, has its floors in [`.testcoverage.yml`](.testcoverage.yml).
+
+[`mise.toml`](mise.toml) provides the same workflows with pinned Go 1.26.5 and
+Rust 1.97.1. Each task's name is the make target's name with `:` for `-`, so
+`make conformance-strict-go` becomes `mise run conformance:strict:go`.
+
+### Releases
 
 ```bash
 make release-check X86_CORPUS=/path/to/x86_64.json.xz
@@ -209,61 +302,40 @@ make build VERSION=v0.1.0
 ./dist/mkasm --version
 ```
 
-`make build` produces a stripped, path-trimmed binary plus a versioned
-`.tar.gz` containing `mkasm`, `LICENSE`, and `README.md`, with a SHA-256 checksum
-beside it under `dist/`. `VERSION` is embedded in release builds; without it,
-the task uses `git describe` so local artifacts remain identifiable. Set
-`GOOS` and `GOARCH` to package another Go target.
-
-`make conformance` proves byte identity for every instruction recognized by
-the installed LLVM oracle and fails on any rejected spelling or byte mismatch.
-Unsupported instructions remain visible and unverified. The separate
-`make conformance-strict` gate also requires LLVM to recognize every
-generated and printable encoding; it currently fails on the documented five
-LLVM-unknown encodings. `make audit-disasm` is a separately named coverage
-threshold report and is not presented as conformance.
-
-`make coverage-encodings` proves that the Go and Rust exact ledgers each
-contain every resolved encoding exactly once. Source statement coverage is a
-separate `make coverage-source` regression metric; the two numbers are not
-conflated. Current source coverage is 49.7% overall; `coverage-source` separately
-holds the focused `pkg/coverage` package at 100%.
-
-The same workflows remain available through `mise.toml` for contributors who
-want pinned Go, Rust, and coverage-tool versions.
-
-Benchmark methodology is documented in
-[`tests/benchmarks`](tests/benchmarks/README.md). Independent-oracle contracts
-and current results are documented in
-[`tests/conformance`](tests/conformance/README.md).
+`make build` writes a stripped, path-trimmed binary to `dist/`. Next to it go a
+`.tar.gz` archive of `mkasm`, `LICENSE` and `README.md`, and that archive's
+SHA-256 checksum. Without `VERSION`, the build embeds the `git describe`
+output. Set `GOOS` and `GOARCH` to package for another platform.
 
 ## Repository map
 
 | Path | Responsibility |
 |---|---|
-| [`Makefile`](Makefile) / [`mise.toml`](mise.toml) | Portable and version-pinned verification workflows |
-| [`cmd/mkasm`](cmd/mkasm) | Public CLI and JSON export |
-| [`pkg/arm`](pkg/arm) | Corpus loading, orchestration, IForm parsing, code generation |
-| [`pkg/x86`](pkg/x86) | opcodesDB normalization and variable-length x86 encode/decode core |
+| [`cmd/mkasm`](cmd/mkasm) | CLI, input selection and JSON export |
+| [`pkg/arm`](pkg/arm) | A64 corpus loading, instruction-page parsing, alias conditions, disassembly model, and Go/Rust generation |
+| [`pkg/x86`](pkg/x86) | opcodesDB import, x86 encode/decode core, and Rust generation |
 | [`pkg/parse`](pkg/parse) | Streaming XML event engine |
 | [`pkg/ir`](pkg/ir) | Architecture-neutral instruction and bit-field model |
 | [`pkg/decoder`](pkg/decoder) | Decoder-tree construction and matching |
-| [`pkg/asl`](pkg/asl) | Hand-written parser for independent Arm ASL evidence |
-| [`pkg/coverage`](pkg/coverage) | Exact expected-versus-emitted encoding coverage |
-| [`templates`](templates) | Embedded Go and Rust project templates |
-| [`tests/benchmarks`](tests/benchmarks) | Public corpus-scale benchmarks |
-| [`tests/conformance`](tests/conformance) | External LLVM and ASL verification |
+| [`pkg/asl`](pkg/asl) | Arm ASL parser for independent cross-checks |
+| [`pkg/coverage`](pkg/coverage) | Expected-versus-emitted encoding coverage |
+| [`templates`](templates) | Embedded Go, Rust and x86 Rust project templates |
+| [`tests/conformance`](tests/conformance) | LLVM and ASL verification and the current ledger |
+| [`tests/benchmarks`](tests/benchmarks) | Corpus-scale benchmarks and measured results |
+| [`Makefile`](Makefile), [`mise.toml`](mise.toml) | Verification and release workflows |
 
 ## Scope
 
-`mkasm` ships A64 XML project generation plus opcodesDB-backed x86-64 Rust
-generation. The x86 backend does not yet emit Go projects or model MVEX; the
-generated Rust crate does cover 3DNow's trailing-selector encoding. It does not
-execute architecture pseudocode cycle-for-cycle, replace an architectural
-simulator, or treat internal encoder/decoder round trips as independent proof.
-Arm's corpus is downloaded or supplied by the user and is not redistributed by
-this repository.
+`mkasm` generates A64 Go and Rust projects and x86-64 Rust projects. The x86
+backend does not emit Go and does not model MVEX. It does cover 3DNow's
+trailing-selector encoding. `mkasm` does not execute architecture pseudocode or
+stand in for a simulator. Round trips between its own encoders and decoders
+show internal consistency, so only the independent gates count as conformance
+evidence.
+
+Arm's corpus is not redistributed here. Users download it or supply their own
+copy. Generated projects are build outputs and are not committed.
 
 ## License
 
-MIT. Generated Go modules and Rust crates receive the same license.
+MIT. Generated Go modules and Rust crates carry the same license.
