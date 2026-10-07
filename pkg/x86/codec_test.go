@@ -42,6 +42,11 @@ func codecCatalog() *Catalog {
 			{Type: "REG", Symbol: "GPR64", EncodedIn: "REG", Write: true},
 			{Type: "AGEN", Symbol: "MEM", EncodedIn: "RM", Size: "64", Read: true},
 		}},
+		{ID: "XOR_rm32_r32", FormID: "XOR_rm32_r32/0", Mnemonic: "XOR", Kind: EncodingLegacy, Map: MapPrimary, Opcode: 0x31, Modes: mode64, W: BitZero, HasModRM: true, Mod: ModRegister, Operands: []Operand{
+			{Type: "REG", Symbol: "GPR32", EncodedIn: "RM", Read: true, Write: true},
+			{Type: "REG", Symbol: "GPR32", EncodedIn: "REG", Read: true},
+		}},
+		{ID: "XCHG_ovv_1", FormID: "XCHG_ovv_1/0", Mnemonic: "XCHG", Kind: EncodingLegacy, Map: MapPrimary, Opcode: 0x90, Modes: modeAll, W: BitAny},
 	}}
 }
 
@@ -57,6 +62,8 @@ func TestDecodeAndEncodeRepresentativeFamilies(t *testing.T) {
 		length uint8
 	}{
 		{"nop", []byte{0x90}, "NOP", 1},
+		{"rex-w-self-exchange-nop", []byte{0x48, 0x90}, "NOP", 2},
+		{"rex-b-exchange", []byte{0x49, 0x90}, "XCHG_ovv_1", 2},
 		{"rex", []byte{0x48, 0x01, 0xc8}, "ADD_rm64_r64", 3},
 		{"memory-sib-disp8", []byte{0x48, 0x01, 0x4c, 0x24, 0x08}, "ADD_rm64_r64", 5},
 		{"endbr64", []byte{0xf3, 0x0f, 0x1e, 0xfa}, "ENDBR64", 4},

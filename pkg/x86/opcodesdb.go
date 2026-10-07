@@ -128,7 +128,7 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 	if size, parseErr := strconv.ParseUint(fields["OSZ"], 10, 8); parseErr == nil && (size == 16 || size == 32 || size == 64) {
 		e.OperandSize = uint8(size)
 	}
-	if e.Kind == EncodingLegacy && fields["OSZ"] != "" {
+	if e.Kind == EncodingLegacy && (fields["OSZ"] != "" || e.Mnemonic == "TZCNT" || e.Mnemonic == "LZCNT" || e.Mnemonic == "POPCNT") {
 		// In legacy encodings the physical 66 byte can be the OSZ
 		// override even when P66 (mandatory-prefix role) is zero.
 		e.PrefixMask &^= 1

@@ -326,26 +326,163 @@ func TestCanonicalBareAlternative(t *testing.T) {
 	}
 }
 
+// labelOperandFixtures are ARM's own <label> explanations, one per wording
+// the A64 corpus uses, with the fields they are encoded in.
+var labelOperandFixtures = []struct {
+	name   string
+	link   string
+	fields []string
+	bits   map[string]ir.BitField
+	prose  string
+}{
+	{
+		name: "B/BL imm26", link: "imm26_offset", fields: []string{"imm26"},
+		bits:  map[string]ir.BitField{"imm26": {Name: "imm26", Start: 0, End: 25}},
+		prose: `Is the program label to be unconditionally branched to. Its offset from the address of this instruction, in the range +/-128MB, is encoded as "imm26" times 4.`,
+	},
+	{
+		name: "B.cond/CBZ imm19", link: "imm19_offset", fields: []string{"imm19"},
+		bits:  map[string]ir.BitField{"imm19": {Name: "imm19", Start: 5, End: 23}},
+		prose: `Is the program label to be conditionally branched to. Its offset from the address of this instruction, in the range +/-1MB, is encoded as "imm19" times 4.`,
+	},
+	{
+		name: "LDR literal imm19", link: "imm19_offset", fields: []string{"imm19"},
+		bits:  map[string]ir.BitField{"imm19": {Name: "imm19", Start: 5, End: 23}},
+		prose: `Is the program label from which the data is to be loaded. Its offset from the address of this instruction, in the range +/-1MB, is encoded as "imm19" times 4.`,
+	},
+	{
+		name: "TBZ imm14", link: "imm14_offset", fields: []string{"imm14"},
+		bits:  map[string]ir.BitField{"imm14": {Name: "imm14", Start: 5, End: 18}},
+		prose: `Is the program label to be conditionally branched to. Its offset from the address of this instruction, in the range +/-32KB, is encoded as "imm14" times 4.`,
+	},
+	{
+		name: "CB<cc> imm9", link: "imm9_offset", fields: []string{"imm9"},
+		bits:  map[string]ir.BitField{"imm9": {Name: "imm9", Start: 5, End: 13}},
+		prose: `Is the program label to be conditionally branched to. Its offset from the address of this instruction, in the range -1024 to 1020, is encoded as "imm9" times 4.`,
+	},
+	{
+		name: "ADR immhi:immlo", link: "immhiimmlo_offset", fields: []string{"immhi", "immlo"},
+		bits: map[string]ir.BitField{
+			"immhi": {Name: "immhi", Start: 5, End: 23},
+			"immlo": {Name: "immlo", Start: 29, End: 30},
+		},
+		prose: `Is the program label whose address is to be calculated. Its offset from the address of this instruction, in the range +/-1MB, is encoded in "immhi:immlo".`,
+	},
+	{
+		name: "ADRP immhi:immlo", link: "immhiimmlo_offset", fields: []string{"immhi", "immlo"},
+		bits: map[string]ir.BitField{
+			"immhi": {Name: "immhi", Start: 5, End: 23},
+			"immlo": {Name: "immlo", Start: 29, End: 30},
+		},
+		prose: `Is the program label whose 4KB page address is to be calculated. Its offset from the page address of this instruction, in the range +/-4GB, is encoded as "immhi:immlo" times 4096.`,
+	},
+	{
+		name: "AUTIASPPC imm16", link: "imm16_offset", fields: []string{"imm16"},
+		bits:  map[string]ir.BitField{"imm16": {Name: "imm16", Start: 5, End: 20}},
+		prose: `Is the program label whose address is to be calculated. Its negative offset from the address of this instruction, a multiple of 4 in the range -262140 to 0, is encoded as an unsigned value in the "imm16" field as <label>/4.`,
+	},
+}
+
+func modelLabelOperand(t *testing.T, name string) *DisasmOperand {
+	t.Helper()
+	for _, fixture := range labelOperandFixtures {
+		if fixture.name != name {
+			continue
+		}
+		c := ClassifyOperandWith(AsmOperand{
+			Symbol: "<label>", Link: fixture.link, Hover: fixture.prose,
+		}, AsmExplanation{
+			Symbol: "<label>", Link: fixture.link, Fields: fixture.fields, Prose: fixture.prose,
+		})
+		if c.Class != ClassLabel {
+			t.Fatalf("%s classified as %s, want label", name, c.Class)
+		}
+		op, err := disasmOperandWithContext(c, fixture.bits, 0, 0, nil, "")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if err := checkLabelDisplacement(op); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return op
+	}
+	t.Fatalf("no label fixture %q", name)
+	return nil
+}
+
+// TestPCRelativeLabelDecodeRelations renders the model-built operand for every
+// A64 label wording, in both directions. A backward branch is the case an
+// unsigned reading gets wrong: BL .-420 used to print as .+268435036.
 func TestPCRelativeLabelDecodeRelations(t *testing.T) {
-	adrp := DisasmOperand{
-		Kind:   DisasmNum,
-		Class:  ClassLabel,
-		Parts:  []BitPart{{Start: 5, End: 23, Width: 19}, {Start: 29, End: 30, Width: 2}},
-		Scale:  4096,
-		Signed: true,
+	for _, test := range []struct {
+		fixture string
+		word    uint32
+		want    string
+	}{
+		{"B/BL imm26", 0x03FFFF97, ".-420"},
+		{"B/BL imm26", 0x02000000, ".-134217728"},
+		{"B/BL imm26", 0x00000001, ".+4"},
+		{"B/BL imm26", 0x01FFFFFF, ".+134217724"},
+		{"B.cond/CBZ imm19", 0x7FFFB << 5, ".-20"},
+		{"B.cond/CBZ imm19", 0x7FFFE << 5, ".-8"},
+		{"B.cond/CBZ imm19", 0x00005 << 5, ".+20"},
+		{"LDR literal imm19", 0x7FFFF << 5, ".-4"},
+		{"LDR literal imm19", 0x40000 << 5, ".-1048576"},
+		{"TBZ imm14", 0x3FF1 << 5, ".-60"},
+		{"TBZ imm14", 0x1FFF << 5, ".+32764"},
+		{"CB<cc> imm9", 0x100 << 5, ".-1024"},
+		{"CB<cc> imm9", 0x0FF << 5, ".+1020"},
+		{"ADR immhi:immlo", 0x7FFFF<<5 | 3<<29, ".-1"},
+		{"ADR immhi:immlo", 0x40000 << 5, ".-1048576"},
+		{"ADR immhi:immlo", 1 << 29, ".+1"},
+		{"ADRP immhi:immlo", 1 << 29, ".+4096"},
+		{"ADRP immhi:immlo", 0x7FFFF<<5 | 3<<29, ".-4096"},
+		{"AUTIASPPC imm16", 36 << 5, ".-144"},
+		{"AUTIASPPC imm16", 3 << 5, ".-12"},
+		{"AUTIASPPC imm16", 0xFFFF << 5, ".-262140"},
+		{"AUTIASPPC imm16", 0, ".+0"},
+	} {
+		op := modelLabelOperand(t, test.fixture)
+		if got, ok := op.Render(test.word); !ok || got != test.want {
+			t.Errorf("%s label of 0x%08X = %q, %v; want %q, true",
+				test.fixture, test.word, got, ok, test.want)
+		}
 	}
-	if got, ok := adrp.Render(uint32(1) << 29); !ok || got != ".+4096" {
-		t.Fatalf("ADRP label = %q, %v; want .+4096, true", got, ok)
+}
+
+// TestLabelOperandsCarryDisplacementSign is the model invariant: every
+// PC-relative label is Signed or the RawMul<0 PAC form, and a label read as a
+// plain unsigned field is refused rather than printed as a forward offset.
+func TestLabelOperandsCarryDisplacementSign(t *testing.T) {
+	for _, fixture := range labelOperandFixtures {
+		op := modelLabelOperand(t, fixture.name)
+		if !op.Signed && op.RawMul >= 0 {
+			t.Errorf("%s: label is neither signed nor negated: %#v", fixture.name, op)
+		}
+		if op.RawMul < 0 && (op.Signed || op.Scale != 4) {
+			t.Errorf("%s: PAC label signed=%v scale=%d, want unsigned field times 4",
+				fixture.name, op.Signed, op.Scale)
+		}
 	}
-	pac := DisasmOperand{
-		Kind:   DisasmNum,
-		Class:  ClassLabel,
-		Parts:  []BitPart{{Start: 5, End: 20, Width: 16}},
-		Scale:  4,
-		RawMul: -1,
+	unsigned := &DisasmOperand{Symbol: "<label>", Class: ClassLabel, Kind: DisasmNum, Scale: 4}
+	if err := checkLabelDisplacement(unsigned); err == nil {
+		t.Fatal("an unsigned PC-relative label passed the displacement invariant")
 	}
-	if got, ok := pac.Render(uint32(3) << 5); !ok || got != ".-12" {
-		t.Fatalf("PAC label = %q, %v; want .-12, true", got, ok)
+}
+
+func TestLabelSignSampleSetsEveryLabelSignBit(t *testing.T) {
+	label := modelLabelOperand(t, "B/BL imm26")
+	form := DisasmForm{Parts: []DisasmPart{{Literal: "BL "}, {Op: label}}}
+	entry := CatalogEntry{Mask: 0xFC000000, Value: 0x94000000}
+	sample, ok := labelSignSample(&form, entry, 0x94000001)
+	if !ok || sample != 0x96000001 {
+		t.Fatalf("sign sample = 0x%08X, %v; want 0x96000001, true", sample, ok)
+	}
+	if got, ok := form.Render(sample); !ok || got != "BL .-134217724" {
+		t.Fatalf("sign sample renders %q, %v; want BL .-134217724", got, ok)
+	}
+	if _, ok := labelSignSample(&form, entry, sample); ok {
+		t.Fatal("a probe that already sets the sign bit produced a duplicate sample")
 	}
 }
 

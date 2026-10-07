@@ -27,6 +27,28 @@ func buildRustDisasmData(catalog *Catalog, surface *DisasmSurface) (rustDisasmDa
 		fmt.Fprintf(&out, "    %s,\n", emitRustDisasmForm(&forms[i], entry))
 	}
 	var cases strings.Builder
+	emit := func(word uint32) {
+		var best *DisasmForm
+		var bestEntry CatalogEntry
+		for j := range forms {
+			candidateEntry := entries[forms[j].EncodingID]
+			if candidateEntry.Mask == 0 || word&candidateEntry.Mask != candidateEntry.Value ||
+				!forms[j].matchesConstraints(word) {
+				continue
+			}
+			if best == nil || betterRustDisasmForm(&forms[j], candidateEntry, best, bestEntry) {
+				best, bestEntry = &forms[j], candidateEntry
+			}
+		}
+		if best == nil {
+			return
+		}
+		expected, ok := best.Render(word)
+		if !ok {
+			return
+		}
+		fmt.Fprintf(&cases, "        (0x%08X, %s),\n", word, rustStringLiteral(expected))
+	}
 	for i := range forms {
 		entry := entries[forms[i].EncodingID]
 		word := entry.FixedWord
@@ -42,28 +64,38 @@ func buildRustDisasmData(catalog *Catalog, surface *DisasmSurface) (rustDisasmDa
 			word = word&^field.Free | probe
 		}
 		word = legalConformanceWord(word, entry.Mask, entry.Value, &forms[i])
-		var best *DisasmForm
-		var bestEntry CatalogEntry
-		for j := range forms {
-			candidateEntry := entries[forms[j].EncodingID]
-			if candidateEntry.Mask == 0 || word&candidateEntry.Mask != candidateEntry.Value ||
-				!forms[j].matchesConstraints(word) {
-				continue
-			}
-			if best == nil || betterRustDisasmForm(&forms[j], candidateEntry, best, bestEntry) {
-				best, bestEntry = &forms[j], candidateEntry
-			}
+		emit(word)
+		if negative, ok := labelSignSample(&forms[i], entry, word); ok {
+			emit(negative)
 		}
-		if best == nil {
-			continue
-		}
-		expected, ok := best.Render(word)
-		if !ok {
-			continue
-		}
-		fmt.Fprintf(&cases, "        (0x%08X, %s),\n", word, rustStringLiteral(expected))
 	}
 	return rustDisasmData{Forms: out.String(), Cases: cases.String()}, nil
+}
+
+// labelSignSample returns word with the most significant bit of every
+// PC-relative label set. That bit is where a two's-complement displacement
+// and an unsigned reading of the same field disagree, so each label form
+// carries one backward (or, for the PAC negative-offset form, maximal)
+// sample beside its ordinary probe. It reports false when the form has no
+// label, the probe already set every sign bit, or the sample is not a word
+// this form prints.
+func labelSignSample(form *DisasmForm, entry CatalogEntry, word uint32) (uint32, bool) {
+	sample := word
+	for _, part := range form.Parts {
+		op := part.Op
+		if op == nil || op.Class != ClassLabel || op.Kind != DisasmNum ||
+			len(op.Parts) == 0 || op.Parts[0].IsLit {
+			continue
+		}
+		sample |= (uint32(1) << uint(op.Parts[0].End)) &^ entry.Mask
+	}
+	if sample == word || sample&entry.Mask != entry.Value || !form.matchesConstraints(sample) {
+		return 0, false
+	}
+	if _, ok := form.Render(sample); !ok {
+		return 0, false
+	}
+	return sample, true
 }
 
 func betterRustDisasmForm(a *DisasmForm, ae CatalogEntry, b *DisasmForm, be CatalogEntry) bool {

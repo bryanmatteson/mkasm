@@ -118,6 +118,24 @@ func TestParseOpcodesDBPreservesLegacyOperandSizeSelection(t *testing.T) {
 	}
 }
 
+func TestCountInstructionsAllowOperandSizeOverrideWithMandatoryF3(t *testing.T) {
+	for _, mnemonic := range []string{"TZCNT", "LZCNT", "POPCNT"} {
+		input := `{"version":"3","arch":"x86","records":[{
+			"id":"COUNT","rectype":"ENCODING",
+			"diagram":{"fields":[{"name":"MAP","value":"0f"},{"name":"MR","value":"1"},{"name":"OP","value":"0xbc"},{"name":"P66","value":"0"},{"name":"PF2","value":"0"},{"name":"PF3","value":"1"}]},
+			"templates":[{"syntax":{"mnem":"` + mnemonic + `","text":"COUNT","ast":[]}}]
+		}]}`
+		cat, err := ParseOpcodesDB(strings.NewReader(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoding := cat.Encodings[0]
+		if encoding.PrefixMask != 6 || encoding.PrefixValue != 2 {
+			t.Fatalf("%s rejects 66 F3 operand-size override: %+v", mnemonic, encoding)
+		}
+	}
+}
+
 func TestOpcodesDBCorpus(t *testing.T) {
 	path := os.Getenv("MKASM_X86_OPCODESDB")
 	if path == "" {

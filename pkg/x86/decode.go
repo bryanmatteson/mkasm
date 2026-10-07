@@ -102,6 +102,7 @@ type decodedHead struct {
 	w               byte
 	vectorLength    uint16
 	addressOverride bool
+	baseExt         byte
 	modrmOffset     int
 }
 
@@ -173,6 +174,11 @@ func encodingSpecificity(e *Encoding) int {
 
 func matchEncoding(src []byte, mode Mode, head decodedHead, e *Encoding) (length int, matched, short bool) {
 	if !e.Modes.supports(mode) || head.prefixBits&e.PrefixMask != e.PrefixValue {
+		return 0, false, false
+	}
+	// Opcode 90 is NOP only for the architectural self-exchange. REX.B extends
+	// its opcode register to R8, making (for example) 49 90 XCHG RAX, R8.
+	if e.ID == "NOP" && head.opcode == 0x90 && head.baseExt != 0 {
 		return 0, false, false
 	}
 	if e.W != BitAny && byte(e.W) != head.w {
@@ -282,6 +288,7 @@ prefixesDone:
 	}
 	if mode == Mode64 && src[pos] >= 0x40 && src[pos] <= 0x4f {
 		h.w = (src[pos] >> 3) & 1
+		h.baseExt = src[pos] & 1
 		pos++
 		if pos >= len(src) {
 			return h, ErrShortInstruction

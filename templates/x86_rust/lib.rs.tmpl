@@ -329,6 +329,9 @@ pub struct EncodeFields {
     pub mode: Mode,
     pub segment_override: u8,
     pub address_override: bool,
+    pub lock: bool,
+    pub repeat: u8,
+    pub force_rex: bool,
     pub mod_bits: u8,
     pub reg: u8,
     pub rm: u8,
@@ -351,6 +354,9 @@ impl Default for EncodeFields {
             mode: Mode::Mode64,
             segment_override: 0,
             address_override: false,
+            lock: false,
+            repeat: 0,
+            force_rex: false,
             mod_bits: 0,
             reg: 0,
             rm: 0,
@@ -510,6 +516,9 @@ enum Match {
 fn match_encoding(src: &[u8], mode: Mode, head: Head, e: &Encoding) -> Match {
     if !supports(e.modes, mode)
         || head.prefix_bits & e.prefix_mask != e.prefix_value
+        // Opcode 90 is NOP only for the architectural self-exchange. REX.B
+        // extends its opcode register to R8, making 49 90 XCHG RAX, R8.
+        || (e.id == "NOP" && head.opcode == 0x90 && head.base_ext != 0)
         || (e.w >= 0 && e.w as u8 != head.w)
         || (e.operand_size != 0 && e.operand_size as usize != effective_operand_bits(mode, head.prefix_bits & 1 != 0, head.w != 0))
         || (e.vector_length != 0 && e.vector_length != head.vector_length)
@@ -1412,12 +1421,18 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
         return Err(EncodeError::BadField);
     }
     let mut pos = 0usize;
+    if fields.lock && matches!(e.kind, 0 | 5) { push(out, &mut pos, 0xf0)?; }
     if fields.segment_override != 0 { push(out, &mut pos, fields.segment_override)?; }
     if fields.address_override { push(out, &mut pos, 0x67)?; }
     if e.kind == 0 {
         let operand_override = operand_size_override(fields.mode, e.operand_size);
         if operand_override && e.mandatory != 1 { push(out, &mut pos, 0x66)?; }
-        if let Some(prefix) = mandatory_prefix_byte(e.mandatory) { push(out, &mut pos, prefix)?; }
+        let mandatory = mandatory_prefix_byte(e.mandatory);
+        let repeat = repeat_prefix_byte(fields.repeat);
+        if repeat != mandatory {
+            if let Some(prefix) = repeat { push(out, &mut pos, prefix)?; }
+        }
+        if let Some(prefix) = mandatory { push(out, &mut pos, prefix)?; }
         let mut rex = 0u8;
         if fields.mode == Mode::Mode64 {
             if e.w == 1 || e.operand_size == 64 { rex |= 8; }
@@ -1426,10 +1441,11 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
             else if fields.use_sib { rex |= (fields.index >> 3 & 1) << 1; rex |= fields.base >> 3 & 1; }
             else { rex |= fields.rm >> 3 & 1; }
         }
-        if rex != 0 { push(out, &mut pos, 0x40 | rex)?; }
+        if rex != 0 || fields.force_rex { push(out, &mut pos, 0x40 | rex)?; }
         put_opcode_map(out, &mut pos, e.map)?;
         push(out, &mut pos, e.opcode | if e.opcode_plus_reg { fields.opcode_reg & 7 } else { 0 })?;
     } else if e.kind == 5 {
+        if let Some(prefix) = repeat_prefix_byte(fields.repeat) { push(out, &mut pos, prefix)?; }
         let mut rex = 0u8;
         if fields.mode == Mode::Mode64 {
             rex |= (fields.reg >> 3 & 1) << 2;
@@ -1440,7 +1456,7 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
                 rex |= fields.rm >> 3 & 1;
             }
         }
-        if rex != 0 { push(out, &mut pos, 0x40 | rex)?; }
+        if rex != 0 || fields.force_rex { push(out, &mut pos, 0x40 | rex)?; }
         push(out, &mut pos, 0x0f)?;
         push(out, &mut pos, 0x0f)?;
     } else {
@@ -1468,6 +1484,230 @@ pub fn encode(form_index: usize, fields: EncodeFields, out: &mut [u8; 15]) -> Re
     }
     if e.kind == 5 { push(out, &mut pos, e.opcode)?; }
     Ok(pos)
+}
+
+/// Architectural register classes exposed by the editable form API.
+pub type FormRegisterClass = RegisterClass;
+
+/// One decoded architectural register exposed by the editable form API.
+pub type FormRegister = Register;
+
+/// One decoded memory operand exposed by the editable form API.
+pub type FormMemory = MemoryOperand;
+
+/// One explicit operand decoded from a generated x86 form.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormOperand {
+    Register(FormRegister),
+    Immediate { value: u64, signed: i64, width: u8 },
+    Relative { displacement: i64, width: u8 },
+    Memory(FormMemory),
+    Other,
+}
+
+/// A replacement value for one editable x86 form operand.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormOperandValue {
+    Gpr { number: u8, width: u16 },
+    Unsigned(u64),
+    Signed(i64),
+    Relative(i64),
+    AbsoluteMemory(u64),
+}
+
+/// One generated x86 form together with editable encoder fields.
+#[derive(Clone, Copy, Debug)]
+pub struct FormInstruction {
+    decoded: Decoded,
+    fields: EncodeFields,
+}
+
+impl FormInstruction {
+    /// Decode the first instruction in `src` as an editable generated form.
+    pub fn decode(src: &[u8], mode: Mode) -> Result<Self, DecodeError> {
+        let decoded = decode(src, mode)?;
+        Ok(Self { fields: fields_from_decoded(&decoded), decoded })
+    }
+
+    pub fn len(&self) -> usize { self.decoded.length as usize }
+    pub const fn is_empty(&self) -> bool { false }
+    pub fn form_index(&self) -> u32 { self.decoded.form_index }
+    pub fn same_form(&self, other: &Self) -> bool { self.form_index() == other.form_index() }
+    pub fn operand_count(&self) -> usize { explicit_form_operands(&self.decoded).count() }
+    pub fn operand(&self, index: usize) -> Option<FormOperand> {
+        explicit_form_operands(&self.decoded).nth(index).map(form_operand)
+    }
+    pub fn supports_operand(&self, index: usize, value: FormOperandValue) -> bool {
+        let mut candidate = *self;
+        candidate.set_operand(index, value).is_ok()
+    }
+
+    /// Replace one explicit operand while preserving the form and every other operand.
+    pub fn set_operand(&mut self, index: usize, value: FormOperandValue) -> Result<(), EncodeError> {
+        if self.operand(index).is_some_and(|operand| operand_matches_value(operand, value)) {
+            return Ok(());
+        }
+        let mut candidates = [None; 5];
+        match value {
+            FormOperandValue::Gpr { number, width } if number < 16 => {
+                for field in 0..4 {
+                    let mut fields = self.fields;
+                    match field {
+                        0 => fields.reg = number,
+                        1 => fields.rm = number,
+                        2 => fields.opcode_reg = number,
+                        _ => fields.vvvv = number,
+                    }
+                    if width == 8 && (4..8).contains(&number) { fields.force_rex = true; }
+                    candidates[field] = Some(fields);
+                }
+            }
+            FormOperandValue::Unsigned(value) => {
+                for immediate in 0..4 {
+                    let mut fields = self.fields;
+                    fields.immediate[immediate] = value;
+                    candidates[immediate] = Some(fields);
+                }
+            }
+            FormOperandValue::Signed(value) | FormOperandValue::Relative(value) => {
+                for immediate in 0..4 {
+                    let mut fields = self.fields;
+                    fields.immediate[immediate] = value as u64;
+                    candidates[immediate] = Some(fields);
+                }
+            }
+            FormOperandValue::AbsoluteMemory(value) => {
+                let mut displacement = self.fields;
+                displacement.displacement = value as i64;
+                candidates[0] = Some(displacement);
+                for immediate in 0..4 {
+                    let mut fields = self.fields;
+                    fields.immediate[immediate] = value;
+                    candidates[immediate + 1] = Some(fields);
+                }
+            }
+            FormOperandValue::Gpr { .. } => {}
+        }
+        for fields in candidates.into_iter().flatten() {
+            if let Some(decoded) = self.validate_candidate(index, value, fields) {
+                self.fields = fields;
+                self.decoded = decoded;
+                return Ok(());
+            }
+        }
+        Err(EncodeError::BadField)
+    }
+
+    /// Encode the current form and operand fields.
+    pub fn encode(&self, out: &mut [u8; 15]) -> Result<usize, EncodeError> {
+        encode(self.form_index() as usize, self.fields, out)
+    }
+
+    /// Encode without a redundant authored REX prefix.
+    pub fn encode_canonical(&self, out: &mut [u8; 15]) -> Result<usize, EncodeError> {
+        let mut fields = self.fields;
+        fields.force_rex = explicit_form_operands(&self.decoded).any(|operand| {
+            matches!(form_operand(operand), FormOperand::Register(FormRegister {
+                class: FormRegisterClass::Gpr, number: 4..=7, width: 8, high8: false,
+            }))
+        });
+        encode(self.form_index() as usize, fields, out)
+    }
+
+    fn validate_candidate(&self, index: usize, value: FormOperandValue, fields: EncodeFields) -> Option<Decoded> {
+        let mut out = [0u8; 15];
+        let length = encode(self.form_index() as usize, fields, &mut out).ok()?;
+        let decoded = decode(&out[..length], self.fields.mode).ok()?;
+        if decoded.form_index != self.form_index()
+            || decoded.length as usize != length
+            || !explicit_form_operands(&decoded).nth(index).map(form_operand)
+                .is_some_and(|operand| operand_matches_value(operand, value))
+        {
+            return None;
+        }
+        for operand_index in 0..self.operand_count() {
+            if operand_index != index
+                && self.operand(operand_index)
+                    != explicit_form_operands(&decoded).nth(operand_index).map(form_operand)
+            {
+                return None;
+            }
+        }
+        Some(decoded)
+    }
+}
+
+fn explicit_form_operands(decoded: &Decoded) -> impl Iterator<Item = &DecodedOperand> {
+    decoded.operands().iter().filter(|operand| !operand.implicit)
+}
+
+fn form_operand(operand: &DecodedOperand) -> FormOperand {
+    match operand.kind {
+        OperandKind::Register | OperandKind::Mask => operand.register
+            .map_or(FormOperand::Other, FormOperand::Register),
+        OperandKind::Memory => FormOperand::Memory(operand.memory),
+        OperandKind::Immediate => FormOperand::Immediate {
+            value: operand.immediate.value,
+            signed: operand.immediate.signed,
+            width: operand.immediate.width,
+        },
+        OperandKind::Relative => FormOperand::Relative {
+            displacement: operand.immediate.signed,
+            width: operand.immediate.width,
+        },
+        _ => FormOperand::Other,
+    }
+}
+
+fn operand_matches_value(operand: FormOperand, value: FormOperandValue) -> bool {
+    match (operand, value) {
+        (FormOperand::Register(FormRegister {
+            class: FormRegisterClass::Gpr, number: actual_number,
+            width: actual_width, high8: false,
+        }), FormOperandValue::Gpr { number, width }) => actual_number == number && actual_width == width,
+        (FormOperand::Immediate { value: actual, .. }, FormOperandValue::Unsigned(value)) => actual == value,
+        (FormOperand::Immediate { signed: actual, .. }, FormOperandValue::Signed(value)) => actual == value,
+        (FormOperand::Relative { displacement: actual, .. }, FormOperandValue::Relative(value)) => actual == value,
+        (FormOperand::Memory(memory), FormOperandValue::AbsoluteMemory(value)) => {
+            memory.base.is_none() && memory.index.is_none() && !memory.rip_relative
+                && memory.displacement_width == 64 && memory.displacement as u64 == value
+        }
+        _ => false,
+    }
+}
+
+fn fields_from_decoded(decoded: &Decoded) -> EncodeFields {
+    let physical = decoded.physical;
+    let memory = decoded.operands().iter()
+        .find(|operand| operand.kind == OperandKind::Memory)
+        .map(|operand| operand.memory);
+    let use_sib = physical.sib.is_some();
+    let segment_override = memory.and_then(|memory| memory.segment).and_then(|segment| match segment.number {
+        0 => Some(0x26), 1 => Some(0x2e), 2 => Some(0x36), 3 => Some(0x3e),
+        4 => Some(0x64), 5 => Some(0x65), _ => None,
+    }).unwrap_or(0);
+    EncodeFields {
+        mode: physical.mode,
+        segment_override,
+        address_override: physical.address_size != match physical.mode { Mode::Mode16 => 16, Mode::Mode32 => 32, Mode::Mode64 => 64 },
+        lock: physical.lock,
+        repeat: physical.repeat,
+        force_rex: physical.rex != 0,
+        mod_bits: physical.mod_bits,
+        reg: physical.reg,
+        rm: if use_sib { 4 } else { physical.rm },
+        scale: physical.sib.map_or(0, |sib| sib >> 6),
+        index: memory.and_then(|memory| memory.index).map_or(4, |index| index.number),
+        base: memory.and_then(|memory| memory.base).map_or(5, |base| base.number),
+        use_sib,
+        vvvv: physical.vvvv,
+        mask: physical.mask,
+        zeroing: physical.zeroing,
+        broadcast: physical.broadcast,
+        opcode_reg: physical.opcode_register,
+        displacement: physical.displacement.signed,
+        immediate: physical.immediates.map(|immediate| immediate.value),
+    }
 }
 
 fn vector_prefix(e: &Encoding, f: EncodeFields) -> Result<([u8; 4], usize), EncodeError> {
@@ -1531,6 +1771,7 @@ fn prefix_bits_from_pp(pp: u8) -> u8 { match pp { 1 => 1, 2 => 2, 3 => 4, _ => 0
 fn map_from_mmmmm(map: u8) -> Option<u8> { match map { 0 => Some(0), 1 => Some(1), 2 => Some(2), 3 => Some(3), 8 => Some(5), 9 => Some(6), 10 => Some(7), _ => None } }
 fn mmmmm_from_map(map: u8) -> Option<u8> { match map { 0 => Some(0), 1 => Some(1), 2 => Some(2), 3 => Some(3), 5 => Some(8), 6 => Some(9), 7 => Some(10), _ => None } }
 fn mandatory_prefix_byte(prefix: u8) -> Option<u8> { match prefix { 1 => Some(0x66), 2 => Some(0xf3), 3 => Some(0xf2), _ => None } }
+fn repeat_prefix_byte(repeat: u8) -> Option<u8> { match repeat & 6 { 2 => Some(0xf3), 4 => Some(0xf2), _ => None } }
 fn pp_from_mandatory(prefix: u8) -> u8 { match prefix { 1 => 1, 2 => 2, 3 => 3, _ => 0 } }
 
 fn effective_operand_bits(mode: Mode, override_: bool, w: bool) -> usize {
@@ -1697,6 +1938,72 @@ mod tests {
             let length = encode(add, EncodeFields { mod_bits: 3, reg: 1, rm: 0, ..Default::default() }, &mut out).unwrap();
             assert_eq!(&out[..length], &[0x48, 0x01, 0xc8]);
         }
+    }
+
+	#[test]
+	fn rex_b_opcode_90_is_xchg_not_nop() {
+		if !ENCODINGS.iter().any(|encoding| encoding.mnemonic == "XCHG") { return; }
+		let xchg = decode(&[0x49, 0x90], Mode::Mode64).unwrap();
+		assert_eq!(xchg.encoding().mnemonic, "XCHG");
+		assert_eq!(xchg.length, 2);
+
+		let nop = decode(&[0x48, 0x90], Mode::Mode64).unwrap();
+		assert_eq!(nop.encoding().mnemonic, "NOP");
+		assert_eq!(nop.length, 2);
+	}
+
+    #[test]
+    fn encoder_preserves_authored_legacy_prefixes_and_low_byte_registers() {
+        if let Some(mov8) = find_form("MOV_mbrb", 2) {
+            let mut out = [0u8; 15];
+            let length = encode(mov8, EncodeFields {
+                mod_bits: 3,
+                reg: 0,
+                rm: 4,
+                force_rex: true,
+                ..Default::default()
+            }, &mut out).unwrap();
+            assert_eq!(&out[..length], &[0x40, 0x88, 0xc4]);
+            let decoded = decode(&out[..length], Mode::Mode64).unwrap();
+            assert_eq!(decoded.operands()[0].register, Some(gpr(4, 8, false)));
+        }
+
+        if let Some(add8) = find_form("ADD_mbrb", 1) {
+            let mut out = [0u8; 15];
+            let length = encode(add8, EncodeFields {
+                lock: true,
+                mod_bits: 0,
+                rm: 0,
+                ..Default::default()
+            }, &mut out).unwrap();
+            assert_eq!(out[0], 0xf0);
+            assert!(decode(&out[..length], Mode::Mode64).unwrap().physical.lock);
+        }
+
+        if let Some(movsb) = ENCODINGS.iter().position(|encoding| {
+            encoding.id == "MOVSB" && encoding.mandatory == 0
+        }) {
+            let mut out = [0u8; 15];
+            let length = encode(movsb, EncodeFields {
+                repeat: 2,
+                ..Default::default()
+            }, &mut out).unwrap();
+            assert_eq!(&out[..length], &[0xf3, 0xa4]);
+            assert_eq!(decode(&out[..length], Mode::Mode64).unwrap().physical.repeat, 2);
+        }
+    }
+
+    #[test]
+    fn editable_forms_are_generated_product_behavior() {
+        let mut instruction = FormInstruction::decode(&[0x31, 0xd8], Mode::Mode64).unwrap();
+        instruction.set_operand(0, FormOperandValue::Gpr { number: 8, width: 32 }).unwrap();
+        instruction.set_operand(1, FormOperandValue::Gpr { number: 9, width: 32 }).unwrap();
+        let mut out = [0u8; 15];
+        let length = instruction.encode(&mut out).unwrap();
+        assert_eq!(&out[..length], &[0x45, 0x31, 0xc8]);
+        let decoded = FormInstruction::decode(&out[..length], Mode::Mode64).unwrap();
+        assert_eq!(decoded.operand(0), Some(FormOperand::Register(gpr(8, 32, false))));
+        assert_eq!(decoded.operand(1), Some(FormOperand::Register(gpr(9, 32, false))));
     }
 
     #[test]

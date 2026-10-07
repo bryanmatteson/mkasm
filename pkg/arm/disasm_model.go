@@ -462,6 +462,9 @@ func buildDisasmForm(instr *ir.InstructionIR, p *ParsedIForm) (*DisasmForm, *Dis
 		if err := applyDisasmOperandCondition(op, prose, byName); err != nil {
 			return nil, &DisasmSkip{instr.EncodingID, ao.Symbol, err.Error()}
 		}
+		if err := checkLabelDisplacement(op); err != nil {
+			return nil, &DisasmSkip{instr.EncodingID, ao.Symbol, err.Error()}
+		}
 		if op.Kind == DisasmLogicalImm &&
 			equivalentOperandInverts(ao, p.EquivalentOperands, p.EquivalentSuffix) {
 			op.LogicalInvert = true
@@ -1033,6 +1036,13 @@ func disasmOperandWithContext(
 	switch c.Class {
 	case ClassImm, ClassLabel:
 		op.Kind = DisasmNum
+		if c.Class == ClassLabel {
+			// Every A64 PC-relative label is a two's-complement displacement
+			// ("its offset from the address of this instruction, in the range
+			// +/-..."). Only the PAC negative-offset form is an unsigned field
+			// negated by RawMul, and pcRelativeLabelOperand owns that shape.
+			op.Signed = op.RawMul == 0
+		}
 		if symbolName == "Cn" || symbolName == "Cm" {
 			op.NumPrefix = "c"
 		} else if !strings.HasSuffix(strings.TrimSpace(c.Prefix), "#") &&
@@ -1143,29 +1153,62 @@ func pcRelativeLabelOperand(
 	byName map[string]ir.BitField,
 	prose string,
 ) (*DisasmOperand, bool) {
-	if len(c.Fields) == 0 {
+	if len(c.Fields) == 0 || !strings.Contains(prose, "offset from") {
 		return nil, false
 	}
-	signedConcat := len(c.Fields) > 1 &&
-		strings.Contains(prose, "offset from") &&
-		strings.Contains(prose, "encoded as")
-	negativeUnsigned := len(c.Fields) == 1 &&
-		strings.Contains(prose, "negative offset") &&
+	// "Its negative offset from the address of this instruction, a multiple
+	// of 4 in the range -262140 to 0, is encoded as an unsigned value in the
+	// "imm16" field as <label>/4": the PAC form is PC-(UInt(imm16)*4).
+	// Every other label is a two's-complement displacement, whether ARM
+	// writes it as `encoded as "imm19" times 4` or `encoded in "immhi:immlo"`.
+	negativeUnsigned := strings.Contains(prose, "negative offset") &&
 		strings.Contains(prose, "encoded as an unsigned value")
-	if !signedConcat && !negativeUnsigned {
-		return nil, false
-	}
 	parts, err := columnsFor(c.Fields, byName)
 	if err != nil {
 		return nil, false
 	}
 	op.Kind, op.Parts = DisasmNum, parts
 	op.Class = ClassLabel
-	op.Signed = signedConcat
+	op.Signed = !negativeUnsigned
 	if negativeUnsigned {
-		op.RawMul = -1
+		scale, ok := labelEncodedMultiple(prose)
+		if !ok {
+			return nil, false
+		}
+		op.RawMul, op.Scale = -1, scale
 	}
 	return op, true
+}
+
+// checkLabelDisplacement enforces the model invariant for PC-relative labels:
+// a label is either a two's-complement displacement (Signed) or the PAC
+// negative-offset form (RawMul < 0). A label read as a plain unsigned field
+// would print a short backward branch as a huge forward one ("BL .+268435036"
+// for .-420), so such an operand has no printable form.
+func checkLabelDisplacement(op *DisasmOperand) error {
+	if op.Class != ClassLabel || op.Kind != DisasmNum || op.HasNumConstant {
+		return nil
+	}
+	if op.Signed || op.RawMul < 0 {
+		return nil
+	}
+	return fmt.Errorf("PC-relative label %s has no displacement sign", op.Symbol)
+}
+
+// labelEncodedMultiple reads the unit of an unsigned label field from ARM's
+// "a multiple of 4 ... as <label>/4" wording. Both statements must name the
+// same unit; a label whose field is not its offset divided by the stated
+// multiple is not this shape and must not print.
+func labelEncodedMultiple(prose string) (int64, bool) {
+	m := multipleRE.FindStringSubmatch(prose)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || n < 1 || !strings.Contains(prose, "<label>/"+m[1]) {
+		return 0, false
+	}
+	return n, true
 }
 
 func bitfieldOperandSize(prose string) int64 {
