@@ -107,6 +107,51 @@ func (f *DisasmForm) matchesConstraints(word uint32) bool {
 			return false
 		}
 	}
+	if guard := f.BitfieldGuard; guard != nil && !guard.matches(word) {
+		return false
+	}
+	return true
+}
+
+func (g *DisasmBitfieldGuard) matches(word uint32) bool {
+	imms := fieldValue(word, g.Imms.Start, g.Imms.End)
+	immr := fieldValue(word, g.Immr.Start, g.Immr.End)
+	return g.allows(word, imms, immr)
+}
+
+func (g *DisasmBitfieldGuard) allows(word, imms, immr uint32) bool {
+	switch g.Order {
+	case BitfieldInsert:
+		if imms >= immr {
+			return false
+		}
+	case BitfieldExtract:
+		if imms < immr {
+			return false
+		}
+	}
+	return !g.Preferred || bfxPreferred(
+		fieldValue(word, g.SF.Start, g.SF.End),
+		fieldValue(word, g.Uns.Start, g.Uns.End),
+		imms, immr,
+	)
+}
+
+// bfxPreferred implements ARM's BFXPreferred: UBFX or SBFX is the preferred
+// disassembly of a UBFM or SBFM word unless a more specific alias (UBFIZ,
+// SBFIZ, UXT[BH], SXT[BHW], LSL, LSR, ASR) applies.
+func bfxPreferred(sf, uns, imms, immr uint32) bool {
+	if imms < immr || imms == sf<<5|0x1f {
+		return false
+	}
+	if immr == 0 {
+		if sf == 0 && (imms == 0x07 || imms == 0x0f) {
+			return false
+		}
+		if sf == 1 && uns == 0 && (imms == 0x07 || imms == 0x0f || imms == 0x1f) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -187,6 +232,25 @@ func (f *DisasmForm) SatisfyConstraints(word uint32) (uint32, bool) {
 				continue
 			}
 			word = word&^mask | candidate<<uint(field.Start)
+			found = true
+			break
+		}
+		if !found {
+			return 0, false
+		}
+	}
+	if guard := f.BitfieldGuard; guard != nil && !guard.matches(word) {
+		immsMask := fieldRangeMask(guard.Imms.Start, guard.Imms.End)
+		immrMask := fieldRangeMask(guard.Immr.Start, guard.Immr.End)
+		found := false
+		// Small values first: they stay inside a 32-bit form's field ranges.
+		for raw := uint32(0); raw < 1<<12; raw++ {
+			imms, immr := raw>>6, raw&0x3f
+			if !guard.allows(word, imms, immr) {
+				continue
+			}
+			word = word&^immsMask | imms<<uint(guard.Imms.Start)
+			word = word&^immrMask | immr<<uint(guard.Immr.Start)
 			found = true
 			break
 		}

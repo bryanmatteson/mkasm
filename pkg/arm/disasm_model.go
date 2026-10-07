@@ -100,9 +100,13 @@ type DisasmForm struct {
 	Forbidden           []DisasmForbidden
 	// SVEMoveMaskField carries the imm13 selected by ARM's
 	// SVEMoveMaskPreferred alias predicate.
-	SVEMoveMaskField            *BitPart
-	MoveWideZeroGuard           *DisasmMoveWideZeroGuard
-	LogicalMoveGuard            *DisasmLogicalMoveGuard
+	SVEMoveMaskField  *BitPart
+	MoveWideZeroGuard *DisasmMoveWideZeroGuard
+	LogicalMoveGuard  *DisasmLogicalMoveGuard
+	// BitfieldGuard carries ARM's bitfield alias predicates: the order of imms
+	// against immr (UBFIZ, SBFIZ, BFI, BFC, BFXIL) and BFXPreferred (UBFX,
+	// SBFX). Without it every alias of a UBFM, SBFM or BFM word would match.
+	BitfieldGuard               *DisasmBitfieldGuard
 	GroupParent                 map[int]int
 	RequiredGroups              map[int]bool
 	PreferOmittedSystemRegister bool
@@ -115,6 +119,29 @@ type DisasmMoveWideZeroGuard struct {
 
 type DisasmLogicalMoveGuard struct {
 	SF, N, Imms, Immr BitPart
+}
+
+// BitfieldOrder is the relation a bitfield alias requires between imms and
+// immr.
+type BitfieldOrder int
+
+const (
+	// BitfieldAnyOrder places no order on imms and immr.
+	BitfieldAnyOrder BitfieldOrder = iota
+	// BitfieldInsert is `UInt(imms) < UInt(immr)`: the field is inserted.
+	BitfieldInsert
+	// BitfieldExtract is `UInt(imms) >= UInt(immr)`: the field is extracted.
+	BitfieldExtract
+)
+
+// DisasmBitfieldGuard selects a bitfield alias. Order is the imms/immr
+// relation; Preferred evaluates BFXPreferred(sf, opc<1>, imms, immr), which
+// also excludes the shift and extend aliases.
+type DisasmBitfieldGuard struct {
+	Imms, Immr BitPart
+	Order      BitfieldOrder
+	Preferred  bool
+	SF, Uns    BitPart
 }
 
 // DisasmForbidden is one conjunction of field values that Decode classifies
@@ -632,6 +659,11 @@ func addDisasmAliasConstraints(form *DisasmForm, cond string, byName map[string]
 			Imms: part(fields[2]), Immr: part(fields[3]),
 		}
 	}
+	if guard, err := bitfieldAliasGuard(cond, byName); err != nil {
+		return err
+	} else if guard != nil {
+		form.BitfieldGuard = guard
+	}
 	if strings.Contains(cond, "SVEMoveMaskPreferred") {
 		field, ok := lookupField("imm13", byName)
 		if !ok || field.End-field.Start+1 != 13 {
@@ -702,6 +734,56 @@ func addDisasmAliasConstraints(form *DisasmForm, cond string, byName map[string]
 		}
 	}
 	return nil
+}
+
+// bitfieldAliasGuard decodes ARM's bitfield alias conditions:
+// `UInt(imms) < UInt(immr)`, `UInt(imms) >= UInt(immr)` and
+// `BFXPreferred(sf, opc[1], imms, immr)` (spelled `opc<1>` in older corpora).
+func bitfieldAliasGuard(cond string, byName map[string]ir.BitField) (*DisasmBitfieldGuard, error) {
+	order := BitfieldAnyOrder
+	switch {
+	case strings.Contains(cond, "UInt(imms) < UInt(immr)"):
+		order = BitfieldInsert
+	case strings.Contains(cond, "UInt(imms) >= UInt(immr)"):
+		order = BitfieldExtract
+	}
+	preferred := strings.Contains(cond, "BFXPreferred(")
+	if order == BitfieldAnyOrder && !preferred {
+		return nil, nil
+	}
+	part := func(name string) (BitPart, error) {
+		field, ok := lookupField(name, byName)
+		if !ok {
+			return BitPart{}, fmt.Errorf("bitfield alias field %q absent from encoding", name)
+		}
+		return BitPart{
+			Field: field.Name, Start: field.Start, End: field.End,
+			Width: field.End - field.Start + 1,
+		}, nil
+	}
+	imms, err := part("imms")
+	if err != nil {
+		return nil, err
+	}
+	immr, err := part("immr")
+	if err != nil {
+		return nil, err
+	}
+	guard := &DisasmBitfieldGuard{Imms: imms, Immr: immr, Order: order, Preferred: preferred}
+	if preferred {
+		if guard.SF, err = part("sf"); err != nil {
+			return nil, err
+		}
+		opc, err := part("opc")
+		if err != nil {
+			return nil, err
+		}
+		if opc.Width != 2 {
+			return nil, fmt.Errorf("BFXPreferred reads opc<1> from a %d-bit opc", opc.Width)
+		}
+		guard.Uns = BitPart{Field: opc.Field, Start: opc.Start + 1, End: opc.Start + 1, Width: 1}
+	}
+	return guard, nil
 }
 
 // disasmOperand resolves one classified operand to the bits it reads.

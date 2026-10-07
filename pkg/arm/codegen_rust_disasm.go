@@ -155,11 +155,12 @@ func emitRustDisasmForm(form *DisasmForm, entry CatalogEntry) string {
 		}
 	}
 	sort.Strings(required)
-	return fmt.Sprintf("Form { mask: 0x%08X, value: 0x%08X, encoding_id: %s, alias: %t, constraint_mask: 0x%08X, constraint_value: 0x%08X, equalities: %s, inequalities: %s, one_hot: %s, forbidden: %s, move_wide_guard: %s, logical_guard: %s, sve_mask: %s, parts: %s, parents: %s, required: %s }",
+	return fmt.Sprintf("Form { mask: 0x%08X, value: 0x%08X, encoding_id: %s, alias: %t, constraint_mask: 0x%08X, constraint_value: 0x%08X, equalities: %s, inequalities: %s, one_hot: %s, forbidden: %s, move_wide_guard: %s, logical_guard: %s, bitfield_guard: %s, sve_mask: %s, parts: %s, parents: %s, required: %s }",
 		entry.Mask, entry.Value, rustStringLiteral(form.EncodingID), entry.AliasOf != "",
 		form.ConstraintMask, form.ConstraintValue, rustSlice(equalities), rustSlice(inequalities),
 		rustSlice(oneHot), rustSlice(forbidden), emitRustMoveWideGuard(form.MoveWideZeroGuard),
-		emitRustLogicalGuard(form.LogicalMoveGuard), emitRustOptionalPart(form.SVEMoveMaskField),
+		emitRustLogicalGuard(form.LogicalMoveGuard), emitRustBitfieldGuard(form.BitfieldGuard),
+		emitRustOptionalPart(form.SVEMoveMaskField),
 		rustSlice(parts), rustSlice(parents), rustSlice(required))
 }
 
@@ -249,6 +250,23 @@ func emitRustLogicalGuard(guard *DisasmLogicalMoveGuard) string {
 	}
 	return fmt.Sprintf("Some(LogicalGuard { sf: %s, n: %s, imms: %s, immr: %s })",
 		emitRustBitPart(guard.SF), emitRustBitPart(guard.N), emitRustBitPart(guard.Imms), emitRustBitPart(guard.Immr))
+}
+
+func emitRustBitfieldGuard(guard *DisasmBitfieldGuard) string {
+	if guard == nil {
+		return "None"
+	}
+	order := map[BitfieldOrder]string{
+		BitfieldAnyOrder: "BitfieldOrder::Any",
+		BitfieldInsert:   "BitfieldOrder::Insert",
+		BitfieldExtract:  "BitfieldOrder::Extract",
+	}[guard.Order]
+	preferred := "None"
+	if guard.Preferred {
+		preferred = fmt.Sprintf("Some((%s, %s))", emitRustBitPart(guard.SF), emitRustBitPart(guard.Uns))
+	}
+	return fmt.Sprintf("Some(BitfieldGuard { imms: %s, immr: %s, order: %s, preferred: %s })",
+		emitRustBitPart(guard.Imms), emitRustBitPart(guard.Immr), order, preferred)
 }
 
 func rustSlice(items []string) string {

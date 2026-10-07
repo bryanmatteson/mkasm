@@ -43,6 +43,13 @@ struct Forbidden { mask: u32, value: u32 }
 struct MoveWideGuard { imm16: BitPart, hw: BitPart }
 #[derive(Clone, Copy)]
 struct LogicalGuard { sf: BitPart, n: BitPart, imms: BitPart, immr: BitPart }
+/// The imms/immr relation a bitfield alias requires.
+#[derive(Clone, Copy)]
+enum BitfieldOrder { Any, Insert, Extract }
+/// A bitfield alias predicate: the imms/immr order and, for UBFX and SBFX,
+/// BFXPreferred over (sf, opc<1>).
+#[derive(Clone, Copy)]
+struct BitfieldGuard { imms: BitPart, immr: BitPart, order: BitfieldOrder, preferred: Option<(BitPart, BitPart)> }
 #[derive(Clone, Copy)]
 struct Form {
     mask: u32, value: u32, encoding_id: &'static str, alias: bool,
@@ -50,6 +57,7 @@ struct Form {
     equalities: &'static [Equality], inequalities: &'static [Inequality],
     one_hot: &'static [u32], forbidden: &'static [Forbidden],
     move_wide_guard: Option<MoveWideGuard>, logical_guard: Option<LogicalGuard>,
+    bitfield_guard: Option<BitfieldGuard>,
     sve_mask: Option<BitPart>, parts: &'static [TextPart],
     parents: &'static [(u8, u8)], required: &'static [u8],
 }
@@ -104,6 +112,17 @@ fn form_matches(form: &Form, word: u32) -> bool {
     }
     if let Some(part) = form.sve_mask {
         if !sve_move_mask_preferred(part_value(word, part)) { return false; }
+    }
+    if let Some(guard) = form.bitfield_guard {
+        let imms = part_value(word, guard.imms); let immr = part_value(word, guard.immr);
+        match guard.order {
+            BitfieldOrder::Insert if imms >= immr => return false,
+            BitfieldOrder::Extract if imms < immr => return false,
+            _ => {}
+        }
+        if let Some((sf, uns)) = guard.preferred {
+            if !bfx_preferred(part_value(word, sf), part_value(word, uns), imms, immr) { return false; }
+        }
     }
     true
 }
@@ -391,6 +410,17 @@ fn move_wide_preferred(sf: u32, n: u32, imms: u32, immr: u32) -> bool {
     let width = if sf != 0 { if n != 1 { return false; } 64 } else { if n != 0 || imms & 0x20 != 0 { return false; } 32 };
     if imms < 16 { (16 - immr % 16) % 16 <= 15 - imms }
     else if imms >= width - 15 { immr % 16 <= imms - (width - 15) } else { false }
+}
+
+/// ARM's BFXPreferred: UBFX or SBFX is the preferred disassembly of a UBFM
+/// or SBFM word unless UBFIZ, SBFIZ, UXT[BH], SXT[BHW], LSL, LSR or ASR applies.
+fn bfx_preferred(sf: u32, uns: u32, imms: u32, immr: u32) -> bool {
+    if imms < immr || imms == (sf << 5 | 0x1f) { return false; }
+    if immr == 0 {
+        if sf == 0 && (imms == 0x07 || imms == 0x0f) { return false; }
+        if sf == 1 && uns == 0 && (imms == 0x07 || imms == 0x0f || imms == 0x1f) { return false; }
+    }
+    true
 }
 
 fn decode_packed_logical(raw: u32) -> Option<u64> {

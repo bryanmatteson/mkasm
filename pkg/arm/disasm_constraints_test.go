@@ -642,6 +642,66 @@ func TestMoveAliasPreferredPredicates(t *testing.T) {
 	}
 }
 
+func TestBitfieldAliasPredicates(t *testing.T) {
+	fields := map[string]ir.BitField{
+		"sf":   {Name: "sf", Start: 31, End: 31},
+		"opc":  {Name: "opc", Start: 29, End: 30},
+		"N":    {Name: "N", Start: 22, End: 22},
+		"immr": {Name: "immr", Start: 16, End: 21},
+		"imms": {Name: "imms", Start: 10, End: 15},
+	}
+	form := func(cond string) DisasmForm {
+		t.Helper()
+		var f DisasmForm
+		if err := addDisasmAliasConstraints(&f, cond, fields); err != nil {
+			t.Fatal(err)
+		}
+		if f.BitfieldGuard == nil {
+			t.Fatalf("%q compiled no bitfield guard", cond)
+		}
+		return f
+	}
+	ubfx := form("BFXPreferred(sf, opc[1], imms, immr)")
+	ubfiz := form("UInt(imms) < UInt(immr)")
+	bfxil := form("UInt(imms) >= UInt(immr)")
+	for _, test := range []struct {
+		word               uint32
+		ubfx, ubfiz, bfxil bool
+	}{
+		// UBFM w0, w8, #8, #15 is UBFX w0, w8, #8, #8.
+		{0x53083D00, true, false, true},
+		// UBFM w0, w8, #8, #7 is UBFIZ w0, w8, #24, #8.
+		{0x53081D00, false, true, false},
+		// UBFM w0, w8, #0, #15 is UXTH, not UBFX.
+		{0x53003D00, false, false, true},
+		// UBFM w0, w8, #8, #31 is LSR, not UBFX.
+		{0x53087D00, false, false, true},
+		// SBFM x0, x8, #0, #31 is SXTW, not SBFX.
+		{0x93407D00, false, false, true},
+		// UBFM x0, x8, #0, #31 is UBFX: zero extension of a word is not an alias.
+		{0xD3407D00, true, false, true},
+	} {
+		if got := ubfx.matchesConstraints(test.word); got != test.ubfx {
+			t.Errorf("0x%08X BFXPreferred = %t, want %t", test.word, got, test.ubfx)
+		}
+		if got := ubfiz.matchesConstraints(test.word); got != test.ubfiz {
+			t.Errorf("0x%08X imms < immr = %t, want %t", test.word, got, test.ubfiz)
+		}
+		if got := bfxil.matchesConstraints(test.word); got != test.bfxil {
+			t.Errorf("0x%08X imms >= immr = %t, want %t", test.word, got, test.bfxil)
+		}
+	}
+	for _, f := range []DisasmForm{ubfx, ubfiz, bfxil} {
+		if got, ok := f.SatisfyConstraints(0x53003D00); !ok || !f.matchesConstraints(got) {
+			t.Fatalf("bitfield solver = 0x%08X, %t", got, ok)
+		}
+	}
+	var none DisasmForm
+	if err := addDisasmAliasConstraints(&none, "imms == '011111'", fields); err != nil || none.BitfieldGuard != nil {
+		t.Fatalf("a field literal compiled a bitfield guard: %v", err)
+	}
+}
+
 func TestAbsentTableRowBecomesOptionalDefault(t *testing.T) {
 	c := ClassifiedOperand{
 		AsmOperand: AsmOperand{Symbol: "<option>"},
