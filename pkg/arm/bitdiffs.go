@@ -68,7 +68,31 @@ func (p *bitDiffParser) peek() byte {
 }
 
 func (p *bitDiffParser) parseExpr() (*ir.BitDiffNode, error) {
-	return p.parseAnd()
+	left, err := p.parseAnd()
+	if err != nil {
+		return nil, err
+	}
+	terms := []*ir.BitDiffNode{left}
+	for {
+		p.skipSpace()
+		if !strings.HasPrefix(p.s[p.pos:], "||") {
+			break
+		}
+		p.pos += 2
+		right, err := p.parseAnd()
+		if err != nil {
+			return nil, err
+		}
+		terms = append(terms, right)
+	}
+	if len(terms) == 1 {
+		return left, nil
+	}
+	// De Morgan's law keeps the same tree for all decoder targets.
+	for i, term := range terms {
+		terms[i] = &ir.BitDiffNode{Kind: ir.BitDiffNot, Kids: []*ir.BitDiffNode{term}}
+	}
+	return &ir.BitDiffNode{Kind: ir.BitDiffNot, Kids: []*ir.BitDiffNode{{Kind: ir.BitDiffAnd, Kids: terms}}}, nil
 }
 
 func (p *bitDiffParser) parseAnd() (*ir.BitDiffNode, error) {

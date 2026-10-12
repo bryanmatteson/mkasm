@@ -1,13 +1,15 @@
 # mkasm
 
 `mkasm` generates instruction-set codecs from machine-readable specifications.
-From Arm's A64 XML release it writes a Rust crate or a Go module. From an
+From Arm's A64 XML release it writes a Rust crate or a Go module. From the
+AArch32 XML it writes a Rust codec for A32 and Thumb (16 and 32 bits). From an
 opcodesDB v3 export it writes an x86-64 Rust crate. Generated projects have no
 dependencies, build on their own, and ship with their own tests.
 
 | Output | Built from | Provides |
 |---|---|---|
 | A64 Rust crate | Arm A64 XML | A typed assembler with labels, an exact encoder for every encoding, an allocation-free decision-tree decoder, a disassembler that prints Arm's preferred spelling, and the encoding registry |
+| A32/Thumb Rust crate | Arm AArch32 XML | Separate mode-specific decision-tree decoders, exact field encoders, structured operands, branch targets, and assembly formatting in both byte orders |
 | A64 Go module | Arm A64 XML | Typed and exact encoders, a decision-tree decoder with a table fallback, and the encoding registry |
 | x86-64 Rust crate | opcodesDB v3 JSON | An allocation-free decoder for legacy/REX, 3DNow, VEX, XOP and EVEX with structured operands, Intel-syntax formatting, flow-control and access summaries, exact encoding, and RIP/relative relocation |
 
@@ -30,8 +32,8 @@ assemblers:
 | x86 opcodesDB import | 3,509 encoding records, 7,289 syntax forms |
 | Generated Go, Rust and x86 Rust project tests | Passing |
 
-Every case LLVM accepts matches byte for byte, and LLVM rejects no generated
-spelling. LLVM MC 22.1.8 does not recognize five encodings: `HINTE` and the
+Every measured A64 case LLVM accepts matches byte for byte, and LLVM rejects
+no measured A64 spelling. LLVM MC 22.1.8 does not recognize five encodings: `HINTE` and the
 authenticated PC-relative `RETAASPPC`, `RETABSPPC`, `AUTIASPPC` and
 `AUTIBSPPC`. They remain unverified, so the
 strict all-encoding gate stays red until an independent assembler accepts them.
@@ -60,6 +62,34 @@ xz -dc x86_64.json.xz | mkasm --arch x86_64 --codegen rust --output ./x86_64-rs 
 ```
 
 From a source checkout, use `go run ./cmd/mkasm` in place of `mkasm`.
+
+For A32 and Thumb, use the AArch32 corpus. The `arm32` crate includes both
+instruction states; `--arch thumb`, `a32`, `arm`, and `aarch32` are aliases.
+
+```bash
+mkasm --arch arm32 --codegen rust --output ./arm32-rs \
+  https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-AArch32-ISA/ISA_AArch32/ISA_AArch32_xml_A_profile-2026-06.tar.gz
+```
+
+```rust
+use arm32::{decode, Mode, Endian};
+let call = decode(&[0x00, 0xf0, 0x00, 0xf8], Mode::Thumb, Endian::Little).unwrap();
+assert_eq!(call.length, 4);
+assert_eq!(call.branch_target(0x2002), Some(0x2006));
+assert_eq!(call.format(0x2002).unwrap(), "bl #0x2006");
+let operands = call.details(0x2002).unwrap();
+```
+
+AArch32 generation supports Rust. `--json` includes each instruction's
+`instruction_set` (`A32` or `T32`) and `width`. A32 fetches a word; Thumb32
+fetches two halfwords in architectural order. A truncated Thumb32 prefix is
+reported as truncated, never reinterpreted as a Thumb16 instruction.
+Formatting is stateless and uses the spelling outside an IT block; an analyst
+can track ITSTATE separately. Allocated instructions without an exact state
+transition in a consumer can still use their decoded operands and encoding ID.
+The June 2026 AArch32 corpus resolves 2,363 encodings, including 143 aliases.
+Generated crate tests cover field round trips, byte order, branch targets,
+integer and SIMD formatting, and structured register and memory access.
 
 ## Using the generated code
 
@@ -117,9 +147,9 @@ encodes it again.
 ## Command line
 
 ```text
-mkasm [--arch aarch64|x86_64] --codegen rust --output DIR INPUT
+mkasm [--arch aarch64|arm32|x86_64] --codegen rust --output DIR INPUT
 mkasm [--arch aarch64]        --codegen go   --output DIR INPUT
-mkasm [--arch aarch64|x86_64] --json INPUT
+mkasm [--arch aarch64|arm32|x86_64] --json INPUT
 mkasm --version
 mkasm --help
 ```
@@ -312,7 +342,7 @@ output. Set `GOOS` and `GOARCH` to package for another platform.
 | Path | Responsibility |
 |---|---|
 | [`cmd/mkasm`](cmd/mkasm) | CLI, input selection and JSON export |
-| [`pkg/arm`](pkg/arm) | A64 corpus loading, instruction-page parsing, alias conditions, disassembly model, and Go/Rust generation |
+| [`pkg/arm`](pkg/arm) | A64 and AArch32 corpus loading, instruction-page parsing, alias conditions, disassembly model, and code generation |
 | [`pkg/x86`](pkg/x86) | opcodesDB import, x86 encode/decode core, and Rust generation |
 | [`pkg/parse`](pkg/parse) | Streaming XML event engine |
 | [`pkg/ir`](pkg/ir) | Architecture-neutral instruction and bit-field model |
@@ -326,7 +356,7 @@ output. Set `GOOS` and `GOARCH` to package for another platform.
 
 ## Scope
 
-`mkasm` generates A64 Go and Rust projects and x86-64 Rust projects. The x86
+`mkasm` generates A64 Go and Rust projects, A32/Thumb Rust projects, and x86-64 Rust projects. The x86
 backend does not emit Go and does not model MVEX. It does cover 3DNow's
 trailing-selector encoding. `mkasm` does not execute architecture pseudocode or
 stand in for a simulator. Round trips between its own encoders and decoders

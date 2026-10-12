@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -17,18 +18,18 @@ import (
 
 const commandName = "mkasm"
 
-const helpText = `mkasm generates AArch64 and x86-64 assembler projects or exports resolved IR.
+const helpText = `mkasm generates AArch64, ARM32/Thumb and x86-64 codec projects or exports resolved IR.
 
 Usage:
-  mkasm [--arch <aarch64|x86_64>] --codegen <rust|go> --output <dir> <input>
-  mkasm [--arch <aarch64|x86_64>] --json <input>
+  mkasm [--arch <aarch64|arm32|x86_64>] --codegen <rust|go> --output <dir> <input>
+  mkasm [--arch <aarch64|arm32|x86_64>] --json <input>
 
 Modes:
-  --codegen <rust|go>  Generate a standalone assembler project.
+  --codegen <rust|go>  Generate a standalone codec project.
   --json               Write resolved instruction IR as JSON to stdout.
 
 Arguments:
-  <input>  AArch64 ISA XML directory/archive/URL, or opcodesDB v3 JSON for
+  <input>  Arm ISA XML directory/archive/URL, or opcodesDB v3 JSON for
            x86_64. Use - to read the architecture's stream from stdin.
 
 Options:
@@ -116,9 +117,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		architecture = "aarch64"
 	case "amd64", "x86-64", "x64":
 		architecture = "x86_64"
-	case "aarch64", "x86_64":
+	case "arm", "aarch32", "a32", "thumb", "thumb2", "t32":
+		architecture = "arm32"
+	case "aarch64", "arm32", "x86_64":
 	default:
-		return &usageError{message: "--arch must be aarch64 or x86_64"}
+		return &usageError{message: "--arch must be aarch64, arm32 or x86_64"}
 	}
 
 	var languages []arm.CodegenLang
@@ -134,8 +137,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if strings.TrimSpace(*output) == "" {
 			return &usageError{message: "--output is required with --codegen"}
 		}
-		if architecture == "x86_64" && languages[0] != arm.LangRust {
-			return &usageError{message: "x86_64 code generation currently supports rust"}
+		if architecture != "aarch64" && languages[0] != arm.LangRust {
+			return &usageError{message: architecture + " code generation currently supports rust"}
 		}
 	} else if *output != "" {
 		return &usageError{message: "--output is only valid with --codegen"}
@@ -149,6 +152,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if err != nil {
 		return err
 	}
+	arch := arm.Arch(architecture)
+	source.encodingIndex = filepath.Join(filepath.Dir(source.encodingIndex), arch.SpecIndexFile())
 
 	if *codegen != "" {
 		if err := os.MkdirAll(*output, 0o755); err != nil {
@@ -165,7 +170,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		IFormWorkers:      runtime.GOMAXPROCS(0),
 		SkipCodegen:       *codegen == "",
 		Languages:         languages,
-		Arch:              arm.ArchAArch64,
+		Arch:              arch,
 		Progress:          stderr,
 	})
 	defer func() {
@@ -190,7 +195,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 
 	printStats(stderr, source.description, registry, parser.GetMetrics(), time.Since(started))
 	if *jsonIR {
-		return writeIRJSON(stdout, registry)
+		return writeArchitectureIRJSON(stdout, registry, arch)
 	}
 	return nil
 }

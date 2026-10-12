@@ -118,12 +118,29 @@ func (ap *ARMParser) Parse(ctx context.Context) error {
 
 // pass1EncodingIndex parses the encoding index XML
 func (ap *ARMParser) pass1EncodingIndex(ctx context.Context) error {
+	if err := ap.parseEncodingIndex(ctx, ap.config.EncodingIndexPath); err != nil {
+		return err
+	}
+	if ap.config.Arch == ArchARM32 {
+		if err := ap.parseEncodingIndex(ctx, filepath.Join(filepath.Dir(ap.config.EncodingIndexPath), "t32_encindex.xml")); err != nil {
+			return err
+		}
+	}
+	aliases, err := ap.discoverAliases()
+	if err != nil {
+		return fmt.Errorf("discover aliases: %w", err)
+	}
+	fmt.Fprintf(ap.config.Progress, "Pass 1 complete: %d instructions parsed (%d aliases)\n", len(ap.registry.GetAll()), aliases)
+	return nil
+}
+
+func (ap *ARMParser) parseEncodingIndex(ctx context.Context, index string) error {
 	var (
 		result *parse.ParseResult
 		err    error
 	)
 	if ap.corpus != nil {
-		r, openErr := ap.corpus.OpenXML(ap.config.EncodingIndexPath)
+		r, openErr := ap.corpus.OpenXML(index)
 		if openErr != nil {
 			return fmt.Errorf("open encoding index: %w", openErr)
 		}
@@ -133,13 +150,13 @@ func (ap *ARMParser) pass1EncodingIndex(ctx context.Context) error {
 			err = closeErr
 		}
 	} else {
-		result, err = ap.parser.ParseFile(ctx, ap.config.EncodingIndexPath)
+		result, err = ap.parser.ParseFile(ctx, index)
 	}
 	if err != nil {
 		return fmt.Errorf("parse encoding index: %w", err)
 	}
 	if releaser, ok := ap.corpus.(interface{ releaseXML(string) }); ok {
-		releaser.releaseXML(ap.config.EncodingIndexPath)
+		releaser.releaseXML(index)
 	}
 
 	// Extract partial instructions from results
@@ -149,14 +166,6 @@ func (ap *ARMParser) pass1EncodingIndex(ctx context.Context) error {
 	for _, instr := range instructions {
 		ap.registry.Add(instr)
 	}
-
-	aliases, err := ap.discoverAliases()
-	if err != nil {
-		return fmt.Errorf("discover aliases: %w", err)
-	}
-
-	fmt.Fprintf(ap.config.Progress, "Pass 1 complete: %d instructions parsed (%d canonical + %d alias)\n",
-		len(instructions)+aliases, len(instructions), aliases)
 
 	return nil
 }
@@ -349,6 +358,14 @@ func (ap *ARMParser) pass3CodeGeneration(ctx context.Context) error {
 	if ap.config.MaxIForms == 0 && len(resolved) != len(instructions) {
 		return fmt.Errorf("pass 3: only %d/%d instructions resolved; refusing incomplete full generation",
 			len(resolved), len(instructions))
+	}
+	if ap.config.Arch == ArchARM32 {
+		for _, lang := range ap.config.Languages {
+			if lang != LangRust {
+				return fmt.Errorf("arm32 code generation supports rust")
+			}
+		}
+		return ap.generateARM32Rust(resolved)
 	}
 
 	byClass := map[string][]*ir.InstructionIR{}

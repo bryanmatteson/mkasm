@@ -6,6 +6,8 @@ package ir
 
 // InstructionIR represents a single instruction variant parsed from ARM XML.
 type InstructionIR struct {
+	// InstructionSet distinguishes A32 from T32 in mixed AArch32 corpora.
+	InstructionSet string
 	// Mnemonic is encodingindex.xml's iform group name, which is a grouping key
 	// and not always spellable: CRC32CB/CRC32CH/CRC32CW all carry "CRC32C", and
 	// the SIMD pages carry "ABS_advsimd". Callers that print use AsmMnemonic.

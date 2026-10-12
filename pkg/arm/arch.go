@@ -15,12 +15,15 @@ type Arch string
 const (
 	// ArchAArch64 is the ARM A64 instruction set.
 	ArchAArch64 Arch = "aarch64"
+	// ArchARM32 includes A32 and both widths of T32 (Thumb).
+	ArchARM32 Arch = "arm32"
 )
 
 // archSpecIndex maps an architecture to the index file its spec tree must have.
 // Adding an architecture means adding its spec parser and an entry here.
 var archSpecIndex = map[Arch]string{
 	ArchAArch64: "encodingindex.xml",
+	ArchARM32:   "a32_encindex.xml",
 }
 
 // SupportedArches lists the architectures this build can generate.
@@ -43,6 +46,8 @@ func ParseArch(s string) (Arch, error) {
 	switch a {
 	case "arm64", "aarch64", "arm64e":
 		a = ArchAArch64
+	case "arm", "a32", "aarch32", "thumb", "thumb2", "t32":
+		a = ArchARM32
 	}
 	if _, ok := archSpecIndex[a]; !ok {
 		names := make([]string, 0, len(archSpecIndex))

@@ -17,19 +17,21 @@ type jsonDocument struct {
 }
 
 type jsonInstruction struct {
-	EncodingID  string        `json:"encoding_id"`
-	Mnemonic    string        `json:"mnemonic"`
-	AsmMnemonic string        `json:"asm_mnemonic,omitempty"`
-	Class       string        `json:"class"`
-	IFormFile   string        `json:"iform_file"`
-	BitPattern  string        `json:"bit_pattern"`
-	FixedWord   string        `json:"fixed_word,omitempty"`
-	Asm         string        `json:"asm,omitempty"`
-	AliasOf     string        `json:"alias_of,omitempty"`
-	BitDiffs    string        `json:"bit_diffs,omitempty"`
-	Fields      []jsonField   `json:"fields,omitempty"`
-	Operands    []jsonOperand `json:"operands,omitempty"`
-	Features    []string      `json:"features,omitempty"`
+	InstructionSet string        `json:"instruction_set,omitempty"`
+	Width          int           `json:"width,omitempty"`
+	EncodingID     string        `json:"encoding_id"`
+	Mnemonic       string        `json:"mnemonic"`
+	AsmMnemonic    string        `json:"asm_mnemonic,omitempty"`
+	Class          string        `json:"class"`
+	IFormFile      string        `json:"iform_file"`
+	BitPattern     string        `json:"bit_pattern"`
+	FixedWord      string        `json:"fixed_word,omitempty"`
+	Asm            string        `json:"asm,omitempty"`
+	AliasOf        string        `json:"alias_of,omitempty"`
+	BitDiffs       string        `json:"bit_diffs,omitempty"`
+	Fields         []jsonField   `json:"fields,omitempty"`
+	Operands       []jsonOperand `json:"operands,omitempty"`
+	Features       []string      `json:"features,omitempty"`
 }
 
 type jsonField struct {
@@ -50,6 +52,10 @@ type jsonOperand struct {
 }
 
 func writeIRJSON(w io.Writer, registry *arm.InstructionRegistry) error {
+	return writeArchitectureIRJSON(w, registry, arm.ArchAArch64)
+}
+
+func writeArchitectureIRJSON(w io.Writer, registry *arm.InstructionRegistry, arch arm.Arch) error {
 	instructions := registry.GetAll()
 	sort.Slice(instructions, func(i, j int) bool {
 		return instructions[i].EncodingID < instructions[j].EncodingID
@@ -57,7 +63,7 @@ func writeIRJSON(w io.Writer, registry *arm.InstructionRegistry) error {
 
 	document := jsonDocument{
 		Schema:       "mkasm.ir.v1",
-		Architecture: string(arm.ArchAArch64),
+		Architecture: string(arch),
 		Instructions: make([]jsonInstruction, 0, len(instructions)),
 	}
 	for _, instruction := range instructions {
@@ -77,6 +83,10 @@ func writeIRJSON(w io.Writer, registry *arm.InstructionRegistry) error {
 			Fields:      make([]jsonField, 0, len(instruction.Encoding.Fields)),
 			Operands:    make([]jsonOperand, 0, len(instruction.Operands)),
 			Features:    make([]string, 0, len(instruction.Features.Tags)),
+		}
+		if arch == arm.ArchARM32 {
+			item.InstructionSet = instruction.InstructionSet
+			item.Width = instruction.Encoding.Width
 		}
 		if word, ok := ir.FixedWord(instruction); ok {
 			item.FixedWord = fmt.Sprintf("0x%08X", word)

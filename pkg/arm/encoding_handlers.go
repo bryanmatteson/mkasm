@@ -51,7 +51,8 @@ func NewInstructionRowHandler() parse.Handler {
 				if parse.GetAttr(hctx.Element, "class") != "instructiontable" {
 					return false
 				}
-				return parse.GetAttr(hctx.Element, "encname") != ""
+				// Reserved allocation rows have no instruction page.
+				return parse.GetAttr(hctx.Element, "encname") != "" && parse.GetAttr(hctx.Element, "iformfile") != ""
 			}),
 		).
 		WithContextCreator(func(hctx *parse.HandlerContext) *InstructionRowContext {

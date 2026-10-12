@@ -31,7 +31,7 @@ var ErrCorpusEntryUnavailable = errors.New("corpus entry unavailable")
 
 // XMLCorpus provides the logical XML documents used by the ARM pipeline.
 // Directory corpora expose every document. Streaming tar corpora retain only
-// encodingindex.xml and serve IForms from their prepared compact models.
+// architecture encoding indexes and serve IForms from prepared compact models.
 type XMLCorpus interface {
 	OpenXML(name string) (io.ReadCloser, error)
 	Description() string
@@ -96,8 +96,8 @@ type TarXMLCorpusStats struct {
 
 // TarXMLCorpus is a prepared, immutable view of a tar stream. The loader
 // consumes gzip/tar sequentially and retains compact ParsedIForm models rather
-// than the expanded XML members. Only encodingindex.xml remains as raw XML for
-// Pass 1; it is released immediately after that pass.
+// than the expanded XML members. Only encoding indexes remain as raw XML for
+// Pass 1; each is released immediately after parsing.
 type TarXMLCorpus struct {
 	mu      sync.RWMutex
 	source  string
@@ -212,7 +212,7 @@ readLoop:
 			break
 		}
 		seen[name] = struct{}{}
-		if path.Base(name) == "encodingindex.xml" {
+		if isEncodingIndex(path.Base(name)) {
 			roots[path.Dir(name)] = struct{}{}
 		}
 		if rootHint != "" && !strings.HasPrefix(name, rootHint+"/") {
@@ -483,7 +483,7 @@ func newPreparedCorpusBuilder() *preparedCorpusBuilder {
 }
 
 func prepareXMLMember(builder *preparedCorpusBuilder, name string, data []byte) error {
-	if path.Base(name) == "encodingindex.xml" {
+	if isEncodingIndex(path.Base(name)) {
 		builder.mu.Lock()
 		builder.files[name] = bytes.Clone(data)
 		builder.mu.Unlock()
@@ -543,8 +543,8 @@ func (b *preparedCorpusBuilder) finish(source, root string) (*TarXMLCorpus, erro
 			retained += int64(len(data))
 		}
 	}
-	if _, ok := files["encodingindex.xml"]; !ok {
-		return nil, fmt.Errorf("tar corpus root %q has no encodingindex.xml", root)
+	if len(files) == 0 {
+		return nil, fmt.Errorf("tar corpus root %q has no ISA encoding index", root)
 	}
 
 	forms := make(map[string]map[string]*ParsedIForm, len(b.forms))
@@ -581,6 +581,10 @@ func (b *preparedCorpusBuilder) finish(source, root string) (*TarXMLCorpus, erro
 			RetainedRawXMLBytes: retained,
 		},
 	}, nil
+}
+
+func isEncodingIndex(name string) bool {
+	return name == "encodingindex.xml" || name == "a32_encindex.xml" || name == "t32_encindex.xml"
 }
 
 // memberBufferArena is a safe, resettable region for transient tar members.

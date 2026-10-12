@@ -15,8 +15,10 @@ import (
 // ParsedIForm is the authoritative content extracted from an instructionsection XML file
 // for one encoding (matched by EncodingID / encoding@name).
 type ParsedIForm struct {
-	EncodingName string
-	Mnemonic     string
+	InstructionSet string
+	Width          int
+	EncodingName   string
+	Mnemonic       string
 	// AliasMnemonic is the preferred disassembly on an alias page (docvar
 	// alias_mnemonic), e.g. ASR for the ASRV encoding it aliases.
 	AliasMnemonic string
@@ -309,8 +311,9 @@ func parseIFormShared(
 		// Collapsing XML character chunks would turn
 		// "LDR  <Wt>, [<Xn|SP>]" into "LDR <Wt> , [ <Xn|SP> ]"; those spaces are
 		// part of the source syntax, so asmtemplate keeps a verbatim stream.
-		asmVerbatim  strings.Builder
-		textVerbatim strings.Builder
+		asmVerbatim       strings.Builder
+		textVerbatim      strings.Builder
+		outsideITSelected bool
 
 		diagram      []RegBox // regdiagram currently being read
 		iclassBase   []RegBox // regdiagram of the enclosing iclass
@@ -319,6 +322,8 @@ func parseIFormShared(
 		matched      bool
 		iclassSerial int
 		ownerIClass  int
+		iclassISA    string
+		iclassWidth  int
 	)
 
 	elementText := func() string {
@@ -353,10 +358,19 @@ func parseIFormShared(
 			case "iclass":
 				iclassSerial++
 				iclassBase = nil
+				iclassISA = attr(t, "isa")
+				iclassWidth = 32
+			case "regdiagram":
+				if inIClass(pathStack) && attr(t, "form") == "16" {
+					iclassWidth = 16
+				}
 			case "encoding":
 				encName = attr(t, "name")
 				inEncoding = encodingID == "" || encName == encodingID
 				if inEncoding {
+					outsideITSelected = false
+					out.InstructionSet = iclassISA
+					out.Width = iclassWidth
 					out.EncodingName = encName
 					out.BitDiffs = attr(t, "bitdiffs")
 					ownerIClass = iclassSerial
@@ -430,6 +444,12 @@ func parseIFormShared(
 				}
 			case "asmtemplate":
 				asmVerbatim.Reset()
+				// Outside an IT block is the stateless Thumb spelling.
+				if inEncoding && iclassISA == "T32" && !outsideITSelected && strings.HasPrefix(attr(t, "comment"), "Outside IT block") {
+					outsideITSelected = true
+					out.AsmTemplate = ""
+					out.AsmOperands = nil
+				}
 			case "text":
 				textVerbatim.Reset()
 			case "explanations":
@@ -704,6 +724,10 @@ func ApplyParsedIForm(instr *ir.InstructionIR, p *ParsedIForm) {
 	}
 	if len(p.Boxes) > 0 {
 		instr.Encoding = boxesToEncoding(p.Boxes)
+		if p.Width != 0 {
+			instr.Encoding.Width = p.Width
+		}
+		instr.InstructionSet = p.InstructionSet
 		instr.BitPattern = boxesToBitPattern(p.Boxes)
 		instr.Operands = boxesToOperandHints(p.Boxes)
 	}
@@ -716,6 +740,9 @@ func ApplyParsedIForm(instr *ir.InstructionIR, p *ParsedIForm) {
 	if expr := combineConstraints(p.BitDiffs, constraints); expr != "" {
 		// Equality pins fold into BitPattern / Fixed; full tree kept for match.
 		_ = applyBitDiffs(instr, expr)
+	}
+	if instr.InstructionSet == "A32" || instr.InstructionSet == "T32" {
+		arm32AllocationConstraints(instr, p)
 	}
 	if p.IsAlias {
 		instr.AliasOf = p.AliasOf
