@@ -303,7 +303,8 @@ impl Decoded {
                 let imm = if p.bits.is_empty() { self.field("imm12").unwrap_or(self.f("i")<<11|self.f("imm3")<<8|self.f("imm8")) } else { value };
                 if self.mnemonic().starts_with("ADR") {
                     let imm = if self.mode == Mode::Arm { (imm&255).rotate_right(((imm>>8)&15)*2) } else if self.length == 2 { imm*4 } else { imm };
-                    let add = !self.encoding_id().contains("sub");
+                    // Encodings A2 and T2 subtract the offset from the aligned PC.
+                    let add = !matches!(self.encoding_id(), "ADR_A2" | "ADR_T2");
                     let pc = (address as u32).wrapping_add(if self.mode == Mode::Arm {8} else {4})&!3;
                     return Ok(format!("#0x{:x}",if add {pc.wrapping_add(imm)} else {pc.wrapping_sub(imm)}))
                 }
@@ -407,7 +408,8 @@ impl Decoded {
                 }
             } else if p.symbol=="<amount>" || p.symbol=="<imm>" && (self.encoding_id().contains("_r_") || self.encoding_id().contains("_rr_")) && self.field("stype").is_some() {
                 let n=value.parse::<u32>().unwrap_or(0);
-                let shift=match shift_kind {0=>Shift::Lsl(n),1=>Shift::Lsr(n),2=>Shift::Asr(n),_ if n==0=>Shift::Rrx,_=>Shift::Ror(n)};
+                // Extend forms (SXTB/UXTH/SXTAB...) encode a rotation, not a shift.
+                let shift=if self.field("rotate").is_some() {if n==0 {Shift::None} else {Shift::Ror(n)}} else {match shift_kind {0=>Shift::Lsl(n),1=>Shift::Lsr(n),2=>Shift::Asr(n),_ if n==0=>Shift::Rrx,_=>Shift::Ror(n)}};
                 if let Some(m)=&mut memory {m.shift=shift} else if let Some(last)=operands.last_mut() {last.shift=shift}
             } else if p.symbol=="<index>" {
                 if let Some(last)=operands.last_mut() {last.lane=Some(self.lane_index())}
@@ -585,6 +587,28 @@ mod tests {
         assert!(details.operands.iter().any(|op|matches!(op.kind,OperandKind::Memory(m) if m.base==Register::Gpr(0)&&m.index.is_none())));
         assert!(details.reads.contains(&Register::Gpr(1)));
         assert!(details.writes.contains(&Register::Gpr(0)));
+    }
+    #[test]
+    fn adr_subtraction_and_extend_rotations_follow_encoding_fields() {
+        for (word,target) in [(0xe28f0004_u32,0x100c),(0xe24f0004,0x1004)] {
+            let d=decode(&word.to_le_bytes(),Mode::Arm,Endian::Little).unwrap();
+            assert_eq!(d.format(0x1000).unwrap(),format!("adr r0, #0x{target:x}"));
+        }
+        for (first,target) in [(0xf20f_u16,0x1008),(0xf2af,0x1000)] {
+            let mut bytes=first.to_le_bytes().to_vec();bytes.extend(0x0004_u16.to_le_bytes());
+            let d=decode(&bytes,Mode::Thumb,Endian::Little).unwrap();
+            assert_eq!(d.format(0x1000).unwrap(),format!("adr r0, #0x{target:x}"));
+        }
+        for rotation in 0..4_u32 {
+            let expected=if rotation==0 {Shift::None} else {Shift::Ror(rotation*8)};
+            let arm=(0xe6ef0071_u32|(rotation<<10)).to_le_bytes();
+            let second=(0xf081_u16|((rotation as u16)<<4)).to_le_bytes();
+            let thumb=[0x5f,0xfa,second[0],second[1]];
+            for (bytes,mode) in [(&arm[..],Mode::Arm),(&thumb[..],Mode::Thumb)] {
+                let d=decode(bytes,mode,Endian::Little).unwrap();
+                assert!(d.details(0).unwrap().operands.iter().any(|op|op.kind==OperandKind::Register(Register::Gpr(1))&&op.shift==expected),"{} rotation {rotation}",d.encoding_id());
+            }
+        }
     }
 }
 {{end}}
