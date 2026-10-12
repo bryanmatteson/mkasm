@@ -361,7 +361,15 @@ impl Decoded {
         let mut shift_kind = 0;
         for (index,p) in form.parts.iter().enumerate() {
             let prefix = p.prefix;
-            if prefix.contains('[') && !p.symbol.contains("[x]") {
+            // A post-index operand follows the closing bracket and is not
+            // part of the address used for the memory access.
+            if prefix.contains(']') {
+                if let Some(m)=memory.take() {
+                    operands.push(Operand{kind:OperandKind::Memory(m),access:Access::Read,shift:Shift::None,lane:None});roles.push("memory");
+                    details.writeback |= prefix.contains(',');
+                }
+            }
+            if prefix.contains('[') && (p.symbol=="<Rn>" || prefix.contains("SP") || prefix.contains("PC")) {
                 memory = Some(Memory {base: Register::Gpr(if prefix.to_ascii_lowercase().contains("pc") {15} else {13}), index: None, displacement:0, subtract:self.field("U")==Some(0),shift:Shift::None});
             }
             append_literal(&mut text,&mut groups,prefix);
@@ -417,7 +425,6 @@ impl Decoded {
             }
             roles.extend(std::iter::repeat_n(p.symbol,operands.len()-before));
             if value.contains('!') {details.writeback=true}
-            if p.prefix.contains(']') {if let Some(m)=memory.take() {operands.push(Operand{kind:OperandKind::Memory(m),access:Access::Read,shift:Shift::None,lane:None});roles.push("memory")}}
         }
         append_literal(&mut text,&mut groups,form.suffix);
         if let Some(m)=memory.take() {operands.push(Operand{kind:OperandKind::Memory(m),access:Access::Read,shift:Shift::None,lane:None});roles.push("memory")}
@@ -451,7 +458,7 @@ impl Decoded {
                 OperandKind::Memory(_) if store=>Access::Write,
                 OperandKind::Memory(_)=>Access::Read,
                 OperandKind::Register(_) if role=="<Rn>" && (load_multiple||store)=>if details.writeback {Access::ReadWrite}else{Access::Read},
-                OperandKind::Register(_) if load_multiple=>Access::Write,
+                OperandKind::Register(_) if load_multiple && role!="<Rm>"=>Access::Write,
                 OperandKind::Register(_) if role=="<Rd>" && (name.starts_with("strex")||name.starts_with("stlex"))=>Access::Write,
                 OperandKind::Register(_) if ["vtrn","vzip","vuzp","vswp"].iter().any(|prefix|name.starts_with(prefix))=>Access::ReadWrite,
                 OperandKind::Register(_) if !store&&!compare && (i==0 || matches!(role,"<Rt2>"|"<RdLo>"|"<RdHi>"|"<Sm1>"))=>if op.lane.is_some() || matches!(role,"<Rdn>"|"<Rdm>"|"<Ddm>"|"<Sdm>") || form.parts.iter().filter(|p|p.symbol==role).count()>1 || ["vmla","vmls","vaba","vfma","vfms","vqdmla","vqdmls","vqrdmla","vqrdmls","vsdot","vudot","vusdot","vsmmla","vummla","vusmmla","vpadal","umlal","smlal","umaal","bfi"].iter().any(|prefix|name.starts_with(prefix)) || matches!(name,"vbit"|"vbif"|"vbsl") {Access::ReadWrite}else{Access::Write},
@@ -564,6 +571,20 @@ mod tests {
         let d=decode(&0xf3b20081_u32.to_le_bytes(),Mode::Arm,Endian::Little).unwrap();
         let details=d.details(0).unwrap();
         for r in [Register::D(0),Register::D(1)] {assert!(details.reads.contains(&r)&&details.writes.contains(&r));}
+    }
+    #[test]
+    fn post_index_updates_are_separate_from_access_addresses() {
+        for (word,offset) in [(0xe4910004_u32,0),(0xe5b10004,4)] {
+            let d=decode(&word.to_le_bytes(),Mode::Arm,Endian::Little).unwrap();
+            let details=d.details(0).unwrap();
+            assert!(details.operands.iter().any(|op|matches!(op.kind,OperandKind::Memory(m) if m.base==Register::Gpr(1)&&m.displacement==offset)));
+            assert!(details.writes.contains(&Register::Gpr(1)));
+        }
+        let d=decode(&0xf4200701_u32.to_le_bytes(),Mode::Arm,Endian::Little).unwrap();
+        let details=d.details(0).unwrap();
+        assert!(details.operands.iter().any(|op|matches!(op.kind,OperandKind::Memory(m) if m.base==Register::Gpr(0)&&m.index.is_none())));
+        assert!(details.reads.contains(&Register::Gpr(1)));
+        assert!(details.writes.contains(&Register::Gpr(0)));
     }
 }
 {{end}}
