@@ -29,6 +29,7 @@ func TestGenerateRust(t *testing.T) {
 		"pub fn encode_relative_branch", "pub fn relocate",
 		"pub force_rex: bool", "pub lock: bool", "pub repeat: u8", "pub struct FormInstruction",
 		`e.id == "NOP" && head.opcode == 0x90 && head.base_ext != 0`,
+		"head.vvvv & e.reserved_vvvv != 0",
 	} {
 		if !strings.Contains(string(source), required) {
 			t.Errorf("generated Rust lacks %q", required)

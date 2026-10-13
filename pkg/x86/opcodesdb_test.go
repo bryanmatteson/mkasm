@@ -136,6 +136,62 @@ func TestCountInstructionsAllowOperandSizeOverrideWithMandatoryF3(t *testing.T) 
 	}
 }
 
+func TestCountInstructionsKeepVEXImpliedPrefixExact(t *testing.T) {
+	// The Knights Corner VEX forms have no operand-size override: pp selects
+	// a single implied prefix, so P66=0 stays part of the constraint.
+	for _, mnemonic := range []string{"TZCNT", "LZCNT", "POPCNT"} {
+		input := `{"version":"3","arch":"x86","records":[{
+			"id":"COUNT","rectype":"ENCODING",
+			"diagram":{"fields":[{"name":"ENC","value":"VEX"},{"name":"MAP","value":"0f"},{"name":"MOD","value":"REG"},{"name":"MODE","value":"64"},{"name":"MR","value":"1"},{"name":"OP","value":"0xbc"},{"name":"P66","value":"0"},{"name":"PF2","value":"0"},{"name":"PF3","value":"1"},{"name":"VL","value":"128"}]},
+			"templates":[{"bitdiffs":{"fields":[{"name":"W","value":"0"}]},"syntax":{"mnem":"` + mnemonic + `","text":"COUNT","ast":[]}}]
+		}]}`
+		cat, err := ParseOpcodesDB(strings.NewReader(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoding := cat.Encodings[0]
+		if encoding.Kind != EncodingVEX || encoding.PrefixMask != 7 || encoding.PrefixValue != 2 {
+			t.Fatalf("%s VEX form lost its exact pp=F3 constraint: %+v", mnemonic, encoding)
+		}
+	}
+}
+
+func TestParseOpcodesDBReservesUnusedVVVV(t *testing.T) {
+	const (
+		reg  = `{"type":"VREG","symbol":"XMM","encodedin":"REG"}`
+		rm   = `{"type":"VREG","symbol":"XMM","encodedin":"RM"}`
+		vvvv = `{"type":"VREG","symbol":"XMM","encodedin":"VVVV"}`
+		vsib = `{"type":"MEM","symbol":"VMZ","encodedin":"RM"}`
+	)
+	for _, tt := range []struct {
+		name, enc, opcodeMap, ast string
+		reserved                  byte
+	}{
+		{"legacy", "", "0f", reg + "," + rm, 0},
+		{"vex-modrm-only", "VEX", "0f", reg + "," + rm, 0x0f},
+		{"vex-source", "VEX", "0f", reg + "," + vvvv + "," + rm, 0},
+		{"xop-modrm-only", "XOP", "xop9", reg + "," + rm, 0x0f},
+		{"evex-modrm-only", "EVEX", "0f", reg + "," + rm, 0x1f},
+		{"evex-source", "EVEX", "0f", reg + "," + vvvv + "," + rm, 0},
+		{"evex-vsib-index", "EVEX", "0f38", reg + "," + vsib, 0x0f},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			input := `{"version":"3","arch":"x86","records":[{
+				"id":"FORM","rectype":"ENCODING",
+				"diagram":{"fields":[{"name":"ENC","value":"` + tt.enc + `"},{"name":"MAP","value":"` + tt.opcodeMap + `"},{"name":"MR","value":"1"},{"name":"OP","value":"0x28"}]},
+				"templates":[{"syntax":{"mnem":"FORM","text":"FORM","ast":[` + tt.ast + `]}}]
+			}]}`
+			cat, err := ParseOpcodesDB(strings.NewReader(input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cat.Encodings[0].ReservedVVVV; got != tt.reserved {
+				t.Fatalf("ReservedVVVV = %#x, want %#x", got, tt.reserved)
+			}
+		})
+	}
+}
+
 func TestOpcodesDBCorpus(t *testing.T) {
 	path := os.Getenv("MKASM_X86_OPCODESDB")
 	if path == "" {

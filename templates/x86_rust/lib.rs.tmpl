@@ -31,6 +31,7 @@ pub struct Encoding {
     w: i8,
     operand_size: u8,
     vector_length: u16,
+    reserved_vvvv: u8,
 	tuple: &'static str,
     has_modrm: bool,
     mod_kind: u8,
@@ -522,6 +523,9 @@ fn match_encoding(src: &[u8], mode: Mode, head: Head, e: &Encoding) -> Match {
         || (e.w >= 0 && e.w as u8 != head.w)
         || (e.operand_size != 0 && e.operand_size as usize != effective_operand_bits(mode, head.prefix_bits & 1 != 0, head.w != 0))
         || (e.vector_length != 0 && e.vector_length != head.vector_length)
+        // A vvvv field the form does not use (and EVEX.V' unless it extends
+        // a VSIB index) must be encoded as ones.
+        || head.vvvv & e.reserved_vvvv != 0
     {
         return Match::No;
     }

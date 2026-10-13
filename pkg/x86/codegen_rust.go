@@ -76,11 +76,11 @@ func buildRustCodegenData(catalog *Catalog, decoder *Decoder) rustCodegenData {
 	tailOffset := 0
 	operandOffset := 0
 	for _, e := range catalog.Encodings {
-		fmt.Fprintf(&encodings, "    Encoding { id: %s, form_id: %s, mnemonic: %s, syntax: %s, flow_control: FlowControl::%s, kind: %d, map: %d, opcode: 0x%02x, opcode_plus_reg: %t, mandatory: %d, prefix_mask: %d, prefix_value: %d, modes: %d, w: %d, operand_size: %d, vector_length: %d, tuple: %s, has_modrm: %t, mod_kind: %d, reg_mask: %d, reg_value: %d, rm_mask: %d, rm_value: %d, tail_start: %d, tail_len: %d, operand_start: %d, operand_len: %d },\n",
+		fmt.Fprintf(&encodings, "    Encoding { id: %s, form_id: %s, mnemonic: %s, syntax: %s, flow_control: FlowControl::%s, kind: %d, map: %d, opcode: 0x%02x, opcode_plus_reg: %t, mandatory: %d, prefix_mask: %d, prefix_value: %d, modes: %d, w: %d, operand_size: %d, vector_length: %d, reserved_vvvv: %d, tuple: %s, has_modrm: %t, mod_kind: %d, reg_mask: %d, reg_value: %d, rm_mask: %d, rm_value: %d, tail_start: %d, tail_len: %d, operand_start: %d, operand_len: %d },\n",
 			rustString(e.ID), rustString(e.FormID), rustString(e.Mnemonic), rustString(e.Syntax),
 			classifyFlowControl(e),
 			e.Kind, e.Map, e.Opcode, e.OpcodePlusReg, e.MandatoryPrefix,
-			e.PrefixMask, e.PrefixValue, e.Modes, e.W, e.OperandSize, e.VectorLength, rustString(e.Tuple),
+			e.PrefixMask, e.PrefixValue, e.Modes, e.W, e.OperandSize, e.VectorLength, e.ReservedVVVV, rustString(e.Tuple),
 			e.HasModRM, e.Mod, e.RegMask, e.RegValue, e.RMMask, e.RMValue,
 			tailOffset, len(e.Tail), operandOffset, len(e.Operands))
 		for _, tail := range e.Tail {

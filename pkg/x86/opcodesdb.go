@@ -130,7 +130,10 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 	}
 	if e.Kind == EncodingLegacy && (fields["OSZ"] != "" || e.Mnemonic == "TZCNT" || e.Mnemonic == "LZCNT" || e.Mnemonic == "POPCNT") {
 		// In legacy encodings the physical 66 byte can be the OSZ
-		// override even when P66 (mandatory-prefix role) is zero.
+		// override even when P66 (mandatory-prefix role) is zero. VEX,
+		// XOP, and EVEX pp selects a single implied prefix and leaves 66 no
+		// OSZ role, so those forms (such as the Knights Corner VEX counts)
+		// keep P66=0.
 		e.PrefixMask &^= 1
 		e.PrefixValue &^= 1
 		if strings.EqualFold(fields["OSZ"], "Z") {
@@ -180,7 +183,32 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 			e.Tail = append(e.Tail, width)
 		}
 	}
+	e.ReservedVVVV = reservedVVVV(e.Kind, e.Operands)
 	return e, nil
+}
+
+// reservedVVVV returns the decoded vvvv bits (EVEX.V' as bit 4) that a VEX,
+// XOP, or EVEX form does not name as an operand. EVEX.V' stays free on VSIB
+// forms, where it extends the vector index register instead.
+func reservedVVVV(kind EncodingKind, operands []Operand) byte {
+	var reserved byte
+	switch kind {
+	case EncodingVEX, EncodingXOP:
+		reserved = 0x0f
+	case EncodingEVEX:
+		reserved = 0x1f
+	default:
+		return 0
+	}
+	for _, operand := range operands {
+		switch {
+		case operand.EncodedIn == "VVVV":
+			return 0
+		case operand.Symbol == "VMX" || operand.Symbol == "VMY" || operand.Symbol == "VMZ":
+			reserved &^= 0x10
+		}
+	}
+	return reserved
 }
 
 func scalarString(value any) string {

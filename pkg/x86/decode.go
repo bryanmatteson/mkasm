@@ -103,6 +103,7 @@ type decodedHead struct {
 	vectorLength    uint16
 	addressOverride bool
 	baseExt         byte
+	vvvv            byte
 	modrmOffset     int
 }
 
@@ -188,6 +189,11 @@ func matchEncoding(src []byte, mode Mode, head decodedHead, e *Encoding) (length
 		return 0, false, false
 	}
 	if e.VectorLength != 0 && e.VectorLength != head.vectorLength {
+		return 0, false, false
+	}
+	// A vvvv field the form does not use (and EVEX.V' unless it extends a
+	// VSIB index) must be encoded as ones.
+	if head.vvvv&e.ReservedVVVV != 0 {
 		return 0, false, false
 	}
 	end := head.modrmOffset
@@ -309,6 +315,7 @@ prefixesDone:
 		p1 := src[pos+1]
 		h.prefixBits = prefixBitsFromPP(p1 & 3)
 		h.vectorLength = 128 << ((p1 >> 2) & 1)
+		h.vvvv = (^p1 >> 3) & 15
 		pos += 2
 	case 0xc4:
 		// C4 has the same legacy collision with LES in 16/32-bit modes.
@@ -327,6 +334,7 @@ prefixesDone:
 		p2 := src[pos+2]
 		h.w, h.prefixBits = p2>>7, prefixBitsFromPP(p2&3)
 		h.vectorLength = 128 << ((p2 >> 2) & 1)
+		h.vvvv = (^p2 >> 3) & 15
 		pos += 3
 	case 0x62:
 		// 62 collides with BOUND in 16/32-bit modes. EVEX is selected there
@@ -355,6 +363,7 @@ prefixesDone:
 		default:
 			return h, ErrUnknownEncoding
 		}
+		h.vvvv = (^p1>>3)&15 | (^p2>>3&1)<<4
 		pos += 4
 	case 0x8f:
 		if pos+1 < len(src) && src[pos+1]&0x1f >= 8 {
@@ -370,6 +379,7 @@ prefixesDone:
 			p2 := src[pos+2]
 			h.w, h.prefixBits = p2>>7, prefixBitsFromPP(p2&3)
 			h.vectorLength = 128 << ((p2 >> 2) & 1)
+			h.vvvv = (^p2 >> 3) & 15
 			pos += 3
 		}
 	}

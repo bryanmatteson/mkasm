@@ -147,6 +147,10 @@ type Encoding struct {
 	W            BitConstraint
 	OperandSize  uint8
 	VectorLength uint16
+	// ReservedVVVV holds the decoded (ones'-complemented) VEX, XOP, or EVEX
+	// vvvv bits, with EVEX.V' as bit 4, that the form leaves unused. They
+	// must be encoded as ones, so any set bit here is #UD.
+	ReservedVVVV byte
 	Tuple        string
 
 	HasModRM bool

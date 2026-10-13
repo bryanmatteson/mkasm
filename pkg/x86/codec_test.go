@@ -160,6 +160,56 @@ func TestDecodePrefersMostSpecificOverlappingEncoding(t *testing.T) {
 	}
 }
 
+func TestDecodeRequiresUnusedVVVVEncodedAsOnes(t *testing.T) {
+	catalog := codecCatalog()
+	catalog.Encodings = append(catalog.Encodings,
+		Encoding{ID: "VMOVAPD_vex", FormID: "VMOVAPD_vex/0", Mnemonic: "VMOVAPD", Kind: EncodingVEX, Map: Map0F, Opcode: 0x28, MandatoryPrefix: Prefix66, PrefixMask: 7, PrefixValue: 1, Modes: modeAll, W: BitAny, VectorLength: 128, ReservedVVVV: 0x0f, HasModRM: true},
+		Encoding{ID: "VFRCZPS", FormID: "VFRCZPS/0", Mnemonic: "VFRCZPS", Kind: EncodingXOP, Map: MapXOP9, Opcode: 0x80, PrefixMask: 7, Modes: modeAll, W: BitZero, VectorLength: 128, ReservedVVVV: 0x0f, HasModRM: true},
+		Encoding{ID: "VMOVAPD_evex", FormID: "VMOVAPD_evex/0", Mnemonic: "VMOVAPD", Kind: EncodingEVEX, Map: Map0F, Opcode: 0x28, MandatoryPrefix: Prefix66, PrefixMask: 7, PrefixValue: 1, Modes: mode64, W: BitOne, VectorLength: 512, ReservedVVVV: 0x1f, HasModRM: true},
+		Encoding{ID: "VGATHERDPS", FormID: "VGATHERDPS/0", Mnemonic: "VGATHERDPS", Kind: EncodingEVEX, Map: Map0F38, Opcode: 0x92, MandatoryPrefix: Prefix66, PrefixMask: 7, PrefixValue: 1, Modes: mode64, W: BitZero, VectorLength: 512, ReservedVVVV: 0x0f, HasModRM: true, Mod: ModMemory},
+	)
+	decoder, err := NewDecoder(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name  string
+		bytes []byte
+		id    string // empty when the encoding is #UD
+	}{
+		{"vex-ones", []byte{0xc5, 0xf9, 0x28, 0xc1}, "VMOVAPD_vex"},
+		{"vex-vvvv", []byte{0xc5, 0xf1, 0x28, 0xc1}, ""},
+		{"xop-ones", []byte{0x8f, 0xe9, 0x78, 0x80, 0xc1}, "VFRCZPS"},
+		{"xop-vvvv", []byte{0x8f, 0xe9, 0x70, 0x80, 0xc1}, ""},
+		{"evex-ones", []byte{0x62, 0xf1, 0xfd, 0x48, 0x28, 0xc1}, "VMOVAPD_evex"},
+		{"evex-vvvv", []byte{0x62, 0xf1, 0xf5, 0x48, 0x28, 0xc1}, ""},
+		{"evex-v-prime", []byte{0x62, 0xf1, 0xfd, 0x40, 0x28, 0xc1}, ""},
+		{"vsib-index-v-prime", []byte{0x62, 0xf2, 0x7d, 0x41, 0x92, 0x0c, 0x90}, "VGATHERDPS"},
+		{"vsib-vvvv", []byte{0x62, 0xf2, 0x75, 0x49, 0x92, 0x0c, 0x90}, ""},
+	} {
+		got, err := decoder.Decode(tt.bytes, Mode64)
+		switch {
+		case tt.id == "" && !errors.Is(err, ErrUnknownEncoding):
+			t.Errorf("%s: decode % x = %+v, %v; want ErrUnknownEncoding", tt.name, tt.bytes, got, err)
+		case tt.id != "" && (err != nil || got.Encoding(decoder).ID != tt.id):
+			t.Errorf("%s: decode % x = %+v, %v; want %s", tt.name, tt.bytes, got, err, tt.id)
+		}
+	}
+	// Forms that name a vvvv operand accept every register it can encode.
+	for v := byte(0); v < 32; v++ {
+		if v < 16 {
+			vex := []byte{0xc5, 0x85 | v<<3, 0xfe, 0xcb}
+			if got, err := decoder.Decode(vex, Mode64); err != nil || got.Encoding(decoder).ID != "VPADDD" {
+				t.Errorf("decode % x = %+v, %v; want VPADDD", vex, got, err)
+			}
+		}
+		evex := []byte{0x62, 0xf1, 0x05 | (v&15)<<3, 0x40 | (v>>4)<<3, 0xef, 0xc0}
+		if got, err := decoder.Decode(evex, Mode64); err != nil || got.Encoding(decoder).ID != "VPXORD" {
+			t.Errorf("decode % x = %+v, %v; want VPXORD", evex, got, err)
+		}
+	}
+}
+
 func TestDecodeErrorsAndAllocations(t *testing.T) {
 	decoder, err := NewDecoder(codecCatalog())
 	if err != nil {
