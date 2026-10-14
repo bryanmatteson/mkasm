@@ -1,10 +1,26 @@
-# mkasm
+<p align="center"><img src="docs/assets/icon.svg" width="112" alt="mkasm icon"></p>
+<h1 align="center">mkasm</h1>
+<p align="center"><strong>Turn instruction specifications into codecs you can ship.</strong></p>
+<p align="center">
+<a href="https://github.com/bryanmatteson/mkasm/actions"><img src="https://img.shields.io/badge/codegen-Go%20%C2%B7%20Rust-2b718a" alt="Go and Rust code generation"></a>
+<img src="https://img.shields.io/badge/ISA-A64%20%C2%B7%20A32%20%C2%B7%20Thumb%20%C2%B7%20x86--64-466299" alt="Supported instruction sets">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-7b68aa" alt="MIT license"></a>
+</p>
 
 `mkasm` generates instruction-set codecs from machine-readable specifications.
 From Arm's A64 XML release it writes a Rust crate or a Go module. From the
 AArch32 XML it writes a Rust codec for A32 and Thumb (16 and 32 bits). From an
 opcodesDB v3 export it writes an x86-64 Rust crate. Generated projects have no
 dependencies, build on their own, and ship with their own tests.
+
+`mkasm --json` writes the resolved instruction model instead of code.
+
+<p align="center"><img src="docs/assets/demo.gif" width="1000" alt="mkasm generates a Go A64 codec from Arm XML, then encodes and decodes an ADD instruction"></p>
+
+The demo generates a complete Go module from the June 2026 A64 corpus, then
+uses its exact encoder and decision-tree decoder to round-trip `ADD x0, x1,
+#42`. Both generation and the codec calls are real. The
+[recording script](scripts/record-readme-demo.py) reproduces the session.
 
 | Output | Built from | Provides |
 |---|---|---|
@@ -13,9 +29,31 @@ dependencies, build on their own, and ship with their own tests.
 | A64 Go module | Arm A64 XML | Typed and exact encoders, a decision-tree decoder with a table fallback, and the encoding registry |
 | x86-64 Rust crate | opcodesDB v3 JSON | An allocation-free decoder for legacy/REX, 3DNow, VEX, XOP and EVEX with structured operands, Intel-syntax formatting, flow-control and access summaries, exact encoding, and RIP/relative relocation |
 
-`mkasm --json` writes the resolved instruction model instead of code.
+## Built for tools that understand machine code
 
-## Status
+- 🧩 **One specification, several surfaces.** Resolve encoding patterns,
+  fields, operand shapes, aliases, features, and instruction classes into one
+  model; emit Rust, Go, or inspectable JSON.
+- ⚙️ **Encode at the right level.** Use typed A64 assembler calls and labels,
+  exact field encoders, or raw emitters for forms whose operands need direct
+  control. Fixups resolve branches when the assembler finishes.
+- 🔎 **Decode and explain.** Identify an encoding, inspect its fields and
+  structured operands, recover branch targets and access information, and
+  format the preferred assembly spelling.
+- 🧱 **Keep the runtime small.** Generated projects stand alone with no
+  dependencies. Rust decision-tree decoders and the x86 codec use fixed-size,
+  allocation-free paths.
+- 🔁 **Move and edit x86 instructions.** Preserve RIP-relative and branch
+  targets through relocation; edit decoded operands through `FormInstruction`
+  and encode the selected form again.
+- 📦 **Bring your corpus.** Read a directory, archive, URL, or stream with
+  bounded loading and deterministic output. The generated registry and tests
+  accompany the codec.
+
+
+<details>
+<summary><strong>Corpus coverage and independent validation</strong></summary>
+
 
 Measured on 2026-10-06 against `ISA_A64_xml_A_profile-2026-06` and opcodesDB
 v3, with Apple clang 21.0.0 and Homebrew LLVM MC 22.1.8 as the independent
@@ -38,6 +76,8 @@ authenticated PC-relative `RETAASPPC`, `RETABSPPC`, `AUTIASPPC` and
 `AUTIBSPPC`. They remain unverified, so the
 strict all-encoding gate stays red until an independent assembler accepts them.
 The full ledger is in [`tests/conformance`](tests/conformance/README.md).
+
+</details>
 
 ## Quick start
 
