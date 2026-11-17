@@ -48,6 +48,7 @@ func TestGoAssemblerLLVMConformance(t *testing.T) {
 	ids := goCaseIDs(cases)
 	words := parseConformanceWords(t, "Go", raw, ids)
 	verifyAssemblerWords(t, cc, p, "go-exact", ids, words)
+	verifyExtendedHintSpace(t, outDir, "go")
 }
 
 func goCaseIDs(cases []arm.GoConformanceCase) []string {

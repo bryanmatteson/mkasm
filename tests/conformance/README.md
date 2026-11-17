@@ -5,12 +5,17 @@ scale. It is separate from the `pkg/arm` unit tests. Encoder and decoder round
 trips derived from one XML parse prove internal consistency, not architectural
 truth.
 
+For every registered native, bytecode and GPU target, use the
+[all-target reference runner](../../docs/reference-testing.md). It executes the
+installed independent implementations and fails on missing or skipped selected
+tests. This directory continues to own the more detailed A64 conformance gates.
+
 | Gate | Independent oracle | Contract |
 |---|---|---|
 | `make coverage-encodings` | `pkg/coverage` | Go and Rust exact ledgers contain every encoding exactly once |
 | `make conformance-go` | clang and LLVM MC | Every supported Go exact encoder reproduces exact bytes; rejects and mismatches fail |
 | `make conformance-rust` | clang and LLVM MC | Supported typed and exact Rust encoders reproduce exact bytes; rejects and mismatches fail |
-| `make conformance-disasm` | clang and LLVM MC | Every supported rendered sample reassembles to its word; PC-relative labels keep their displacement sign |
+| `make conformance-disasm` | clang and LLVM MC | Every supported rendered sample reassembles to its word; PC-relative labels keep their displacement sign; the generated text assembler returns LLVM's word first for the formatter's and LLVM's spelling of each sample |
 | `make conformance` | clang and LLVM MC | All three supported-instruction gates above |
 | `make conformance-strict` | clang and LLVM MC | The oracle must also recognize every generated and printable encoding |
 | `make conformance-asl` | Arm ASL from `mra_tools` | Opcode bits and fields agree |
@@ -70,6 +75,12 @@ Observed on 2026-10-06 with Apple clang 21.0.0 and Homebrew LLVM MC 22.1.8:
 | Typed Rust calls | 4,524 | 4,523 | 0 | 1 |
 | Rust exact ledger | 4,623 | 4,618 | 0 | 5 |
 | Disassembly samples | 4,578 | 4,573 | 0 | 5 |
+| Text assembler, formatter spellings | 4,578 | 4,573 | 0 | 5 |
+| Text assembler, LLVM spellings | 4,578 | 4,573 | 0 | 5 |
+
+The text-assembler rows were observed on 2026-11-11 with the same tools. A
+case is byte-identical when the assembler's first encoding is LLVM's word; the
+LLVM spellings are llvm-mc's own disassembly of each word.
 
 None of the cases the independent assemblers accept differs by a single byte,
 and they reject no generated spelling. The unsupported cases are `HINTE` and

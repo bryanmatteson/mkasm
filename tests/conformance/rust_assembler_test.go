@@ -90,6 +90,7 @@ func TestRustAssemblerLLVMConformance(t *testing.T) {
 	}
 	exactWords := parseRustConformanceWords(t, raw, exactCases)
 	verifyAssemblerWords(t, cc, p, "exact", rustCaseIDs(exactCases), exactWords)
+	verifyExtendedHintSpace(t, outDir, "rust")
 }
 
 func requireEncodingCoverage(t *testing.T, p *arm.ARMParser, observed []string) {
@@ -419,6 +420,14 @@ func verifyWithLLVMCFallback(t *testing.T, rendered []renderedCase, res *asmResu
 			continue
 		}
 		word, err := assembleWithLLVMMC(mc, c.text)
+		if err != nil && c.id == "HINTE_extendedhint" {
+			// FEAT_HINTE occupies the generic system-register space. Older
+			// LLVM supports that encoding syntax even without the new mnemonic.
+			// Translate the source immediate, never the expected encoded word.
+			if text, ok := extendedHintSystemSyntax(c.text); ok {
+				word, err = assembleWithLLVMMC(mc, text)
+			}
+		}
 		if err != nil {
 			if llvmMCMissingInstruction(err) {
 				res.unsupported[i] = true
@@ -436,6 +445,29 @@ func verifyWithLLVMCFallback(t *testing.T, rendered []renderedCase, res *asmResu
 		verified++
 	}
 	return verified
+}
+
+// Arm's HINTE immediate is L:imm3:imm7:Rt. In generic system-register
+// syntax these fields are the read/write direction, op1, CRm:op2 and Rt;
+// op0=0 and CRn=2 are fixed by the architectural encoding.
+func extendedHintSystemSyntax(text string) (string, bool) {
+	fields := strings.Fields(text)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "HINTE") {
+		return "", false
+	}
+	imm, err := strconv.ParseUint(strings.TrimPrefix(fields[1], "#"), 0, 16)
+	if err != nil || imm>>15 == 0 && imm>>12&7 == 3 && imm&31 == 31 {
+		return "", false
+	}
+	register := fmt.Sprintf("x%d", imm&31)
+	if imm&31 == 31 {
+		register = "xzr"
+	}
+	system := fmt.Sprintf("S0_%d_C2_C%d_%d", imm>>12&7, imm>>8&15, imm>>5&7)
+	if imm>>15 != 0 {
+		return "mrs " + register + ", " + system, true
+	}
+	return "msr " + system + ", " + register, true
 }
 
 func llvmMCMissingInstruction(err error) bool {
