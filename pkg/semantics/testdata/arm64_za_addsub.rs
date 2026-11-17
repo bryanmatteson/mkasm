@@ -1,0 +1,181 @@
+#![allow(dead_code)]
+#[path = "semantics.rs"]
+mod semantics;
+use semantics::*;
+use std::cell::Cell;
+const FORMS: &[(u32, u8, u16, bool, bool)] = &[
+    (0xc1e41c00, 16, 2, true, false),
+    (0xc1e51c00, 16, 4, true, false),
+    (0xc1e41c08, 16, 2, true, true),
+    (0xc1e51c08, 16, 4, true, true),
+    (0xc1a01c00, 32, 2, false, false),
+    (0xc1e01c00, 64, 2, false, false),
+    (0xc1a41c00, 16, 2, false, false),
+    (0xc1a11c00, 32, 4, false, false),
+    (0xc1e11c00, 64, 4, false, false),
+    (0xc1a51c00, 16, 4, false, false),
+    (0xc1a01c08, 32, 2, false, true),
+    (0xc1e01c08, 64, 2, false, true),
+    (0xc1a41c08, 16, 2, false, true),
+    (0xc1a11c08, 32, 4, false, true),
+    (0xc1e11c08, 64, 4, false, true),
+    (0xc1a51c08, 16, 4, false, true),
+];
+fn recipe(word: u32, vl: u16) -> Option<Recipe> {
+    arm64_za_addsub::a64(word, 0x1000, vl)
+}
+struct State {
+    z: [[u64; 32]; 32],
+    za: Vec<[u64; 32]>,
+    sm: u64,
+    w: u32,
+    calls: Vec<(u8, bool, bool, u64, u64)>,
+    at: Cell<usize>,
+}
+fn marker(i: usize, w: u8) -> u64 {
+    0xe71ab35d6219acf0u64.wrapping_mul(i as u64 + 1) & if w == 64 { u64::MAX } else { (1 << w) - 1 }
+}
+impl Machine for State {
+    fn read_register(&self, r: Register) -> Value {
+        Value::known(
+            64,
+            match r.bank {
+                "a64.svcr" => self.sm,
+                "a64.fpcr" => 0x07c09f03,
+                "a64.gpr" => u64::from(self.w),
+                "a64.vector64" => self.z[usize::from(r.index / 32)][usize::from(r.index % 32)],
+                "a64.za64" => self.za[usize::from(r.index / 32)][usize::from(r.index % 32)],
+                _ => panic!("unexpected read {r:?}"),
+            },
+        )
+    }
+    fn read_memory(&self, _: u64, _: u8, _: Endian) -> Result<Value, EvalError> {
+        panic!()
+    }
+    fn evaluate_float(
+        &self,
+        f: &FloatExpression,
+        v: &[Value],
+        ctrl: Value,
+        status: Value,
+    ) -> Result<Value, EvalError> {
+        let i = self.at.get();
+        let (w, bf, sub, a, b) = self.calls[i];
+        assert_eq!(
+            f.operation,
+            FloatOperation::ZaBinary {
+                bfloat: bf,
+                subtract: sub
+            }
+        );
+        assert_eq!(f.environment, FloatEnvironment::A64);
+        assert_eq!(f.projection, FloatProjection::Value);
+        assert_eq!(f.width, w);
+        assert_eq!(v, [Value::known(w, a), Value::known(w, b)]);
+        assert_eq!(ctrl, Value::known(32, 0x07c09f03));
+        assert_eq!(status, Value::known(32, 0));
+        self.at.set(i + 1);
+        Ok(Value::known(w, marker(i, w)))
+    }
+}
+#[test]
+fn complete_za_addsub_groups_widths_lengths_wraps_and_backing() {
+    for &(base, width, nreg, bf, sub) in FORMS {
+        for vl in [128, 256, 512, 1024, 2048] {
+            for pattern in 0..3u32 {
+                let m = 32 - u32::from(nreg);
+                let off = pattern * 3;
+                let selector = pattern;
+                let word = base | (m << 5) | (selector << 13) | off;
+                let mut s = State {
+                    z: std::array::from_fn(|n| {
+                        std::array::from_fn(|c| {
+                            0x9127356bdcfa8231u64.wrapping_mul((n * 32 + c + 1) as u64)
+                        })
+                    }),
+                    za: (0..256)
+                        .map(|r| {
+                            std::array::from_fn(|c| {
+                                0x8f2e731a6954bcd1u64.wrapping_mul((r * 32 + c + 1) as u64)
+                            })
+                        })
+                        .collect(),
+                    sm: 3,
+                    w: if pattern == 0 {
+                        0
+                    } else if pattern == 1 {
+                        u32::MAX
+                    } else {
+                        u32::from(vl / 8 / nreg) - 1
+                    },
+                    calls: vec![],
+                    at: Cell::new(0),
+                };
+                let stride = vl / 8 / nreg;
+                let row0 = (u64::from(s.w) + u64::from(off)) % u64::from(stride);
+                let mut expected = s.za.clone();
+                for member in 0..nreg {
+                    let row = row0 as usize + usize::from(member * stride);
+                    for chunk in 0..vl / 64 {
+                        let old = s.za[row][usize::from(chunk)];
+                        let src = s.z[m as usize + usize::from(member)][usize::from(chunk)];
+                        let mut out = 0;
+                        for part in 0..64 / u16::from(width) {
+                            let shift = part * u16::from(width);
+                            let mask = if width == 64 {
+                                u64::MAX
+                            } else {
+                                (1 << width) - 1
+                            };
+                            let i = s.calls.len();
+                            s.calls.push((
+                                width,
+                                bf,
+                                sub,
+                                (old >> shift) & mask,
+                                (src >> shift) & mask,
+                            ));
+                            out |= marker(i, width) << shift;
+                        }
+                        expected[row][usize::from(chunk)] = out;
+                    }
+                }
+                let r = recipe(word, vl).unwrap();
+                assert_eq!(r.support, Support::Full);
+                r.validate().unwrap();
+                let t = evaluate(&r, &s).unwrap();
+                let mut actual = s.za.clone();
+                for wr in t.registers {
+                    assert_eq!(wr.register.bank, "a64.za64");
+                    assert!(wr.value.is_known());
+                    actual[usize::from(wr.register.index / 32)]
+                        [usize::from(wr.register.index % 32)] = wr.value.bits;
+                }
+                assert_eq!(actual, expected, "{word:08x} VL{vl}");
+                assert_eq!(s.at.get(), s.calls.len());
+                assert_eq!(t.next_pc, Value::known(64, 0x1004));
+                assert_eq!(t.trap, None);
+                assert!(t.memory.is_empty());
+            }
+        }
+    }
+}
+#[test]
+fn streaming_guard_precedes_missing_data() {
+    for &(word, _, _, _, _) in FORMS {
+        for sm in [0, 1, 2] {
+            let s = State {
+                z: [[0; 32]; 32],
+                za: vec![],
+                sm,
+                w: 0,
+                calls: vec![],
+                at: Cell::new(0),
+            };
+            assert_eq!(
+                evaluate(&recipe(word, 128).unwrap(), &s),
+                Err(EvalError::UnsupportedContext)
+            );
+        }
+    }
+}
