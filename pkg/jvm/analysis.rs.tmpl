@@ -1,0 +1,41 @@
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct OperandSpan {pub start:usize,pub end:usize,pub name:&'static str,pub kind:&'static str,pub value:Option<i64>,pub position_dependent:bool}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Described {pub text:String,pub operands:Vec<OperandSpan>}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Hole {pub name:&'static str,pub kind:&'static str,pub min:i64,pub max:i64,pub position_dependent:bool}
+impl Instruction {
+    pub fn branch_targets(&self)->Vec<i64>{let base=i64::from(self.offset);let mut out=self.operands.iter().filter(|o|o.kind=="branch").map(|o|base+o.value).collect::<Vec<_>>();if let Some(s)=&self.switch{out.push(base+i64::from(s.default));out.extend(s.targets.iter().map(|v|base+i64::from(*v)));out.extend(s.pairs.iter().map(|p|base+i64::from(p.target)));}out}
+    pub fn describe(&self)->Described{
+        let text=self.format();let mut start=self.mnemonic.len()+usize::from(self.wide)*5;let mut operands=Vec::new();
+        if self.switch.is_some(){operands.push(OperandSpan{start:start+1,end:text.len(),name:"switch",kind:"switch",value:None,position_dependent:true});}
+        else{for o in &self.operands{start+=1;let end=text[start..].find(' ').map_or(text.len(),|n|start+n);operands.push(OperandSpan{start,end,name:o.name,kind:o.kind,value:Some(o.value),position_dependent:o.kind=="branch"});start=end;}}
+        Described{text,operands}
+    }
+    pub fn set_operand(&mut self,name:&str,value:i64)->Result<(),Error>{let mut next=self.clone();next.operands.iter_mut().find(|o|o.name==name).ok_or(Error::Malformed("unknown operand"))?.value=value;let b=encode(&next,self.offset)?;*self=decode(&b,self.offset)?;Ok(())}
+    pub fn relocated(&self,to:u32)->Result<Self,Error>{
+        let mut next=self.clone();let delta=i64::from(self.offset)-i64::from(to);for o in &mut next.operands{if o.kind=="branch"{o.value=o.value.checked_add(delta).ok_or(Error::Malformed("relocation range"))?;}}
+        if let Some(s)=&mut next.switch{let shift=|v:i32|i32::try_from(i64::from(v)+delta).map_err(|_|Error::Malformed("relocation range"));s.default=shift(s.default)?;for v in &mut s.targets{*v=shift(*v)?;}for p in &mut s.pairs{p.target=shift(p.target)?;}}
+        let b=encode(&next,to)?;decode(&b,to)
+    }
+    pub fn encode_into(&self,output:&mut[u8])->Result<usize,Error>{let b=encode(self,self.offset)?;if output.len()<b.len(){return Err(Error::Malformed("output buffer too small"));}output[..b.len()].copy_from_slice(&b);Ok(b.len())}
+    pub fn relocate_into(&self,to:u32,output:&mut[u8])->Result<usize,Error>{self.relocated(to)?.encode_into(output)}
+}
+impl InstructionTemplate {
+    pub fn definition(&self)->&'static Definition{self.definition}
+    pub fn holes(&self)->Vec<Hole>{
+        let mut out=Vec::new();for(o,v)in self.definition.operands.iter().zip(&self.fixed){if v.is_none(){let bits=8*if self.wide{2}else{o.bytes};let(min,max)=if o.kind=="array_type"{(4,11)}else if o.signed{(-(1i64<<(bits-1)),(1i64<<(bits-1))-1)}else{(i64::from(matches!(o.kind,"constant_pool"|"count"|"dimensions")),(1i64<<bits)-1)};out.push(Hole{name:o.name,kind:o.kind,min,max,position_dependent:o.kind=="branch"});}}
+        if matches!(self.definition.opcode,0xaa|0xab)&&self.switch_value.is_none(){out.push(Hole{name:"switch",kind:"switch",min:i32::MIN as i64,max:i32::MAX as i64,position_dependent:true});}out
+    }
+    pub fn could_match(&self,src:&[u8])->bool{if self.wide{src.starts_with(&[0xc4,self.definition.opcode])}else{src.first()==Some(&self.definition.opcode)}}
+}
+#[cfg(test)]mod analysis_tests{use super::*;#[test]fn branch_switch_and_atomic_edits(){
+    let b=assemble("goto 16",0).unwrap();let mut i=decode(&b,0).unwrap();let a=i.describe();assert_eq!(&a.text[a.operands[0].start..a.operands[0].end],"16");let moved=i.relocated(4).unwrap();assert_eq!(moved.operands[0].value+4,i.operands[0].value);assert!(i.set_operand("branch",1000000).is_err());assert_eq!(encode(&i,0).unwrap(),b);let t=InstructionTemplate::new("goto",false).unwrap();assert!(t.holes()[0].position_dependent);assert!(t.could_match(&b));
+    let mut t=InstructionTemplate::new("lookupswitch",false).unwrap();t.set_switch(Switch{default:16,low:0,targets:vec![],pairs:vec![LookupPair{key:-1,target:-4}]}).unwrap();let b=t.encode(0).unwrap();let i=decode(&b,0).unwrap();let m=i.relocated(1).unwrap();assert_eq!(i.switch.as_ref().unwrap().default,i32::try_from(m.offset).unwrap()+m.switch.as_ref().unwrap().default);assert_eq!(m.length+1,i.length);
+}
+#[test]fn holes_follow_semantic_operand_ranges(){
+    for(name,operand,min,max)in [("newarray","type",4,11),("multianewarray","dimensions",1,255),("invokeinterface","count",1,255)]{
+        let t=InstructionTemplate::new(name,false).unwrap();let h=t.holes().into_iter().find(|h|h.name==operand).unwrap();assert_eq!((h.min,h.max),(min,max));
+    }
+}}

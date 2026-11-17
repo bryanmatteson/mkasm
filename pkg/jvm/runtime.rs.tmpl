@@ -1,0 +1,747 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+#[derive(Clone, Copy, Debug)]
+pub struct OperandDefinition {
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub bytes: usize,
+    pub signed: bool,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct Definition {
+    pub opcode: u8,
+    pub mnemonic: &'static str,
+    pub source_format: &'static str,
+    pub source_wide_format: &'static str,
+    pub operands: &'static [OperandDefinition],
+    pub reserved: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Operand {
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub value: i64,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LookupPair {
+    pub key: i32,
+    pub target: i32,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Switch {
+    pub default: i32,
+    pub low: i32,
+    pub targets: Vec<i32>,
+    pub pairs: Vec<LookupPair>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Instruction {
+    pub opcode: u8,
+    pub mnemonic: &'static str,
+    pub offset: u32,
+    pub length: usize,
+    pub wide: bool,
+    pub operands: Vec<Operand>,
+    pub switch: Option<Switch>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    Truncated,
+    Reserved(u8),
+    Malformed(&'static str),
+}
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+impl std::error::Error for Error {}
+static OPCODE_INDEX: [u8; 256] = {
+    let mut index = [u8::MAX; 256];
+    let mut i = 0;
+    while i < INSTRUCTIONS.len() { index[INSTRUCTIONS[i].opcode as usize] = i as u8; i += 1; }
+    index
+};
+pub fn definition(opcode: u8) -> Option<&'static Definition> {
+    INSTRUCTIONS.get(OPCODE_INDEX[opcode as usize] as usize)
+}
+fn wide_allowed(op: u8) -> bool {
+    matches!(op,0x15..=0x19|0x36..=0x3a|0x84|0xa9)
+}
+fn operand_valid(o: &OperandDefinition, v: i64) -> Result<(), Error> {
+    match o.kind {
+        "constant_pool" if v == 0 => Err(Error::Malformed("zero constant-pool index")),
+        "count" | "dimensions" if v == 0 => Err(Error::Malformed("zero count/dimensions")),
+        "array_type" if !(4..=11).contains(&v) => {
+            Err(Error::Malformed("invalid primitive array type"))
+        }
+        _ => Ok(()),
+    }
+}
+fn word(src: &[u8], pos: usize) -> i32 {
+    i32::from_be_bytes(src[pos..pos + 4].try_into().unwrap())
+}
+pub fn decode(src: &[u8], offset: u32) -> Result<Instruction, Error> {
+    let mut op = *src.first().ok_or(Error::Truncated)?;
+    let mut pos = 1;
+    let mut wide = false;
+    if op == 0xc4 {
+        op = *src.get(1).ok_or(Error::Truncated)?;
+        if !wide_allowed(op) {
+            return Err(Error::Malformed("invalid wide opcode"));
+        }
+        wide = true;
+        pos = 2;
+    }
+    let d = definition(op)
+        .filter(|d| !d.reserved)
+        .ok_or(Error::Reserved(op))?;
+    let mut in_ = Instruction {
+        opcode: op,
+        mnemonic: d.mnemonic,
+        offset,
+        length: 0,
+        wide,
+        operands: Vec::with_capacity(d.operands.len()),
+        switch: None,
+    };
+    if op == 0xaa || op == 0xab {
+        pos = 1 + (4 - (offset as u64 + 1) % 4) as usize % 4;
+        if src.len() < pos {
+            return Err(Error::Truncated);
+        }
+        if src[1..pos].iter().any(|b| *b != 0) {
+            return Err(Error::Malformed("nonzero switch padding"));
+        }
+        let header = if op == 0xaa { 12 } else { 8 };
+        if src.len() - pos < header {
+            return Err(Error::Truncated);
+        }
+        let mut s = Switch {
+            default: word(src, pos),
+            low: 0,
+            targets: vec![],
+            pairs: vec![],
+        };
+        pos += 4;
+        if op == 0xaa {
+            let low = word(src, pos);
+            let high = word(src, pos + 4);
+            pos += 8;
+            let n = high as i64 - low as i64 + 1;
+            if n <= 0 {
+                return Err(Error::Malformed("invalid tableswitch range"));
+            }
+            if n as u64 > ((65535 - pos) / 4) as u64 {
+                return Err(Error::Malformed("switch exceeds maximum method size"));
+            }
+            if n as u64 > ((src.len() - pos) / 4) as u64 {
+                return Err(Error::Truncated);
+            }
+            s.low = low;
+            for _ in 0..n {
+                s.targets.push(word(src, pos));
+                pos += 4
+            }
+        } else {
+            let n = word(src, pos);
+            pos += 4;
+            if n < 0 {
+                return Err(Error::Malformed("negative lookupswitch count"));
+            }
+            if n as u64 > ((65535 - pos) / 8) as u64 {
+                return Err(Error::Malformed("switch exceeds maximum method size"));
+            }
+            if n as u64 > ((src.len() - pos) / 8) as u64 {
+                return Err(Error::Truncated);
+            }
+            for _ in 0..n {
+                let key = word(src, pos);
+                let target = word(src, pos + 4);
+                pos += 8;
+                if s.pairs.last().is_some_and(|p| p.key >= key) {
+                    return Err(Error::Malformed("unordered switch keys"));
+                }
+                s.pairs.push(LookupPair { key, target })
+            }
+        }
+        in_.switch = Some(s);
+        in_.length = pos;
+        return Ok(in_);
+    }
+    for o in d.operands {
+        let n = if wide { 2 } else { o.bytes };
+        if src.len() - pos < n {
+            return Err(Error::Truncated);
+        }
+        let mut v = 0i64;
+        for b in &src[pos..pos + n] {
+            v = (v << 8) | *b as i64
+        }
+        if o.signed {
+            v = (v << (64 - n * 8)) >> (64 - n * 8)
+        }
+        operand_valid(o, v)?;
+        in_.operands.push(Operand {
+            name: o.name,
+            kind: o.kind,
+            value: v,
+        });
+        pos += n;
+    }
+    let zeros = match op {
+        0xb9 => 1,
+        0xba => 2,
+        _ => 0,
+    };
+    if src.len() - pos < zeros {
+        return Err(Error::Truncated);
+    }
+    if src[pos..pos + zeros].iter().any(|b| *b != 0) {
+        return Err(Error::Malformed("nonzero invoke reserved byte"));
+    }
+    pos += zeros;
+    in_.length = pos;
+    Ok(in_)
+}
+fn add_word(out: &mut Vec<u8>, v: i32) {
+    out.extend(v.to_be_bytes())
+}
+pub fn encode(in_: &Instruction, offset: u32) -> Result<Vec<u8>, Error> {
+    let d = definition(in_.opcode)
+        .filter(|d| !d.reserved)
+        .ok_or(Error::Reserved(in_.opcode))?;
+    if in_.mnemonic != d.mnemonic {
+        return Err(Error::Malformed("opcode/mnemonic mismatch"));
+    }
+    if in_.wide && !wide_allowed(in_.opcode) {
+        return Err(Error::Malformed("invalid wide opcode"));
+    }
+    let mut out = if in_.wide {
+        vec![0xc4, in_.opcode]
+    } else {
+        vec![in_.opcode]
+    };
+    if in_.opcode == 0xaa || in_.opcode == 0xab {
+        if in_.wide || !in_.operands.is_empty() {
+            return Err(Error::Malformed("invalid switch operands"));
+        }
+        let s = in_
+            .switch
+            .as_ref()
+            .ok_or(Error::Malformed("missing switch"))?;
+        let pad = (4 - (offset as u64 + 1) % 4) as usize % 4;
+        out.extend(vec![0; pad]);
+        add_word(&mut out, s.default);
+        if in_.opcode == 0xaa {
+            let high = s.low as i64 + s.targets.len() as i64 - 1;
+            if !s.pairs.is_empty()
+                || s.targets.is_empty()
+                || s.targets.len() > 16384
+                || high > i32::MAX as i64
+            {
+                return Err(Error::Malformed("invalid tableswitch range"));
+            }
+            add_word(&mut out, s.low);
+            add_word(&mut out, high as i32);
+            for v in &s.targets {
+                add_word(&mut out, *v)
+            }
+        } else {
+            if !s.targets.is_empty() || s.low != 0 || s.pairs.len() > 8192 {
+                return Err(Error::Malformed("invalid lookupswitch"));
+            }
+            add_word(&mut out, s.pairs.len() as i32);
+            let mut prev = None;
+            for p in &s.pairs {
+                if prev.is_some_and(|v| v >= p.key) {
+                    return Err(Error::Malformed("unordered switch keys"));
+                }
+                prev = Some(p.key);
+                add_word(&mut out, p.key);
+                add_word(&mut out, p.target)
+            }
+        }
+        if out.len() > 65535 {
+            return Err(Error::Malformed("switch exceeds maximum method size"));
+        }
+        return Ok(out);
+    }
+    if in_.opcode == 0xc4 {
+        return Err(Error::Malformed("standalone wide prefix"));
+    }
+    if in_.switch.is_some() || in_.operands.len() != d.operands.len() {
+        return Err(Error::Malformed("invalid operand count"));
+    }
+    for (o, value) in d.operands.iter().zip(&in_.operands) {
+        if value.name != o.name {
+            return Err(Error::Malformed("operand name"));
+        }
+        let n = if in_.wide { 2 } else { o.bytes };
+        let v = value.value;
+        let (lo, hi) = if o.signed {
+            (-(1i64 << (n * 8 - 1)), (1i64 << (n * 8 - 1)) - 1)
+        } else {
+            (0, (1i64 << (n * 8)) - 1)
+        };
+        if v < lo || v > hi {
+            return Err(Error::Malformed("operand range"));
+        }
+        operand_valid(o, v)?;
+        for b in (0..n).rev() {
+            out.push(((v as u64) >> (b * 8)) as u8)
+        }
+    }
+    match in_.opcode {
+        0xb9 => out.push(0),
+        0xba => out.extend([0, 0]),
+        _ => {}
+    }
+    Ok(out)
+}
+fn targets(in_: &Instruction) -> Vec<i32> {
+    let mut v: Vec<i32> = in_
+        .operands
+        .iter()
+        .filter(|o| o.kind == "branch")
+        .map(|o| o.value as i32)
+        .collect();
+    if let Some(s) = &in_.switch {
+        v.push(s.default);
+        v.extend(&s.targets);
+        v.extend(s.pairs.iter().map(|p| p.target))
+    }
+    v
+}
+pub fn decode_method(src: &[u8]) -> Result<Vec<Instruction>, Error> {
+    if src.is_empty() || src.len() > 65535 {
+        return Err(Error::Malformed("method length"));
+    }
+    let mut out = vec![];
+    let mut starts = BTreeSet::new();
+    let mut pos = 0;
+    while pos < src.len() {
+        let in_ = decode(&src[pos..], pos as u32)?;
+        starts.insert(pos as i64);
+        pos += in_.length;
+        out.push(in_)
+    }
+    for in_ in &out {
+        for target in targets(in_) {
+            if !starts.contains(&(in_.offset as i64 + target as i64)) {
+                return Err(Error::Malformed("branch target is not an instruction"));
+            }
+        }
+    }
+    Ok(out)
+}
+pub fn encode_method(instructions: &[Instruction]) -> Result<Vec<u8>, Error> {
+    let mut out = vec![];
+    for in_ in instructions {
+        out.extend(encode(in_, out.len() as u32)?)
+    }
+    decode_method(&out)?;
+    Ok(out)
+}
+fn primitive(v: i64) -> Option<&'static str> {
+    match v {
+        4 => Some("boolean"),
+        5 => Some("char"),
+        6 => Some("float"),
+        7 => Some("double"),
+        8 => Some("byte"),
+        9 => Some("short"),
+        10 => Some("int"),
+        11 => Some("long"),
+        _ => None,
+    }
+}
+impl Instruction {
+    pub fn format(&self) -> String {
+        let mut text = if self.wide {
+            format!("wide {}", self.mnemonic)
+        } else {
+            self.mnemonic.to_string()
+        };
+        if let Some(s) = &self.switch {
+            let mut json = format!("{{\"default\":{}", self.offset as i64 + s.default as i64);
+            if s.low != 0 {
+                json.push_str(&format!(",\"low\":{}", s.low))
+            }
+            if !s.targets.is_empty() {
+                json.push_str(",\"targets\":[");
+                json.push_str(
+                    &s.targets
+                        .iter()
+                        .map(|v| (self.offset as i64 + *v as i64).to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+                json.push(']')
+            }
+            if !s.pairs.is_empty() {
+                json.push_str(",\"pairs\":[");
+                json.push_str(
+                    &s.pairs
+                        .iter()
+                        .map(|p| {
+                            format!(
+                                "{{\"match\":{},\"target\":{}}}",
+                                p.key,
+                                self.offset as i64 + p.target as i64
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+                json.push(']')
+            }
+            json.push('}');
+            return format!("{} {}", text, json);
+        }
+        for o in &self.operands {
+            let value = if o.kind == "branch" {
+                (self.offset as i64 + o.value).to_string()
+            } else if o.kind == "constant_pool" {
+                format!("#{}", o.value)
+            } else if o.kind == "array_type" {
+                primitive(o.value).unwrap_or("invalid").to_string()
+            } else {
+                o.value.to_string()
+            };
+            text.push(' ');
+            text.push_str(&value)
+        }
+        text
+    }
+}
+// A small strict JSON reader keeps switch text dependency-free. Only the object,
+// array and integer forms needed by the switch grammar are accepted.
+#[derive(Debug)]
+enum Json {
+    Num(i64),
+    Array(Vec<Json>),
+    Object(BTreeMap<String, Json>),
+}
+struct JsonParser<'a> {
+    s: &'a [u8],
+    p: usize,
+    depth: usize,
+}
+impl<'a> JsonParser<'a> {
+    fn ws(&mut self) {
+        while self.s.get(self.p).is_some_and(|b| b.is_ascii_whitespace()) {
+            self.p += 1
+        }
+    }
+    fn take(&mut self, b: u8) -> Result<(), Error> {
+        self.ws();
+        if self.s.get(self.p) != Some(&b) {
+            return Err(Error::Malformed("invalid switch JSON"));
+        }
+        self.p += 1;
+        Ok(())
+    }
+    fn value(&mut self) -> Result<Json, Error> {
+        if self.depth >= 8 {
+            return Err(Error::Malformed("switch JSON nesting"));
+        }
+        self.depth += 1;
+        let result = self.inner_value();
+        self.depth -= 1;
+        result
+    }
+    fn inner_value(&mut self) -> Result<Json, Error> {
+        self.ws();
+        match self.s.get(self.p) {
+            Some(b'{') => {
+                self.p += 1;
+                let mut obj = BTreeMap::new();
+                self.ws();
+                if self.s.get(self.p) == Some(&b'}') {
+                    self.p += 1;
+                    return Ok(Json::Object(obj));
+                }
+                loop {
+                    self.take(b'"')?;
+                    let start = self.p;
+                    while self
+                        .s
+                        .get(self.p)
+                        .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                    {
+                        self.p += 1
+                    }
+                    let key = std::str::from_utf8(&self.s[start..self.p])
+                        .map_err(|_| Error::Malformed("JSON key"))?
+                        .to_owned();
+                    self.take(b'"')?;
+                    self.take(b':')?;
+                    let val = self.value()?;
+                    if obj.insert(key, val).is_some() {
+                        return Err(Error::Malformed("duplicate switch JSON field"));
+                    }
+                    self.ws();
+                    if self.s.get(self.p) == Some(&b'}') {
+                        self.p += 1;
+                        break;
+                    }
+                    self.take(b',')?
+                }
+                Ok(Json::Object(obj))
+            }
+            Some(b'[') => {
+                self.p += 1;
+                let mut a = vec![];
+                self.ws();
+                if self.s.get(self.p) == Some(&b']') {
+                    self.p += 1;
+                    return Ok(Json::Array(a));
+                }
+                loop {
+                    a.push(self.value()?);
+                    self.ws();
+                    if self.s.get(self.p) == Some(&b']') {
+                        self.p += 1;
+                        break;
+                    }
+                    self.take(b',')?
+                }
+                Ok(Json::Array(a))
+            }
+            _ => {
+                let start = self.p;
+                if self.s.get(self.p) == Some(&b'-') {
+                    self.p += 1
+                }
+                while self.s.get(self.p).is_some_and(|b| b.is_ascii_digit()) {
+                    self.p += 1
+                }
+                let n = std::str::from_utf8(&self.s[start..self.p])
+                    .map_err(|_| Error::Malformed("JSON number"))?
+                    .parse()
+                    .map_err(|_| Error::Malformed("JSON integer"))?;
+                Ok(Json::Num(n))
+            }
+        }
+    }
+}
+fn json_number(v: Json) -> Result<i64, Error> {
+    if let Json::Num(n) = v {
+        Ok(n)
+    } else {
+        Err(Error::Malformed("expected JSON integer"))
+    }
+}
+fn i32_number(v: i64) -> Result<i32, Error> {
+    v.try_into().map_err(|_| Error::Malformed("integer range"))
+}
+fn relative(v: i64, offset: u32) -> Result<i32, Error> {
+    let v = v
+        .checked_sub(offset as i64)
+        .ok_or(Error::Malformed("branch range"))?;
+    i32_number(v)
+}
+fn parse_switch(text: &str, offset: u32) -> Result<Switch, Error> {
+    let mut p = JsonParser {
+        s: text.as_bytes(),
+        p: 0,
+        depth: 0,
+    };
+    let obj = p.value()?;
+    p.ws();
+    if p.p != p.s.len() {
+        return Err(Error::Malformed("trailing switch text"));
+    }
+    let Json::Object(mut o) = obj else {
+        return Err(Error::Malformed("expected switch object"));
+    };
+    let default = relative(
+        json_number(o.remove("default").unwrap_or(Json::Num(0)))?,
+        offset,
+    )?;
+    let low = i32_number(json_number(o.remove("low").unwrap_or(Json::Num(0)))?)?;
+    let mut s = Switch {
+        default,
+        low,
+        targets: vec![],
+        pairs: vec![],
+    };
+    if let Some(t) = o.remove("targets") {
+        let Json::Array(a) = t else {
+            return Err(Error::Malformed("expected switch targets array"));
+        };
+        for v in a {
+            s.targets.push(relative(json_number(v)?, offset)?)
+        }
+    }
+    if let Some(t) = o.remove("pairs") {
+        let Json::Array(a) = t else {
+            return Err(Error::Malformed("expected switch pairs array"));
+        };
+        for v in a {
+            let Json::Object(mut pair) = v else {
+                return Err(Error::Malformed("expected lookup pair"));
+            };
+            let key = i32_number(json_number(pair.remove("match").unwrap_or(Json::Num(0)))?)?;
+            let target = relative(
+                json_number(pair.remove("target").unwrap_or(Json::Num(0)))?,
+                offset,
+            )?;
+            if !pair.is_empty() {
+                return Err(Error::Malformed("unknown lookup field"));
+            }
+            s.pairs.push(LookupPair { key, target })
+        }
+    }
+    if !o.is_empty() {
+        return Err(Error::Malformed("unknown switch field"));
+    }
+    Ok(s)
+}
+fn number(token: &str) -> Result<i64, Error> {
+    let token = token.strip_prefix('#').unwrap_or(token);
+    let (neg, t) = if let Some(t) = token.strip_prefix('-') {
+        (true, t)
+    } else {
+        (false, token.strip_prefix('+').unwrap_or(token))
+    };
+    let (radix, t) = if let Some(t) = t.strip_prefix("0x") {
+        (16, t)
+    } else if let Some(t) = t.strip_prefix("0b") {
+        (2, t)
+    } else if let Some(t) = t.strip_prefix("0o") {
+        (8, t)
+    } else {
+        (10, t)
+    };
+    let raw = i128::from_str_radix(t, radix).map_err(|_| Error::Malformed("invalid integer"))?;
+    let n = if neg { -raw } else { raw };
+    n.try_into().map_err(|_| Error::Malformed("integer range"))
+}
+pub fn assemble(text: &str, offset: u32) -> Result<Vec<u8>, Error> {
+    let text = text.split("//").next().unwrap_or("").trim();
+    let (wide, text) = if let Some(t) = text.strip_prefix("wide ") {
+        (true, t.trim())
+    } else {
+        (false, text)
+    };
+    let (name, args) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    let d = INSTRUCTIONS
+        .iter()
+        .find(|d| d.mnemonic == name)
+        .ok_or(Error::Malformed("unknown JVM mnemonic"))?;
+    let mut in_ = Instruction {
+        opcode: d.opcode,
+        mnemonic: d.mnemonic,
+        offset,
+        length: 0,
+        wide,
+        operands: vec![],
+        switch: None,
+    };
+    if d.opcode == 0xaa || d.opcode == 0xab {
+        in_.switch = Some(parse_switch(args.trim(), offset)?);
+        return encode(&in_, offset);
+    }
+    let args = args.replace(',', " ");
+    let args: Vec<_> = args.split_whitespace().collect();
+    if args.len() != d.operands.len() {
+        return Err(Error::Malformed("operand count"));
+    }
+    for (o, t) in d.operands.iter().zip(args) {
+        let mut v = if o.kind == "array_type" {
+            (4..=11)
+                .find(|v| primitive(*v) == Some(t))
+                .map(Ok)
+                .unwrap_or_else(|| number(t))?
+        } else {
+            number(t)?
+        };
+        if o.kind == "branch" {
+            v = relative(v, offset)? as i64
+        }
+        in_.operands.push(Operand {
+            name: o.name,
+            kind: o.kind,
+            value: v,
+        })
+    }
+    encode(&in_, offset)
+}
+
+/// A named-operand template. Unset fields are captured by match_instruction;
+/// encode requires every scalar field and any switch payload to be supplied.
+#[derive(Clone,Debug)]
+pub struct InstructionTemplate {
+    definition: &'static Definition,
+    wide: bool,
+    fixed: Vec<Option<i64>>,
+    switch_value: Option<Switch>,
+}
+impl InstructionTemplate {
+    pub fn new(mnemonic:&str,wide:bool)->Result<Self,Error>{
+        let d=INSTRUCTIONS.iter().find(|d|d.mnemonic==mnemonic&&!d.reserved&&d.opcode!=0xc4).ok_or(Error::Malformed("unknown template opcode"))?;
+        if wide&&!wide_allowed(d.opcode){return Err(Error::Malformed("invalid wide template"));}
+        Ok(Self{definition:d,wide,fixed:vec![None;d.operands.len()],switch_value:None})
+    }
+    pub fn set(&mut self,name:&str,value:i64)->Result<(),Error>{
+        let i=self.definition.operands.iter().position(|o|o.name==name).ok_or(Error::Malformed("unknown template operand"))?;
+        let o=&self.definition.operands[i];let bits=8*if self.wide{2}else{o.bytes};
+        if o.signed{if value< -(1i64<<(bits-1))||value>(1i64<<(bits-1))-1{return Err(Error::Malformed("operand range"));}}
+        else if value<0||value>(1i64<<bits)-1{return Err(Error::Malformed("operand range"));}
+        operand_valid(o,value)?;self.fixed[i]=Some(value);Ok(())
+    }
+    pub fn set_switch(&mut self,value:Switch)->Result<(),Error>{
+        if !matches!(self.definition.opcode,0xaa|0xab){return Err(Error::Malformed("template has no switch"));}
+        let instruction=Instruction{opcode:self.definition.opcode,mnemonic:self.definition.mnemonic,offset:0,length:0,wide:false,operands:vec![],switch:Some(value.clone())};
+        encode(&instruction,0)?;self.switch_value=Some(value);Ok(())
+    }
+    pub fn encode(&self,offset:u32)->Result<Vec<u8>,Error>{
+        let mut operands=Vec::new();for(o,value)in self.definition.operands.iter().zip(&self.fixed){operands.push(Operand{name:o.name,kind:o.kind,value:value.ok_or(Error::Malformed("missing template operand"))?});}
+        if matches!(self.definition.opcode,0xaa|0xab)&&self.switch_value.is_none(){return Err(Error::Malformed("missing template switch"));}
+        encode(&Instruction{opcode:self.definition.opcode,mnemonic:self.definition.mnemonic,offset,length:0,wide:self.wide,operands,switch:self.switch_value.clone()},offset)
+    }
+    pub fn match_instruction(&self,src:&[u8],offset:u32)->Option<Instruction>{
+        let instruction=decode(src,offset).ok()?;
+        if instruction.opcode!=self.definition.opcode||instruction.wide!=self.wide{return None;}
+        if self.fixed.iter().zip(&instruction.operands).any(|(value,o)|value.is_some_and(|v|v!=o.value)){return None;}
+        if self.switch_value.as_ref().is_some_and(|s|instruction.switch.as_ref()!=Some(s)){return None;}
+        Some(instruction)
+    }
+}
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+    #[test]fn wide_operands_and_captures(){
+        let mut template=InstructionTemplate::new("iinc",true).unwrap();
+        assert!(template.encode(0).is_err());template.set("index",300).unwrap();
+        let captured=template.match_instruction(&[0xc4,0x84,1,44,0xfe,0xd4],0).unwrap();assert_eq!(captured.operands[1].value,-300);
+        template.set("constant",-300).unwrap();assert_eq!(template.encode(0).unwrap(),[0xc4,0x84,1,44,0xfe,0xd4]);
+        assert!(template.match_instruction(&[0xc4,0x84,1,45,0xfe,0xd4],0).is_none());assert!(template.set("index",65536).is_err());assert!(template.set("missing",0).is_err());
+    }
+    #[test]fn switch_payload_and_alignment(){
+        let mut template=InstructionTemplate::new("lookupswitch",false).unwrap();
+        let value=Switch{default:16,low:0,targets:vec![],pairs:vec![LookupPair{key:-1,target:-4}]};template.set_switch(value).unwrap();
+        for offset in 0..4{let bytes=template.encode(offset).unwrap();assert!(template.match_instruction(&bytes,offset).is_some());assert_eq!(encode(&decode(&bytes,offset).unwrap(),offset).unwrap(),bytes);}
+        assert!(InstructionTemplate::new("breakpoint",false).is_err());
+    }
+}
+
+#[cfg(test)]
+mod opcode_index_tests {
+    use super::*;
+    #[test]
+    fn definition_matches_catalog_for_every_opcode() {
+        for op in 0..=u8::MAX {
+            let expected = INSTRUCTIONS.iter().find(|d| d.opcode == op);
+            let actual = definition(op);
+            assert!(match (expected, actual) {
+                (Some(a), Some(b)) => std::ptr::eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }, "opcode {op:#x}");
+        }
+    }
+}
