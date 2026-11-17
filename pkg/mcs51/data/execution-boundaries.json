@@ -1,0 +1,30 @@
+[
+  {
+    "name": "ajmp-wrap",
+    "pc": 65535,
+    "bytes": "0101",
+    "expected_target": 1,
+    "observed_target": 1
+  },
+  {
+    "name": "acall-wrap",
+    "pc": 65535,
+    "bytes": "1101",
+    "expected_target": 1,
+    "observed_target": 1
+  },
+  {
+    "name": "sjmp-wrap",
+    "pc": 65535,
+    "bytes": "80fe",
+    "expected_target": 65535,
+    "observed_target": 65535
+  },
+  {
+    "name": "ajmp-page",
+    "pc": 2047,
+    "bytes": "e100",
+    "expected_target": 3840,
+    "observed_target": 3840
+  }
+]
