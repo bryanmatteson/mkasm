@@ -13,7 +13,7 @@ import (
 	"github.com/bryanmatteson/mkasm/pkg/x86"
 )
 
-func runX86(ctx context.Context, input string, stdin io.Reader, stdout, stderr io.Writer, output string, jsonIR bool) error {
+func runX86(ctx context.Context, input string, stdin io.Reader, stdout, stderr io.Writer, output string, jsonIR bool, architecture string) error {
 	reader, closeInput, description, err := openX86Input(ctx, input, stdin)
 	if err != nil {
 		return err
@@ -26,19 +26,29 @@ func runX86(ctx context.Context, input string, stdin io.Reader, stdout, stderr i
 	if err != nil {
 		return fmt.Errorf("parse %s: %w", description, err)
 	}
-	fmt.Fprintf(stderr, "Input: %s\nArchitecture: x86_64\nForms: %d\nElapsed: %s\n",
-		description, len(catalog.Encodings), time.Since(started).Round(time.Millisecond))
+	if _, err := x86.SupplementXEDFP16(catalog); err != nil {
+		return fmt.Errorf("Intel XED FP16 supplement: %w", err)
+	}
+	if _, err := x86.SupplementXEDInteger(catalog); err != nil {
+		return fmt.Errorf("Intel XED integer supplement: %w", err)
+	}
+	fmt.Fprintf(stderr, "Input: %s\nArchitecture: %s\nForms: %d\nElapsed: %s\n",
+		description, architecture, len(catalog.Encodings), time.Since(started).Round(time.Millisecond))
 	if jsonIR {
 		return json.NewEncoder(stdout).Encode(struct {
 			Schema       string         `json:"schema"`
 			Architecture string         `json:"architecture"`
 			Encodings    []x86.Encoding `json:"encodings"`
-		}{"mkasm.x86.v1", "x86_64", catalog.Encodings})
+		}{"mkasm.x86.v1", architecture, catalog.Encodings})
 	}
 	if err := os.MkdirAll(output, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
-	if err := x86.GenerateRust(catalog, output); err != nil {
+	mode := x86.Mode64
+	if architecture == "x86_32" {
+		mode = x86.Mode32
+	}
+	if err := x86.GenerateRustForMode(catalog, output, mode); err != nil {
 		return err
 	}
 	fmt.Fprintln(stderr, "Generated: rust")

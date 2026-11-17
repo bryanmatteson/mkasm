@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,27 +15,54 @@ import (
 	"time"
 
 	"github.com/bryanmatteson/mkasm/pkg/arm"
+	"github.com/bryanmatteson/mkasm/pkg/dotnet"
+	"github.com/bryanmatteson/mkasm/pkg/object"
 )
 
 const commandName = "mkasm"
 
-const helpText = `mkasm generates AArch64, ARM32/Thumb and x86-64 codec projects or exports resolved IR.
+const helpText = `mkasm generates standalone instruction codec projects or exports resolved IR.
 
 Usage:
-  mkasm [--arch <aarch64|arm32|x86_64>] --codegen <rust|go> --output <dir> <input>
-  mkasm [--arch <aarch64|arm32|x86_64>] --json <input>
+  mkasm [--arch <target>] --codegen <rust|go> --output <dir> <input>
+  mkasm [--arch <target>] --json <input>
+  mkasm --arch cil --inspect --json [--verify] [--native] <assembly>
+  mkasm --arch cil --rewrite <manifest.json> --output <assembly> <input>
+  mkasm --assemble-object --assembler <tool> --target-triple <triple> --output <file> <input>
 
 Modes:
   --codegen <rust|go>  Generate a standalone codec project.
   --json               Write resolved instruction IR as JSON to stdout.
 
 Arguments:
-  <input>  Arm ISA XML directory/archive/URL, or opcodesDB v3 JSON for
-           x86_64. Use - to read the architecture's stream from stdin.
+  <input>  Architecture specification file, URL, or - for stdin.
+           Arm: ISA XML directory/archive. x86: opcodesDB v3 JSON.
+           RISC-V: riscv-opcodes directory or tar archive.
+           LLVM targets: resolved TableGen JSON (--dump-json).
+           Other native, bytecode and module sources: see docs/architecture-codecs.md.
+           Use --list-architectures for all target names.
 
 Options:
   --arch <arch>  Target architecture (default: aarch64).
   --output <dir>  Destination directory. Required with --codegen.
+  --cpu <name>    Select a source-defined CPU profile (where available).
+  --strict-corpus Reject unsupported source records.
+  --inspect       Inspect a .NET PE/CLI image or Portable PDB (with --arch cil --json).
+  --verify        Check CIL stack heights, variable bounds and maxstack during inspection.
+  --native        Include ReadyToRun native function bytes and MethodDef mappings.
+  --type-verifier <tool> Run ILVerify with an explicitly selected executable.
+  --references <paths> Reference assembly paths/globs for metadata and ILVerify.
+  --system-module <name> Core library name (default: System.Private.CoreLib).
+  --rewrite <json> Replace methods using token-to-complete-hex-body JSON.
+  --drop-native   Remove ReadyToRun code when all required IL bodies remain.
+  --strip-signatures Remove invalidated strong-name and Authenticode signatures.
+  --assemble-object Assemble complete programs, retaining symbols and relocations.
+  --assembler <path> Explicit target assembler executable.
+  --assembler-kind <kind> llvm (default), gnu, or command.
+  --target-triple <triple> LLVM target triple.
+  --assembler-args <json> Literal argument array; command uses {input}/{output}.
+  --features <list> Comma-separated LLVM feature names.
+  --list-architectures List all supported target names.
   --version       Show the mkasm version.
   -h, --help      Show this help.
 
@@ -89,6 +117,24 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	archName := flags.String("arch", "aarch64", "target architecture")
 	jsonIR := flags.Bool("json", false, "write resolved instruction IR as JSON to stdout")
 	output := flags.String("output", "", "generated project directory")
+	cpu := flags.String("cpu", "", "source-defined CPU profile")
+	strictCorpus := flags.Bool("strict-corpus", false, "reject unsupported source records")
+	inspect := flags.Bool("inspect", false, "inspect a .NET managed image or metadata file")
+	verify := flags.Bool("verify", false, "verify managed evaluation stacks during inspection")
+	native := flags.Bool("native", false, "include ReadyToRun headers, functions and native code during inspection")
+	rewrite := flags.String("rewrite", "", "MethodDef token to complete hex body JSON manifest")
+	dropNative := flags.Bool("drop-native", false, "discard ReadyToRun code when rewriting")
+	stripSignatures := flags.Bool("strip-signatures", false, "remove invalidated PE signatures when rewriting")
+	typeVerifier := flags.String("type-verifier", "", "ILVerify executable for full managed type verification")
+	references := flags.String("references", "", "comma-separated explicit reference assembly paths/globs")
+	systemModule := flags.String("system-module", "System.Private.CoreLib", "managed core library name")
+	assembleProgram := flags.Bool("assemble-object", false, "assemble a complete program with an explicit toolchain")
+	assembler := flags.String("assembler", "", "target assembler executable")
+	assemblerKind := flags.String("assembler-kind", "llvm", "llvm, gnu, or command")
+	assemblerArgs := flags.String("assembler-args", "", "JSON array of literal assembler arguments")
+	targetTriple := flags.String("target-triple", "", "explicit LLVM target triple")
+	features := flags.String("features", "", "comma-separated assembler feature names")
+	listArchitectures := flags.Bool("list-architectures", false, "list supported targets")
 	showVersion := flags.Bool("version", false, "show the mkasm version")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -97,8 +143,21 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return &usageError{message: err.Error()}
 	}
+	if *listArchitectures {
+		if *assembleProgram || *assembler != "" || *assemblerKind != "llvm" || *assemblerArgs != "" || *targetTriple != "" || *features != "" {
+			return &usageError{message: "--list-architectures must be used alone"}
+		}
+		if flags.NArg() != 0 || *showVersion || *codegen != "" || *jsonIR || *output != "" || *cpu != "" || *strictCorpus || *inspect || *archName != "aarch64" || *verify || *native || *rewrite != "" || *dropNative || *stripSignatures || *typeVerifier != "" || *references != "" || *systemModule != "System.Private.CoreLib" {
+			return &usageError{message: "--list-architectures must be used alone"}
+		}
+		_, err := fmt.Fprintln(stdout, strings.Join(architectureNames(), "\n"))
+		return err
+	}
 	if *showVersion {
-		if flags.NArg() != 0 || *codegen != "" || *jsonIR || *output != "" || *archName != "aarch64" {
+		if *assembleProgram || *assembler != "" || *assemblerKind != "llvm" || *assemblerArgs != "" || *targetTriple != "" || *features != "" {
+			return &usageError{message: "--version must be used alone"}
+		}
+		if flags.NArg() != 0 || *codegen != "" || *jsonIR || *output != "" || *archName != "aarch64" || *cpu != "" || *strictCorpus || *inspect || *verify || *native || *rewrite != "" || *dropNative || *stripSignatures || *typeVerifier != "" || *references != "" || *systemModule != "System.Private.CoreLib" {
 			return &usageError{message: "--version cannot be combined with a mode, output, or input"}
 		}
 		_, err := fmt.Fprintf(stdout, "%s %s\n", commandName, resolvedVersion())
@@ -108,20 +167,61 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if flags.NArg() != 1 {
 		return &usageError{message: "exactly one INPUT is required"}
 	}
+	if *assembleProgram {
+		if *assembler == "" || (*output == "") == !*jsonIR || *codegen != "" || *inspect || *strictCorpus || *verify || *native || *rewrite != "" || *dropNative || *stripSignatures || *typeVerifier != "" || *references != "" || *systemModule != "System.Private.CoreLib" {
+			return &usageError{message: "--assemble-object requires --assembler and exactly one of --output FILE or --json, without other modes"}
+		}
+		opts := object.Options{Executable: *assembler, Kind: *assemblerKind, Triple: *targetTriple, CPU: *cpu}
+		if *features != "" {
+			opts.Features = strings.Split(*features, ",")
+		}
+		if *assemblerArgs != "" {
+			if e := json.Unmarshal([]byte(*assemblerArgs), &opts.Arguments); e != nil {
+				return &usageError{message: "--assembler-args must be a JSON string array"}
+			}
+		}
+		return assembleObject(ctx, flags.Arg(0), *output, *jsonIR, stdin, stdout, opts)
+	}
+	if *assembler != "" || *assemblerKind != "llvm" || *assemblerArgs != "" || *targetTriple != "" || *features != "" {
+		return &usageError{message: "assembler options require --assemble-object"}
+	}
+	if *rewrite != "" {
+		if canonicalArchitecture(*archName) != "cil" || *output == "" || *jsonIR || *codegen != "" || *cpu != "" || *strictCorpus || *inspect || *verify || *native || *showVersion || *listArchitectures || *typeVerifier != "" || *references != "" || *systemModule != "System.Private.CoreLib" {
+			return &usageError{message: "--rewrite requires --arch cil --output FILE and no other mode"}
+		}
+		return rewriteManaged(ctx, flags.Arg(0), *rewrite, *output, stdin, dotnet.RewriteOptions{DropNative: *dropNative, StripStrongName: *stripSignatures, StripAuthenticode: *stripSignatures})
+	}
+	if *dropNative || *stripSignatures {
+		return &usageError{message: "--drop-native and --strip-signatures require --rewrite"}
+	}
+	if (*verify || *native) && !*inspect {
+		return &usageError{message: "--verify and --native require --inspect"}
+	}
+	if (*typeVerifier != "" || *references != "" || *systemModule != "System.Private.CoreLib") && !*inspect {
+		return &usageError{message: "type verification options require --inspect"}
+	}
+	if *typeVerifier == "" && *systemModule != "System.Private.CoreLib" {
+		return &usageError{message: "a custom system module requires --type-verifier"}
+	}
 	if (*codegen == "") == !*jsonIR {
 		return &usageError{message: "choose exactly one of --codegen or --json"}
 	}
-	architecture := strings.ToLower(strings.TrimSpace(*archName))
-	switch architecture {
-	case "arm64", "arm64e":
-		architecture = "aarch64"
-	case "amd64", "x86-64", "x64":
-		architecture = "x86_64"
-	case "arm", "aarch32", "a32", "thumb", "thumb2", "t32":
-		architecture = "arm32"
-	case "aarch64", "arm32", "x86_64":
-	default:
-		return &usageError{message: "--arch must be aarch64, arm32 or x86_64"}
+	architecture := canonicalArchitecture(*archName)
+	if architecture != "aarch64" && architecture != "arm32" && architecture != "x86_64" && architecture != "x86_32" && backendLoaders[architecture] == nil {
+		return &usageError{message: "--arch must be one of: " + strings.Join(architectureNames(), ", ")}
+	}
+	if *inspect {
+		if architecture != "cil" || !*jsonIR || *codegen != "" || *output != "" || *cpu != "" || *strictCorpus {
+			return &usageError{message: "--inspect requires --arch cil --json and no generation or CPU options"}
+		}
+		var refs []string
+		if *references != "" {
+			refs = strings.Split(*references, ",")
+		}
+		return inspectManagedDetailed(ctx, flags.Arg(0), stdin, stdout, *verify, *typeVerifier, refs, *systemModule, *native)
+	}
+	if (*cpu != "" || *strictCorpus) && backendLoaders[architecture] == nil {
+		return &usageError{message: "--cpu and --strict-corpus require a specification backend"}
 	}
 
 	var languages []arm.CodegenLang
@@ -145,8 +245,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	input := flags.Arg(0)
-	if architecture == "x86_64" {
-		return runX86(ctx, input, stdin, stdout, stderr, *output, *jsonIR)
+	if architecture == "x86_64" || architecture == "x86_32" {
+		return runX86(ctx, input, stdin, stdout, stderr, *output, *jsonIR, architecture)
+	}
+	if backendLoaders[architecture] != nil {
+		return runBackend(ctx, architecture, input, stdin, stdout, stderr, *output, *jsonIR, *cpu, *strictCorpus)
 	}
 	source, err := openInput(ctx, input, stdin)
 	if err != nil {

@@ -77,10 +77,10 @@ func TestRunX86JSONAndRustCodegen(t *testing.T) {
 		if err := json.Unmarshal(stdout.Bytes(), &document); err != nil {
 			t.Fatal(err)
 		}
-		if document.Schema != "mkasm.x86.v1" || document.Architecture != "x86_64" || len(document.Encodings) != 1 {
-			t.Fatalf("bad x86 document: %#v", document)
+		if document.Schema != "mkasm.x86.v1" || document.Architecture != "x86_64" || len(document.Encodings) != 735 {
+			t.Fatalf("bad x86 document: schema=%s architecture=%s forms=%d", document.Schema, document.Architecture, len(document.Encodings))
 		}
-		if !strings.Contains(stderr.String(), "Forms: 1") {
+		if !strings.Contains(stderr.String(), "Forms: 735") {
 			t.Fatalf("stderr lacks x86 stats: %s", stderr.String())
 		}
 	})
@@ -90,7 +90,7 @@ func TestRunX86JSONAndRustCodegen(t *testing.T) {
 		if err := run(context.Background(), []string{"--arch", "amd64", "--codegen", "rust", "--output", output, "-"}, strings.NewReader(corpus), io.Discard, io.Discard); err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range []string{"Cargo.toml", "LICENSE", "src/lib.rs"} {
+		for _, name := range []string{"Cargo.toml", "LICENSE", "INTEL-XED-LICENSE", "INTEL-XED-SOURCE", "src/lib.rs"} {
 			if _, err := os.Stat(filepath.Join(output, name)); err != nil {
 				t.Errorf("generated x86 project missing %s: %v", name, err)
 			}
@@ -165,7 +165,7 @@ func TestHelpIsUsefulAndUsesStdout(t *testing.T) {
 		}
 		help := stdout.String()
 		for _, required := range []string{
-			"mkasm generates AArch64",
+			"mkasm generates standalone",
 			"Usage:",
 			"Modes:",
 			"Arguments:",

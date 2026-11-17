@@ -10,6 +10,9 @@ BENCHCOUNT ?= 1
 ITERATIONS ?= 1000000
 X86_CORPUS ?=
 X86_RUST_OUT ?= ./output-x86-rs
+ARCH ?= riscv64
+ARCH_CORPUS ?=
+ARCH_RUST_OUT ?= ./output-$(ARCH)-rs
 GO_OUT ?= ./output
 RUST_OUT ?= ./output-rs
 ASL ?= ../arm-asl-parser/asl
@@ -18,7 +21,7 @@ COVERAGE_TOOL ?= $(GO) run github.com/vladopajic/go-test-coverage/v2@v2.18.9
 .PHONY: \
 	help fmt-check vet test test-race coverage-source coverage-encodings verify \
 	bench bench-micro bench-rust-decoder bench-x86 bench-x86-rust \
-	generate-go generate-rust generate-x86-rust build \
+	generate-go generate-rust generate-x86-rust generate-architecture build \
 	conformance-go conformance-rust conformance-disasm conformance \
 	conformance-strict-go conformance-strict-rust conformance-strict-disasm \
 	conformance-strict audit-disasm conformance-asl release-check clean
@@ -99,6 +102,14 @@ generate-x86-rust: ## Generate and test x86 Rust (X86_CORPUS=...json.xz)
 		--codegen rust --output "$(X86_RUST_OUT)" -
 	cd "$(X86_RUST_OUT)" && RUSTFLAGS="-D warnings" $(CARGO) test
 
+generate-architecture: ## Generate and test a target (ARCH=... ARCH_CORPUS=...)
+	@test -n "$(ARCH_CORPUS)" || { echo "ARCH_CORPUS is required" >&2; exit 2; }
+	mkdir -p "$(ARCH_RUST_OUT)"
+	$(GO) build -o "$(ARCH_RUST_OUT)/mkasm" ./cmd/mkasm
+	"$(ARCH_RUST_OUT)/mkasm" --arch "$(ARCH)" --codegen rust \
+		--output "$(ARCH_RUST_OUT)" "$(ARCH_CORPUS)"
+	cd "$(ARCH_RUST_OUT)" && RUSTFLAGS="-D warnings" $(CARGO) test --lib --tests
+
 build: ## Build and package mkasm for the current platform
 	@set -eu; \
 	version="$${VERSION:-$$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"; \
@@ -138,12 +149,12 @@ conformance-rust: ## Check typed and exact Rust encoder byte parity against LLVM
 		$(GO) test ./tests/conformance \
 		-run '^TestRustAssemblerLLVMConformance$$' -v -count=1 -timeout 600s
 
-conformance-disasm: ## Check word-to-text-to-LLVM byte parity
+conformance-disasm: ## Check word-to-text-to-LLVM and text-assembler byte parity
 	MKASM_CORPUS="$(CORPUS)" \
 	MKASM_CLANG="$${MKASM_CLANG:-}" MKASM_LLVM_MC="$${MKASM_LLVM_MC:-}" \
-	MKASM_DISASM_LLVM_PARITY=1 \
+	MKASM_DISASM_LLVM_PARITY=1 MKASM_TEXT_ASM_LLVM_PARITY=1 \
 		$(GO) test ./tests/conformance \
-		-run '^(TestDisasmAssemblesBack|TestLabelOperandsCarryDisplacementSign)$$' -v -count=1 -timeout 600s
+		-run '^(TestDisasmAssemblesBack|TestLabelOperandsCarryDisplacementSign|TestTextAssemblerLLVMParity)$$' -v -count=1 -timeout 1200s
 
 conformance: ## Run supported Go, Rust, and disassembler LLVM parity
 	@$(MAKE) --no-print-directory conformance-go
