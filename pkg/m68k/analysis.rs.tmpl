@@ -1,0 +1,26 @@
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct OperandSpan {pub start:usize,pub end:usize,pub index:usize,pub name:String,pub class:String,pub value:Value,pub position_dependent:bool,pub target:Option<u64>}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Described {pub text:String,pub operands:Vec<OperandSpan>}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Hole {pub name:String,pub class:String,pub position_dependent:bool}
+fn pc_ea(value:&Value,place:u8)->Option<&[Value]>{let address=if place==b'/'{value.list(Some(2)).ok()?.first()?}else{value};let a=address.list(None).ok()?;let code=a.first()?.u(6).ok()?;if code==58||code==59&&(a.get(4)?.u(1).ok()?==0||a.get(7)?.u(1).ok()?==0){Some(a)}else{None}}
+impl Instruction {
+    pub fn describe(&self,pc:u64)->Described{
+        let mut text=self.opcode.id.to_owned();let mut operands=Vec::new();if !self.operands.is_empty(){text.push_str(" [");for(n,(pair,value))in pairs(self.opcode).zip(&self.operands).enumerate(){if n>0{text.push(',');}let start=text.len();text.push_str(&value.to_string());let relative=pair[0]==b'B'||ea_mask(pair[0]).is_some()&&pc_ea(value,pair[1]).is_some();operands.push(OperandSpan{start,end:text.len(),index:n,name:format!("op{n}"),class:String::from_utf8_lossy(pair).into_owned(),value:value.clone(),position_dependent:relative,target:if pair[0]==b'B'{self.branch_target(pc)}else{self.pc_relative_target(n,pc)}});}text.push(']');}Described{text,operands}
+    }
+    pub fn set_operand(&mut self,catalog:&Catalog,index:usize,value:Value)->Result<(),String>{let mut values=self.operands.clone();*values.get_mut(index).ok_or("unknown operand")?=value;let b=catalog.encode(self.opcode.id,&values)?;*self=catalog.decode_selected(&b,Some(self.opcode.id))?;Ok(())}
+    pub fn relocated(&self,catalog:&Catalog,from:u64,to:u64)->Result<Self,String>{
+        let mut values=self.operands.clone();let delta=(from as u32).wrapping_sub(to as u32);
+        for(n,pair)in pairs(self.opcode).enumerate(){if pair[0]==b'B'{values[n]=Value::I((integer(&values[n])? as u32).wrapping_add(delta) as i32 as i64);}else if ea_mask(pair[0]).is_some()&&pc_ea(&values[n],pair[1]).is_some(){let address=if pair[1]==b'/'{match &mut values[n]{Value::List(v)=>&mut v[0],_=>return Err("invalid effective address".into())}}else{&mut values[n]};let Value::List(a)=address else{return Err("invalid effective address".into());};let displacement=if a[0].u(6)?==58{1}else{5};a[displacement]=Value::I((integer(&a[displacement])? as u32).wrapping_add(delta) as i32 as i64);}}
+        let b=catalog.encode(self.opcode.id,&values)?;if b.len()!=self.length{return Err("relocation changes instruction form".into());}catalog.decode_selected(&b,Some(self.opcode.id))
+    }
+    pub fn encode_into(&self,catalog:&Catalog,output:&mut[u8])->Result<usize,String>{let b=catalog.encode(self.opcode.id,&self.operands)?;if output.len()<b.len(){return Err("output buffer too small".into());}output[..b.len()].copy_from_slice(&b);Ok(b.len())}
+    pub fn relocate_into(&self,catalog:&Catalog,from:u64,to:u64,output:&mut[u8])->Result<usize,String>{self.relocated(catalog,from,to)?.encode_into(catalog,output)}
+}
+impl InstructionTemplate {
+    pub fn definition(&self)->&'static Opcode{self.opcode}
+    pub fn holes(&self)->Vec<Hole>{pairs(self.opcode).zip(&self.values).enumerate().filter_map(|(n,(pair,v))|v.is_none().then(||Hole{name:format!("op{n}"),class:String::from_utf8_lossy(pair).into_owned(),position_dependent:pair[0]==b'B'||ea_mask(pair[0]).is_some()})).collect()}
+    pub fn could_match(&self,src:&[u8])->bool{if src.len()<fixed(self.opcode){return false;}let n=u32::from(u16::from_be_bytes([src[0],src[1]]))<<16|if src.len()>=4{u32::from(u16::from_be_bytes([src[2],src[3]]))}else{0};n&self.opcode.mask==self.opcode.opcode}
+}

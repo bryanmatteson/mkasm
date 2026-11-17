@@ -1,0 +1,1148 @@
+[
+  {
+    "CPU": "68000",
+    "Assembly": "nop",
+    "Text": "nop_1473",
+    "Hex": "4e71"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "rts",
+    "Text": "rts_1719",
+    "Hex": "4e75"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "moveq #-7,%d3",
+    "Text": "moveq_1340 [-7,3]",
+    "Hex": "76f9"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movel %d0,%d1",
+    "Text": "movel_1369 [[0],[1]]",
+    "Hex": "2200"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movel (%a2)+,-(%a3)",
+    "Text": "movel_1369 [[26],[35]]",
+    "Hex": "271a"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movew #0x1234,6(%a1)",
+    "Text": "movew_1353 [[60,4660],[41,6]]",
+    "Hex": "337c12340006"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "moveb #-1,%d5",
+    "Text": "moveb_1342 [[60,-1],[5]]",
+    "Hex": "1a3cffff"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movel -32768(%a0),%d7",
+    "Text": "movel_1369 [[40,-32768],[7]]",
+    "Hex": "2e288000"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movel 127(%a2,%d3.w),%d0",
+    "Text": "movel_1369 [[50,3,0,1,0,127],[0]]",
+    "Hex": "2032307f"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movel -8(%pc),%d0",
+    "Text": "movel_1369 [[58,-8],[0]]",
+    "Hex": "203afff8"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movel 0x12345678.l,%a2",
+    "Text": "moveal_1315 [[57,305419896],2]",
+    "Hex": "247912345678"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movel 0x1234.w,%d0",
+    "Text": "movel_1369 [[56,4660],[0]]",
+    "Hex": "20381234"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "bras .-6",
+    "Text": "bras_147 [-8]",
+    "Hex": "60f8"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "braw .-200",
+    "Text": "braw_145 [-202]",
+    "Hex": "6000ff36"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "dbra %d2,.-20",
+    "Text": "dbf_219 [2,-22]",
+    "Hex": "51caffea"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "lea 8(%pc),%a3",
+    "Text": "lea_1259 [[58,8],3]",
+    "Hex": "47fa0008"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "addqw #8,(%a1)",
+    "Text": "addqw_9 [8,[17]]",
+    "Hex": "5051"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "moveml %d0/%d4/%a1,-(%sp)",
+    "Text": "moveml_1328 [529,7]",
+    "Hex": "48e78840"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "moveml (%sp)+,%d0/%d4/%a1",
+    "Text": "moveml_1330 [[31],529]",
+    "Hex": "4cdf0211"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "movepw %d4,10(%a2)",
+    "Text": "movepw_1337 [4,[2,10]]",
+    "Hex": "098a000a"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "linkw %a6,#-32",
+    "Text": "linkw_1261 [6,-32]",
+    "Hex": "4e56ffe0"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "jsr 0x12345678.l",
+    "Text": "jsr_1256 [[57,305419896]]",
+    "Hex": "4eb912345678"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "roxlw #8,%d1",
+    "Text": "roxlw_1703 [8,1]",
+    "Hex": "e151"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "oriw #0x1f,%sr",
+    "Text": "oriw_1481 [31,\"sr\"]",
+    "Hex": "007c001f"
+  },
+  {
+    "CPU": "68000",
+    "Assembly": "stop #0x2700",
+    "Text": "stop_1809 [9984]",
+    "Hex": "4e722700"
+  },
+  {
+    "CPU": "68010",
+    "Assembly": "movec %d0,%vbr",
+    "Text": "movec_1318 [0,2049]",
+    "Hex": "4e7b0801"
+  },
+  {
+    "CPU": "68010",
+    "Assembly": "movec %vbr,%a2",
+    "Text": "movec_1320 [2049,10]",
+    "Hex": "4e7aa801"
+  },
+  {
+    "CPU": "68010",
+    "Assembly": "bkpt #7",
+    "Text": "bkpt_144 [7]",
+    "Hex": "484f"
+  },
+  {
+    "CPU": "68010",
+    "Assembly": "rtd #16",
+    "Text": "rtd_1715 [16]",
+    "Hex": "4e740010"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "movel 12(%a2,%a3.l*4),%d1",
+    "Text": "movel_1369 [[50,11,1,4,0,12],[1]]",
+    "Hex": "2232bc0c"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "movel ([20,%a2,%d3.l*2],40),%d1",
+    "Text": "movel_1369 [[50,3,1,2,1,20,16,0,0,2,40],[1]]",
+    "Hex": "22323b2200140028"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "movel ([20,%a2],%d3.l*2,40),%d1",
+    "Text": "movel_1369 [[50,3,1,2,1,20,16,0,0,6,40],[1]]",
+    "Hex": "22323b2600140028"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "movel ([20],%d3.l*2,40),%d1",
+    "Text": "movel_1369 [[48,3,1,2,1,20,16,1,0,6,40],[1]]",
+    "Hex": "22303ba600140028"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "movel 65536(%a2,%d3.l*8),%d1",
+    "Text": "movel_1369 [[50,3,1,8,1,65536,32,0,0,0,0],[1]]",
+    "Hex": "22323f3000010000"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "movel ([65536,%pc,%a4.l*4],-65536),%d2",
+    "Text": "movel_1369 [[59,12,1,4,1,65536,32,0,0,3,-65536],[2]]",
+    "Hex": "243bcd3300010000ffff0000"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "bsrl .-100000",
+    "Text": "bsrl_153 [-100002]",
+    "Hex": "61fffffe795e"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "casl %d1,%d2,(%a3)",
+    "Text": "casl_166 [1,2,[19]]",
+    "Hex": "0ed30081"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "cas2l %d0:%d1,%d2:%d3,(%a0):(%a1)",
+    "Text": "cas2l_162 [0,1,2,3,8,9]",
+    "Hex": "0efc808090c1"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "bfextu (%a0){%d1:16},%d2",
+    "Text": "bfextu_137 [[16],33,16,2]",
+    "Hex": "e9d02850"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "bfins %d2,(%a0){3:%d4}",
+    "Text": "bfins_139 [2,[16],3,36]",
+    "Hex": "efd020e4"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "pack %d1,%d2,#12",
+    "Text": "pack_1504 [1,2,12]",
+    "Hex": "8541000c"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "unpk -(%a1),-(%a2),#-12",
+    "Text": "unpk_1879 [1,2,-12]",
+    "Hex": "8589fff4"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "divsl (%a0),%d1:%d2",
+    "Text": "divsl_233 [[16],1,2]",
+    "Hex": "4c502c01"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "chk2w (%a1),%d3",
+    "Text": "chk2w_168 [[17],3]",
+    "Hex": "02d13800"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "callm #4,(%a0)",
+    "Text": "callm_159 [4,[16]]",
+    "Hex": "06d00004"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "faddx %fp1,%fp2",
+    "Text": "faddx_344 [1,1,2]",
+    "Hex": "f2000522"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "faddd 8(%a2),%fp3",
+    "Text": "faddd_335 [1,[42,8],3]",
+    "Hex": "f22a55a20008"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "fmovex #0r1.5,%fp2",
+    "Text": "fmovex_745 [1,[60,[63,255,128,0,0,0,0,0,0,0,0,0]],2]",
+    "Hex": "f23c49003fff80000000000000000000"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "fmovemx %fp0/%fp3/%fp7,-(%a7)",
+    "Text": "fmovemx_798 [1,137,7]",
+    "Hex": "f227e089"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "fmovem (%a0),%fpcr",
+    "Text": "fmovel_728 [1,[16],4]",
+    "Hex": "f2109000"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "fbeql .-100000",
+    "Text": "fbeql_434 [1,-100002]",
+    "Hex": "f2c1fffe795e"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "fdbne %d3,.-20",
+    "Text": "fdbne_538 [1,3,-24]",
+    "Hex": "f24b000effe8"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapeqw #42",
+    "Text": "ftrapeqw_1163 [1,42]",
+    "Hex": "f27a0001002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapeql #0x12345678",
+    "Text": "ftrapeql_1195 [1,305419896]",
+    "Hex": "f27b000112345678"
+  },
+  {
+    "CPU": "68030",
+    "Assembly": "pflush #1,#2,(%a0)",
+    "Text": "pflush_1558 [1,2,[16]]",
+    "Hex": "f0103851"
+  },
+  {
+    "CPU": "68030",
+    "Assembly": "ptestw #1,(%a0),#2,%a1",
+    "Text": "ptestw_1627 [1,[16],2,1]",
+    "Hex": "f0108931"
+  },
+  {
+    "CPU": "68030",
+    "Assembly": "pmove (%a1),%tc",
+    "Text": "pmove_1583 [[17],16]",
+    "Hex": "f0114000"
+  },
+  {
+    "CPU": "68040",
+    "Assembly": "move16 (%a0)+,(%a1)+",
+    "Text": "move16_1427 [0,1]",
+    "Hex": "f6209000"
+  },
+  {
+    "CPU": "68040",
+    "Assembly": "move16 (%a2)+,0x12345670",
+    "Text": "move16_1428 [2,305419888]",
+    "Hex": "f60212345670"
+  },
+  {
+    "CPU": "68040",
+    "Assembly": "cinvl %ic,(%a3)",
+    "Text": "cinvl_173 [2,3]",
+    "Hex": "f48b"
+  },
+  {
+    "CPU": "68040",
+    "Assembly": "cpusha %bc",
+    "Text": "cpusha_175 [3]",
+    "Hex": "f4f8"
+  },
+  {
+    "CPU": "68040",
+    "Assembly": "fsqrtx %fp3,%fp1",
+    "Text": "fsqrtx_1024 [1,3,1]",
+    "Hex": "f2000c84"
+  },
+  {
+    "CPU": "cpu32",
+    "Assembly": "tblsw (%a0),%d1",
+    "Text": "tblsw_1847 [[16],1]",
+    "Hex": "f8101940"
+  },
+  {
+    "CPU": "cpu32",
+    "Assembly": "tblunl %d1:%d2,%d3",
+    "Text": "tblunl_1868 [1,2,3]",
+    "Hex": "f8013482"
+  },
+  {
+    "CPU": "cpu32",
+    "Assembly": "lpstop #0x2700",
+    "Text": "lpstop_1260 [9984]",
+    "Hex": "f80001c02700"
+  },
+  {
+    "CPU": "isa-a",
+    "Assembly": "movel 4(%a0),%d1",
+    "Text": "movel_1371 [[40,4],[1]]",
+    "Hex": "22280004"
+  },
+  {
+    "CPU": "isa-a",
+    "Assembly": "movel 4(%a0,%d2.l*4),%d1",
+    "Text": "movel_1372 [[48,2,1,4,0,4],[1]]",
+    "Hex": "22302c04"
+  },
+  {
+    "CPU": "isa-a+",
+    "Assembly": "bitrev %d3",
+    "Text": "bitrev_143 [3]",
+    "Hex": "00c3"
+  },
+  {
+    "CPU": "isa-a+",
+    "Assembly": "byterev %d5",
+    "Text": "byterev_158 [5]",
+    "Hex": "02c5"
+  },
+  {
+    "CPU": "isa-a+",
+    "Assembly": "ff1 %d2",
+    "Text": "ff1_273 [2]",
+    "Hex": "04c2"
+  },
+  {
+    "CPU": "isa-a+",
+    "Assembly": "stldsr #0x2700",
+    "Text": "stldsr_1723 [9984]",
+    "Hex": "40e746fc2700"
+  },
+  {
+    "CPU": "isa-a+",
+    "Assembly": "strldsr #0x2700",
+    "Text": "stldsr_1723 [9984]",
+    "Hex": "40e746fc2700"
+  },
+  {
+    "CPU": "isa-b",
+    "Assembly": "mov3ql #-1,(%a0)",
+    "Text": "mov3ql_1416 [-1,[16]]",
+    "Hex": "a150"
+  },
+  {
+    "CPU": "isa-b",
+    "Assembly": "mvzb (%a0),%d2",
+    "Text": "mvzb_1419 [[16],2]",
+    "Hex": "7590"
+  },
+  {
+    "CPU": "isa-b",
+    "Assembly": "mvsw (%a0),%d3",
+    "Text": "mvsw_1418 [[16],3]",
+    "Hex": "7750"
+  },
+  {
+    "CPU": "isa-b",
+    "Assembly": "bras .-8",
+    "Text": "bras_147 [-10]",
+    "Hex": "60f6"
+  },
+  {
+    "CPU": "isa-b",
+    "Assembly": "bsrl .-100000",
+    "Text": "bsrl_153 [-100002]",
+    "Hex": "61fffffe795e"
+  },
+  {
+    "CPU": "isa-c",
+    "Assembly": "satsl %d2",
+    "Text": "satsl_1720 [2]",
+    "Hex": "4c82"
+  },
+  {
+    "CPU": "isa-c",
+    "Assembly": "mulsl %d1,%d2",
+    "Text": "mulsl_1458 [[1],2]",
+    "Hex": "4c012800"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "macl %d0,%d1,\u003c\u003c,%acc0",
+    "Text": "macl_1313 [0,1,0]",
+    "Hex": "a2000a00"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "macw %d0u,%d1l,(%a0)\u0026,%d2,%acc1",
+    "Text": "macw_1287 [16,1,[[16],1],2,1]",
+    "Hex": "a4101060"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "msacl %d3,%d4,\u003e\u003e,%acc2",
+    "Text": "msacl_1453 [3,4,3,2]",
+    "Hex": "a8030f10"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "movel #0x12345678,%accext01",
+    "Text": "movel_1394 [305419896,0]",
+    "Hex": "ab3c12345678"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "movel %acc2,%d3",
+    "Text": "movel_1385 [2,3]",
+    "Hex": "a583"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "movclrl %acc1,%a2",
+    "Text": "movclrl_1317 [1,10]",
+    "Hex": "a3ca"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "faddd %fp1,%fp2",
+    "Text": "faddd_333 [1,1,2]",
+    "Hex": "f2000522"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "fsmovel %fp1,%d2",
+    "Text": "fsmovel_756 [1,1,[2]]",
+    "Hex": "f20260c0"
+  },
+  {
+    "CPU": "coldfire-all",
+    "Assembly": "fdmoved %fp2,(%a0)",
+    "Text": "fdmoved_772 [1,2,[16]]",
+    "Hex": "f2107544"
+  },
+  {
+    "CPU": "68020",
+    "Assembly": "rtm %d0",
+    "Text": "rtm_1717 [0]",
+    "Hex": "06c0"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "pflushs #1,#2,(%a0)",
+    "Text": "pflushs_1570 [1,2,[16]]",
+    "Hex": "f0103c51"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "fmovel #0x12345678,%fpcr",
+    "Text": "fmovel_728 [1,[60,305419896],4]",
+    "Hex": "f23c900012345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "pmove (%a0),%bad3",
+    "Text": "pmove_1594 [[16],[28,3]]",
+    "Hex": "f010700c"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "pmove %bac7,(%a1)",
+    "Text": "pmove_1595 [[29,7],[17]]",
+    "Hex": "f011761c"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "pbbc .-100000",
+    "Text": "pbbc_1510 [-100002]",
+    "Hex": "f0c1fffe795e"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "pbbc .-20",
+    "Text": "pbbcw_1511 [-22]",
+    "Hex": "f081ffea"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapeqw #42",
+    "Text": "ftrapeqw_1163 [1,42]",
+    "Hex": "f27a0001002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapeql #0x12345678",
+    "Text": "ftrapeql_1195 [1,305419896]",
+    "Hex": "f27b000112345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapfw #42",
+    "Text": "ftrapfw_1164 [1,42]",
+    "Hex": "f27a0000002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapfl #0x12345678",
+    "Text": "ftrapfl_1196 [1,305419896]",
+    "Hex": "f27b000012345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapgew #42",
+    "Text": "ftrapgew_1165 [1,42]",
+    "Hex": "f27a0013002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapgel #0x12345678",
+    "Text": "ftrapgel_1197 [1,305419896]",
+    "Hex": "f27b001312345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapglw #42",
+    "Text": "ftrapglw_1166 [1,42]",
+    "Hex": "f27a0016002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapgll #0x12345678",
+    "Text": "ftrapgll_1198 [1,305419896]",
+    "Hex": "f27b001612345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapglew #42",
+    "Text": "ftrapglew_1167 [1,42]",
+    "Hex": "f27a0017002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapglel #0x12345678",
+    "Text": "ftrapglel_1199 [1,305419896]",
+    "Hex": "f27b001712345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapgtw #42",
+    "Text": "ftrapgtw_1168 [1,42]",
+    "Hex": "f27a0012002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapgtl #0x12345678",
+    "Text": "ftrapgtl_1200 [1,305419896]",
+    "Hex": "f27b001212345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftraplew #42",
+    "Text": "ftraplew_1169 [1,42]",
+    "Hex": "f27a0015002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftraplel #0x12345678",
+    "Text": "ftraplel_1201 [1,305419896]",
+    "Hex": "f27b001512345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapltw #42",
+    "Text": "ftrapltw_1170 [1,42]",
+    "Hex": "f27a0014002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapltl #0x12345678",
+    "Text": "ftrapltl_1202 [1,305419896]",
+    "Hex": "f27b001412345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnew #42",
+    "Text": "ftrapnew_1171 [1,42]",
+    "Hex": "f27a000e002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnel #0x12345678",
+    "Text": "ftrapnel_1203 [1,305419896]",
+    "Hex": "f27b000e12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapngew #42",
+    "Text": "ftrapngew_1172 [1,42]",
+    "Hex": "f27a001c002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapngel #0x12345678",
+    "Text": "ftrapngel_1204 [1,305419896]",
+    "Hex": "f27b001c12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnglw #42",
+    "Text": "ftrapnglw_1173 [1,42]",
+    "Hex": "f27a0019002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapngll #0x12345678",
+    "Text": "ftrapngll_1205 [1,305419896]",
+    "Hex": "f27b001912345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnglew #42",
+    "Text": "ftrapnglew_1174 [1,42]",
+    "Hex": "f27a0018002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnglel #0x12345678",
+    "Text": "ftrapnglel_1206 [1,305419896]",
+    "Hex": "f27b001812345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapngtw #42",
+    "Text": "ftrapngtw_1175 [1,42]",
+    "Hex": "f27a001d002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapngtl #0x12345678",
+    "Text": "ftrapngtl_1207 [1,305419896]",
+    "Hex": "f27b001d12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnlew #42",
+    "Text": "ftrapnlew_1176 [1,42]",
+    "Hex": "f27a001a002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnlel #0x12345678",
+    "Text": "ftrapnlel_1208 [1,305419896]",
+    "Hex": "f27b001a12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnltw #42",
+    "Text": "ftrapnltw_1177 [1,42]",
+    "Hex": "f27a001b002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapnltl #0x12345678",
+    "Text": "ftrapnltl_1209 [1,305419896]",
+    "Hex": "f27b001b12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapogew #42",
+    "Text": "ftrapogew_1178 [1,42]",
+    "Hex": "f27a0003002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapogel #0x12345678",
+    "Text": "ftrapogel_1210 [1,305419896]",
+    "Hex": "f27b000312345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapoglw #42",
+    "Text": "ftrapoglw_1179 [1,42]",
+    "Hex": "f27a0006002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapogll #0x12345678",
+    "Text": "ftrapogll_1211 [1,305419896]",
+    "Hex": "f27b000612345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapogtw #42",
+    "Text": "ftrapogtw_1180 [1,42]",
+    "Hex": "f27a0002002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapogtl #0x12345678",
+    "Text": "ftrapogtl_1212 [1,305419896]",
+    "Hex": "f27b000212345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapolew #42",
+    "Text": "ftrapolew_1181 [1,42]",
+    "Hex": "f27a0005002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapolel #0x12345678",
+    "Text": "ftrapolel_1213 [1,305419896]",
+    "Hex": "f27b000512345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapoltw #42",
+    "Text": "ftrapoltw_1182 [1,42]",
+    "Hex": "f27a0004002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapoltl #0x12345678",
+    "Text": "ftrapoltl_1214 [1,305419896]",
+    "Hex": "f27b000412345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftraporw #42",
+    "Text": "ftraporw_1183 [1,42]",
+    "Hex": "f27a0007002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftraporl #0x12345678",
+    "Text": "ftraporl_1215 [1,305419896]",
+    "Hex": "f27b000712345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapseqw #42",
+    "Text": "ftrapseqw_1184 [1,42]",
+    "Hex": "f27a0011002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapseql #0x12345678",
+    "Text": "ftrapseql_1216 [1,305419896]",
+    "Hex": "f27b001112345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapsfw #42",
+    "Text": "ftrapsfw_1185 [1,42]",
+    "Hex": "f27a0010002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapsfl #0x12345678",
+    "Text": "ftrapsfl_1217 [1,305419896]",
+    "Hex": "f27b001012345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapsnew #42",
+    "Text": "ftrapsnew_1186 [1,42]",
+    "Hex": "f27a001e002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapsnel #0x12345678",
+    "Text": "ftrapsnel_1218 [1,305419896]",
+    "Hex": "f27b001e12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapstw #42",
+    "Text": "ftrapstw_1187 [1,42]",
+    "Hex": "f27a001f002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapstl #0x12345678",
+    "Text": "ftrapstl_1219 [1,305419896]",
+    "Hex": "f27b001f12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftraptw #42",
+    "Text": "ftraptw_1188 [1,42]",
+    "Hex": "f27a000f002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftraptl #0x12345678",
+    "Text": "ftraptl_1220 [1,305419896]",
+    "Hex": "f27b000f12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapueqw #42",
+    "Text": "ftrapueqw_1189 [1,42]",
+    "Hex": "f27a0009002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapueql #0x12345678",
+    "Text": "ftrapueql_1221 [1,305419896]",
+    "Hex": "f27b000912345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapugew #42",
+    "Text": "ftrapugew_1190 [1,42]",
+    "Hex": "f27a000b002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapugel #0x12345678",
+    "Text": "ftrapugel_1222 [1,305419896]",
+    "Hex": "f27b000b12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapugtw #42",
+    "Text": "ftrapugtw_1191 [1,42]",
+    "Hex": "f27a000a002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapugtl #0x12345678",
+    "Text": "ftrapugtl_1223 [1,305419896]",
+    "Hex": "f27b000a12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapulew #42",
+    "Text": "ftrapulew_1192 [1,42]",
+    "Hex": "f27a000d002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapulel #0x12345678",
+    "Text": "ftrapulel_1224 [1,305419896]",
+    "Hex": "f27b000d12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapultw #42",
+    "Text": "ftrapultw_1193 [1,42]",
+    "Hex": "f27a000c002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapultl #0x12345678",
+    "Text": "ftrapultl_1225 [1,305419896]",
+    "Hex": "f27b000c12345678"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapunw #42",
+    "Text": "ftrapunw_1194 [1,42]",
+    "Hex": "f27a0008002a"
+  },
+  {
+    "CPU": "68020+68881",
+    "Assembly": "ftrapunl #0x12345678",
+    "Text": "ftrapunl_1226 [1,305419896]",
+    "Hex": "f27b000812345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapacw #42",
+    "Text": "ptrapacw_1633 [42]",
+    "Hex": "f07a0007002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapacl #0x12345678",
+    "Text": "ptrapacl_1634 [305419896]",
+    "Hex": "f07b000712345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapasw #42",
+    "Text": "ptrapasw_1636 [42]",
+    "Hex": "f07a0006002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapasl #0x12345678",
+    "Text": "ptrapasl_1637 [305419896]",
+    "Hex": "f07b000612345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapbcw #42",
+    "Text": "ptrapbcw_1639 [42]",
+    "Hex": "f07a0001002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapbcl #0x12345678",
+    "Text": "ptrapbcl_1640 [305419896]",
+    "Hex": "f07b000112345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapbsw #42",
+    "Text": "ptrapbsw_1642 [42]",
+    "Hex": "f07a0000002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapbsl #0x12345678",
+    "Text": "ptrapbsl_1643 [305419896]",
+    "Hex": "f07b000012345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapccw #42",
+    "Text": "ptrapccw_1645 [42]",
+    "Hex": "f07a000f002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapccl #0x12345678",
+    "Text": "ptrapccl_1646 [305419896]",
+    "Hex": "f07b000f12345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapcsw #42",
+    "Text": "ptrapcsw_1648 [42]",
+    "Hex": "f07a000e002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapcsl #0x12345678",
+    "Text": "ptrapcsl_1649 [305419896]",
+    "Hex": "f07b000e12345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapgcw #42",
+    "Text": "ptrapgcw_1651 [42]",
+    "Hex": "f07a000d002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapgcl #0x12345678",
+    "Text": "ptrapgcl_1652 [305419896]",
+    "Hex": "f07b000d12345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapgsw #42",
+    "Text": "ptrapgsw_1654 [42]",
+    "Hex": "f07a000c002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapgsl #0x12345678",
+    "Text": "ptrapgsl_1655 [305419896]",
+    "Hex": "f07b000c12345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapicw #42",
+    "Text": "ptrapicw_1657 [42]",
+    "Hex": "f07a000b002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapicl #0x12345678",
+    "Text": "ptrapicl_1658 [305419896]",
+    "Hex": "f07b000b12345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapisw #42",
+    "Text": "ptrapisw_1660 [42]",
+    "Hex": "f07a000a002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapisl #0x12345678",
+    "Text": "ptrapisl_1661 [305419896]",
+    "Hex": "f07b000a12345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptraplcw #42",
+    "Text": "ptraplcw_1663 [42]",
+    "Hex": "f07a0003002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptraplcl #0x12345678",
+    "Text": "ptraplcl_1664 [305419896]",
+    "Hex": "f07b000312345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptraplsw #42",
+    "Text": "ptraplsw_1666 [42]",
+    "Hex": "f07a0002002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptraplsl #0x12345678",
+    "Text": "ptraplsl_1667 [305419896]",
+    "Hex": "f07b000212345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapscw #42",
+    "Text": "ptrapscw_1669 [42]",
+    "Hex": "f07a0005002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapscl #0x12345678",
+    "Text": "ptrapscl_1670 [305419896]",
+    "Hex": "f07b000512345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapssw #42",
+    "Text": "ptrapssw_1672 [42]",
+    "Hex": "f07a0004002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapssl #0x12345678",
+    "Text": "ptrapssl_1673 [305419896]",
+    "Hex": "f07b000412345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapwcw #42",
+    "Text": "ptrapwcw_1675 [42]",
+    "Hex": "f07a0009002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapwcl #0x12345678",
+    "Text": "ptrapwcl_1676 [305419896]",
+    "Hex": "f07b000912345678"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapwsw #42",
+    "Text": "ptrapwsw_1678 [42]",
+    "Hex": "f07a0008002a"
+  },
+  {
+    "CPU": "68851",
+    "Assembly": "ptrapwsl #0x12345678",
+    "Text": "ptrapwsl_1679 [305419896]",
+    "Hex": "f07b000812345678"
+  }
+]
