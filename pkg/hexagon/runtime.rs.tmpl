@@ -1,0 +1,1084 @@
+fn packet_literal_syntax(text:&str)->String{text.replace('\x01',"{").replace('\x02',"}")}
+#[derive(Debug)]
+struct PacketMeta {
+    group: &'static str,
+    extender: bool,
+    extendable: bool,
+    must_extend: bool,
+    extend: isize,
+    align: u32,
+    signed: bool,
+    new_value: isize,
+    producers: &'static [usize],
+    vector: bool,
+    solo: bool,
+}
+#[derive(Clone, Debug)]
+pub struct PacketInstruction {
+    pub decoded: DecodedWord,
+    pub extended: bool,
+    /// Resolved producer ordinal among non-extender packet members.
+    /// Kept separately from the architectural register to preserve ambiguous
+    /// same-register producer references when encoding decoded packets.
+    pub producer: Option<usize>,
+}
+impl PacketInstruction {
+    pub fn new(id: &str, values: &[i128]) -> Result<Self, Error> {
+        let (index, e) = catalog_entry(id).ok_or(Error::Unknown)?;
+        if values.len() != e.operands.len() {
+            return Err(Error::Operand);
+        }
+        let mut v = [0; MAX_OPERANDS];
+        v[..values.len()].copy_from_slice(values);
+        Ok(Self {
+            decoded: DecodedWord {
+                encoding_index: index,
+                values: v,
+                length: 4,
+            },
+            extended: false,
+            producer: None,
+        })
+    }
+    pub fn encoding(&self) -> &'static Encoding {
+        self.decoded.encoding()
+    }
+    pub fn operand(&self, name: &str) -> Option<i128> {
+        self.decoded.operand(name)
+    }
+    /// Architectural operand receiving a same-packet producer result. Decoding
+    /// has already resolved the encoded producer distance to a register number.
+    pub fn new_value_operand(&self) -> Option<&'static str> {
+        let index = usize::try_from(pm(self).new_value).ok()?;
+        Some(self.encoding().operands.get(index)?.name)
+    }
+    /// Explicit producer destinations retained from the source instruction DAG.
+    pub fn produced_operands(&self) -> impl Iterator<Item = (&'static str, i128)> + '_ {
+        pm(self).producers.iter().map(|&n| (self.encoding().operands[n].name, self.decoded.values[n]))
+    }
+
+}
+#[derive(Clone, Debug)]
+pub struct PacketWord {
+    pub instructions: Vec<PacketInstruction>,
+}
+#[derive(Clone, Debug, Default)]
+pub struct Packet {
+    pub words: Vec<PacketWord>,
+    pub inner_loop: bool,
+    pub outer_loop: bool,
+    pub length: usize,
+}
+const DUPLEX: [(&str, &str); 15] = [
+    ("L1", "L1"),
+    ("L2", "L1"),
+    ("L2", "L2"),
+    ("A", "A"),
+    ("L1", "A"),
+    ("L2", "A"),
+    ("S1", "A"),
+    ("S2", "A"),
+    ("S1", "L1"),
+    ("S1", "L2"),
+    ("S1", "S1"),
+    ("S2", "S1"),
+    ("S2", "L1"),
+    ("S2", "L2"),
+    ("S2", "S2"),
+];
+fn pm(i: &PacketInstruction) -> &'static PacketMeta {
+    &PACKET_META[i.decoded.encoding_index]
+}
+fn packet_decode_word(
+    mut word: u32,
+    group: &str,
+    extended: bool,
+    active: Option<&[&str]>,
+) -> Result<PacketInstruction, Error> {
+    if group.is_empty() {
+        word |= 0xc000;
+    }
+    let bytes = word.to_le_bytes();
+    let mut best = None;
+    let mut score = 0;
+    // Reuse the physical decoder's generated decision tree. Packet-specific
+    // group/extender checks only examine its small candidate leaf.
+    for &candidate in decode_candidates(&bytes) {
+        let index = candidate as usize;
+        let e = &ENCODINGS[index];
+        let m = &PACKET_META[index];
+        if e.assembly_only
+            || m.group != group
+            || m.must_extend && !extended
+            || extended && !m.extendable && !m.must_extend
+            || !features(e, active)
+        {
+            continue;
+        }
+        if bytes
+            .iter()
+            .zip(e.mask)
+            .zip(e.value)
+            .any(|((&b, &mask), &v)| b & mask != v)
+        {
+            continue;
+        }
+        let Some(values) = decode_values(e, &bytes) else {
+            continue;
+        };
+        let s = e.mask.iter().map(|v| v.count_ones()).sum::<u32>()
+            + if extended && m.must_extend { 64 } else { 0 };
+        if best.as_ref().is_none_or(|old: &PacketInstruction| {
+            s > score || s == score && index < old.decoded.encoding_index
+        }) {
+            best = Some(PacketInstruction {
+                decoded: DecodedWord {
+                    encoding_index: index,
+                    values,
+                    length: 4,
+                },
+                extended,
+                producer: None,
+            });
+            score = s;
+        }
+    }
+    best.ok_or(Error::Unknown)
+}
+fn packet_extend(i: &mut PacketInstruction, upper: u32) -> Result<(), Error> {
+    let m = pm(i);
+    if !m.extendable && !m.must_extend || m.extend < 0 {
+        return Err(Error::Operand);
+    }
+    let index = m.extend as usize;
+    let full = upper | ((i.decoded.values[index] as u32 >> m.align) & 63);
+    let signed = m.signed || i.encoding().operands[index].signed;
+    i.decoded.values[index] = if signed {
+        full as i32 as i128
+    } else {
+        full as i128
+    };
+    i.extended = true;
+    Ok(())
+}
+fn packet_producer(i: &PacketInstruction, selector: usize) -> Option<i128> {
+    let m = pm(i);
+    let &index = m.producers.get(if m.producers.len() > 1 {
+        1 - selector
+    } else {
+        0
+    })?;
+    let class = i.encoding().operands[index].class;
+    if matches!(class, "DoubleRegs" | "GeneralDoubleLow8Regs") {
+        return None;
+    }
+    let v = i.decoded.values[index];
+    if class == "HvxWR" {
+        return Some((v & !1) | ((v & 1) ^ selector as i128));
+    }
+    if m.producers.len() == 1 && selector != 0 {
+        return None;
+    }
+    Some(v)
+}
+fn packet_new_value(
+    i: &mut PacketInstruction,
+    history: &[PacketInstruction],
+    encode: bool,
+) -> Result<(), Error> {
+    let m = pm(i);
+    if m.new_value < 0 {
+        return Ok(());
+    }
+    let index = m.new_value as usize;
+    let value = i.decoded.values[index];
+    let mut distance = 0;
+    for (history_index, previous) in history.iter().enumerate().rev() {
+        let p = pm(previous);
+        if p.extender {
+            continue;
+        }
+        if !m.vector || p.vector {
+            distance += 1;
+        }
+        if distance == 0 {
+            continue;
+        }
+        let producer_index=history[..history_index].iter().filter(|p| !pm(p).extender).count();
+        for selector in 0..2 {
+            let Some(v) = packet_producer(previous, selector) else {
+                continue;
+            };
+            if encode && v == value && i.producer.is_none_or(|n| n==producer_index) {
+                if distance > 3 {
+                    return Err(Error::Operand);
+                }
+                i.decoded.values[index] = (distance * 2 + selector) as i128;
+                return Ok(());
+            }
+            if !encode && value >> 1 == distance as i128 && value & 1 == selector as i128 {
+                i.decoded.values[index] = v;
+                i.producer=Some(producer_index);
+                return Ok(());
+            }
+        }
+        if !encode && value >> 1 == distance as i128 {
+            break;
+        }
+    }
+    Err(Error::Operand)
+}
+fn packet_solo(p: &Packet) -> Result<(), Error> {
+    let all = p
+        .words
+        .iter()
+        .flat_map(|w| &w.instructions)
+        .filter(|i| !pm(i).extender)
+        .collect::<Vec<_>>();
+    if all.len() > 4 || all.len() > 1 && all.iter().any(|i| pm(i).solo) {
+        return Err(Error::Operand);
+    }
+    Ok(())
+}
+/// Decode one complete packet; the remainder belongs to subsequent packets.
+pub fn decode(src: &[u8]) -> Result<Packet, Error> {
+    decode_with_features(src, None)
+}
+pub fn decode_with_features(src: &[u8], active: Option<&[&str]>) -> Result<Packet, Error> {
+    let mut p = Packet::default();
+    let mut pending = None;
+    let mut history = Vec::new();
+    for index in 0..4 {
+        let bytes = src.get(index * 4..index * 4 + 4).ok_or(Error::Truncated)?;
+        let raw = u32::from_le_bytes(bytes.try_into().unwrap());
+        let parse = (raw >> 14) & 3;
+        let end = parse == 0 || parse == 3;
+        let mut word = PacketWord {
+            instructions: Vec::new(),
+        };
+        if parse == 2 {
+            match index {
+                0 => p.inner_loop = true,
+                1 => p.outer_loop = true,
+                _ => return Err(Error::Operand),
+            }
+        }
+        if parse == 0 {
+            let class = (((raw >> 28) & 14) | ((raw >> 13) & 1)) as usize;
+            let groups = DUPLEX.get(class).ok_or(Error::Unknown)?;
+            for (slot, group) in [groups.0, groups.1].iter().enumerate() {
+                let mut i = packet_decode_word(
+                    (raw >> (slot * 16)) & 0x1fff,
+                    group,
+                    pending.is_some() && slot == 1,
+                    active,
+                )?;
+                if slot == 1 {
+                    if let Some(upper) = pending.take() {
+                        packet_extend(&mut i, upper)?;
+                    }
+                }
+                packet_new_value(&mut i, &history, false)?;
+                history.push(i.clone());
+                word.instructions.push(i);
+            }
+        } else {
+            let mut i = packet_decode_word(raw & !0xc000, "", pending.is_some(), active)?;
+            if pm(&i).extender {
+                if pending.is_some() || end {
+                    return Err(Error::Operand);
+                }
+                pending = Some(i.decoded.values[0] as u32);
+                i.extended = false;
+            } else {
+                if let Some(upper) = pending.take() {
+                    packet_extend(&mut i, upper)?;
+                }
+                packet_new_value(&mut i, &history, false)?;
+            }
+            history.push(i.clone());
+            word.instructions.push(i);
+        }
+        p.words.push(word);
+        if end {
+            if pending.is_some() {
+                return Err(Error::Operand);
+            }
+            p.length = (index + 1) * 4;
+            packet_solo(&p)?;
+            return Ok(p);
+        }
+    }
+    Err(Error::Operand)
+}
+fn packet_encode_instruction(
+    i: &PacketInstruction,
+    history: &[PacketInstruction],
+    pending: Option<u32>,
+) -> Result<u32, Error> {
+    let mut copy = i.clone();
+    packet_new_value(&mut copy, history, true)?;
+    let m = pm(i);
+    let e = i.encoding();
+    if let Some(upper) = pending {
+        if !m.extendable && !m.must_extend || m.extend < 0 {
+            return Err(Error::Operand);
+        }
+        let v = copy.decoded.values[m.extend as usize];
+        if v < i32::MIN as i128 || v > u32::MAX as i128 || (v as u32 & !63) != upper {
+            return Err(Error::Operand);
+        }
+        copy.decoded.values[m.extend as usize] = ((v as u32 & 63) << m.align) as i128;
+    } else if m.must_extend || i.extended {
+        return Err(Error::Operand);
+    }
+    let values = &copy.decoded.values[..e.operands.len()];
+    if !constraints(e, values) {
+        return Err(Error::Operand);
+    }
+    let mut bytes = e.value.to_vec();
+    for (index, o) in e.operands.iter().enumerate() {
+        let n = values[index];
+        let w = width(o);
+        let unsigned = pending.is_some() && m.extend == index as isize;
+        if o.signed && !unsigned {
+            if n < -(1i128 << (w - 1)) || n >= (1i128 << (w - 1)) {
+                return Err(Error::Operand);
+            }
+        } else if n < 0 || n >= (1i128 << w) {
+            return Err(Error::Operand);
+        }
+        if !o.names.is_empty()
+            && (n < 0 || n >= o.names.len() as i128 || o.names[n as usize].is_empty())
+        {
+            return Err(Error::Operand);
+        }
+        let represented = o
+            .bits
+            .iter()
+            .fold(0u64, |a, b| a | (mask(b.width) << b.value));
+        if n as u64 & mask(w) & !represented != 0 {
+            return Err(Error::Operand);
+        }
+        for b in o.bits {
+            for k in 0..b.width {
+                let bit = b.instruction + k as usize;
+                bytes[bit / 8] |= (((n as u64 >> (b.value + k)) & 1) as u8) << (bit % 8);
+            }
+        }
+    }
+    Ok(u32::from_le_bytes(
+        bytes.try_into().map_err(|_| Error::Operand)?,
+    ))
+}
+fn packet_extender(upper: u32) -> Result<PacketInstruction, Error> {
+    PacketInstruction::new("A4_ext", &[upper as i128])
+}
+pub fn encode_packet(p: &Packet, active: Option<&[&str]>) -> Result<Vec<u8>, Error> {
+    if p.words.is_empty() {
+        return Err(Error::Operand);
+    }
+    packet_solo(p)?;
+    let mut raw = Vec::new();
+    let mut duplex = Vec::new();
+    let mut history = Vec::new();
+    let mut pending = None;
+    for word in &p.words {
+        if word.instructions.is_empty() || word.instructions.len() > 2 {
+            return Err(Error::Operand);
+        }
+        if word
+            .instructions
+            .iter()
+            .any(|i| !features(i.encoding(), active))
+        {
+            return Err(Error::Operand);
+        }
+        if word.instructions.len() == 2 {
+            let low = &word.instructions[0];
+            let high = &word.instructions[1];
+            let class = DUPLEX
+                .iter()
+                .position(|&(a, b)| a == pm(low).group && b == pm(high).group)
+                .ok_or(Error::Operand)?;
+            if low.extended {
+                return Err(Error::Operand);
+            }
+            if pending.is_none() && (high.extended || pm(high).must_extend) {
+                let m = pm(high);
+                if m.extend < 0 {
+                    return Err(Error::Operand);
+                }
+                let upper = high.decoded.values[m.extend as usize] as u32 & !63;
+                let ext = packet_extender(upper)?;
+                raw.push(packet_encode_instruction(&ext, &history, None)?);
+                duplex.push(false);
+                history.push(ext);
+                pending = Some(upper);
+            }
+            let a = packet_encode_instruction(low, &history, None)?;
+            let b = packet_encode_instruction(high, &history, pending)?;
+            raw.push(
+                ((class as u32 & 14) << 28)
+                    | ((class as u32 & 1) << 13)
+                    | (a & 0x1fff)
+                    | ((b & 0x1fff) << 16),
+            );
+            duplex.push(true);
+            history.extend([low.clone(), high.clone()]);
+            pending = None;
+        } else {
+            let i = &word.instructions[0];
+            let m = pm(i);
+            if !m.group.is_empty() {
+                return Err(Error::Operand);
+            }
+            let mut value = packet_encode_instruction(i, &history, pending);
+            if value.is_err() && pending.is_none() && (m.extendable || m.must_extend) {
+                if m.extend < 0 {
+                    return Err(Error::Operand);
+                }
+                let upper = i.decoded.values[m.extend as usize] as u32 & !63;
+                let ext = packet_extender(upper)?;
+                raw.push(packet_encode_instruction(&ext, &history, None)?);
+                duplex.push(false);
+                history.push(ext);
+                pending = Some(upper);
+                value = packet_encode_instruction(i, &history, pending);
+            }
+            raw.push(value? & !0xc000);
+            duplex.push(false);
+            if m.extender {
+                if pending.is_some() {
+                    return Err(Error::Operand);
+                }
+                pending = Some(i.decoded.values[0] as u32);
+            } else {
+                pending = None;
+            }
+            history.push(i.clone());
+        }
+    }
+    if pending.is_some()
+        || raw.len() > 4
+        || p.inner_loop && raw.len() < 2
+        || p.outer_loop && raw.len() < 3
+    {
+        return Err(Error::Operand);
+    }
+    let length = raw.len();
+    let mut out = Vec::new();
+    for (index, &value) in raw.iter().enumerate() {
+        let last = index == length - 1;
+        let value = if duplex[index] {
+            if !last {
+                return Err(Error::Operand);
+            }
+            value
+        } else {
+            let mut parse = if last { 3 } else { 1 };
+            if index == 0 && p.inner_loop || index == 1 && p.outer_loop {
+                if last {
+                    return Err(Error::Operand);
+                }
+                parse = 2;
+            }
+            (value & !0xc000) | (parse << 14)
+        };
+        out.extend(value.to_le_bytes());
+    }
+    Ok(out)
+}
+fn packet_instruction_format(i: &PacketInstruction, address: u64) -> String {
+    let e = i.encoding();
+    let m = pm(i);
+    let mut text = escaped_syntax(e.syntax);
+    if i.extended && m.extend >= 0 {
+        let hole = format!("{{{}}}", e.operands[m.extend as usize].name);
+        if text.contains(&format!("#{hole}")) {
+            text = text.replace(&format!("#{hole}"), &format!("##{hole}"));
+        } else {
+            text = text.replace(&hole, &format!("##{hole}"));
+        }
+    }
+    for (o, v) in i.decoded.operands() {
+        let spelling = if o.kind == "register" {
+            o.names
+                .get(v as usize)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("{}{v}", o.prefix))
+        } else if o.relative {
+            format!("0x{:x}", relative_target(o, v, address))
+        } else if o.kind == "address" {
+            format!("0x{:x}", v as u64)
+        } else {
+            v.to_string()
+        };
+        text = text.replace(&format!("{{{}}}", o.name), &spelling);
+    }
+    packet_literal_syntax(&text)
+}
+impl Packet {
+    pub fn format(&self, address: u64) -> String {
+        let lines = self
+            .words
+            .iter()
+            .map(|w| {
+                w.instructions
+                    .iter()
+                    .map(|i| packet_instruction_format(i, address))
+                    .collect::<Vec<_>>()
+                    .join(" ; ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        format!(
+            "{{\n  {lines}\n}}{}{}",
+            if self.inner_loop { ":endloop0" } else { "" },
+            if self.outer_loop { ":endloop1" } else { "" }
+        )
+    }
+}
+fn packet_lines(text: &str) -> Result<(Vec<&str>, bool, bool), Error> {
+    let mut text = text.trim();
+    let (mut inner, mut outer) = (false, false);
+    if text.starts_with('{') {
+        let end = text.rfind('}').ok_or(Error::Syntax)?;
+        let mut suffix = text[end + 1..].trim();
+        while !suffix.is_empty() {
+            if let Some(s) = suffix.strip_prefix(":endloop0") {
+                inner = true;
+                suffix = s.trim();
+            } else if let Some(s) = suffix.strip_prefix(":endloop1") {
+                outer = true;
+                suffix = s.trim();
+            } else {
+                return Err(Error::Syntax);
+            }
+        }
+        text = &text[1..end];
+    }
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return Err(Error::Syntax);
+    }
+    Ok((lines, inner, outer))
+}
+fn packet_parse_instruction(
+    text: &str,
+    sub: bool,
+    address: u64,
+    active: Option<&[&str]>,
+) -> Vec<PacketInstruction> {
+    let mut out = Vec::new();
+    for (index, e) in ENCODINGS.iter().enumerate() {
+        let m = &PACKET_META[index];
+        if (!m.group.is_empty()) != sub || !features(e, active) {
+            continue;
+        }
+        let extended = text.contains("##");
+        let syntax = if extended {
+            if m.extend < 0 {
+                continue;
+            }
+            let hole = format!("{{{}}}", e.operands[m.extend as usize].name);
+            if e.syntax.contains(&format!("#{hole}")) {
+                e.syntax.replace(&format!("#{hole}"), &format!("##{hole}"))
+            } else {
+                e.syntax.replace(&hole, &format!("##{hole}"))
+            }
+        } else {
+            e.syntax.to_owned()
+        };
+        // parse_syntax has a static source type. The parser below shares its operand
+        // grammar while accepting a dynamically marked extended immediate.
+        if let Some(values) = packet_parse_syntax(e, &syntax, text, address) {
+            let mut v = [0; MAX_OPERANDS];
+            v[..values.len()].copy_from_slice(&values);
+            out.push(PacketInstruction {
+                decoded: DecodedWord {
+                    encoding_index: index,
+                    values: v,
+                    length: 4,
+                },
+                extended,
+                producer: None,
+            });
+        }
+    }
+    out
+}
+fn packet_parse_syntax(e: &Encoding, syntax: &str, text: &str, address: u64) -> Option<Vec<i128>> {
+    let pattern = packet_normalize_syntax(&escaped_syntax(syntax));
+    let text = syntax_input(text);
+    let mut pattern = pattern.as_str();
+    let mut input = text.as_str();
+    let mut values = e
+        .operands
+        .iter()
+        .map(|o| o.implicit.then_some(0))
+        .collect::<Vec<_>>();
+    while let Some(p) = pattern.find('{') {
+        input = input.strip_prefix(&packet_literal_syntax(&pattern[..p]))?;
+        pattern = &pattern[p + 1..];
+        let j = pattern.find('}')?;
+        let name = &pattern[..j];
+        pattern = &pattern[j + 1..];
+        let index = e.operands.iter().position(|o| o.name == name)?;
+        let next = packet_literal_syntax(&pattern[..pattern.find('{').unwrap_or(pattern.len())]);
+        let end = if next.is_empty() {
+            input.len()
+        } else {
+            packet_delimiter_index(input, &next)?
+        };
+        let value = parse_operand(&e.operands[index], &input[..end], address)?;
+        if values[index].is_some_and(|old| old != value) {
+            return None;
+        }
+        values[index] = Some(value);
+        input = &input[end..];
+    }
+    if input != packet_literal_syntax(pattern) {
+        return None;
+    }
+    values.into_iter().collect()
+}
+fn packet_parse_words(line: &str, address: u64, active: Option<&[&str]>) -> Vec<PacketWord> {
+    let mut out = packet_parse_instruction(line, false, address, active)
+        .into_iter()
+        .map(|i| PacketWord {
+            instructions: vec![i],
+        })
+        .collect::<Vec<_>>();
+    for (index, ch) in line.char_indices() {
+        if ch != ';' {
+            continue;
+        }
+        let low = packet_parse_instruction(line[..index].trim(), true, address, active);
+        let high = packet_parse_instruction(line[index + 1..].trim(), true, address, active);
+        for a in &low {
+            for b in &high {
+                if DUPLEX
+                    .iter()
+                    .any(|&(x, y)| x == pm(a).group && y == pm(b).group)
+                {
+                    out.push(PacketWord {
+                        instructions: vec![a.clone(), b.clone()],
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+pub fn assemble(text: &str) -> Result<Vec<Vec<u8>>, Error> {
+    assemble_at(text, 0)
+}
+pub fn assemble_at(text: &str, address: u64) -> Result<Vec<Vec<u8>>, Error> {
+    assemble_with_features(text, address, None)
+}
+pub fn assemble_with_features(
+    text: &str,
+    address: u64,
+    active: Option<&[&str]>,
+) -> Result<Vec<Vec<u8>>, Error> {
+    let (lines, inner_loop, outer_loop) = packet_lines(text)?;
+    let mut packets = vec![Packet {
+        inner_loop,
+        outer_loop,
+        ..Packet::default()
+    }];
+    for line in lines {
+        let words = packet_parse_words(line, address, active);
+        if words.is_empty() {
+            return Err(Error::Syntax);
+        }
+        let mut next = Vec::new();
+        for p in &packets {
+            for w in &words {
+                let mut q = p.clone();
+                q.words.push(w.clone());
+                next.push(q);
+                if next.len() > 4096 {
+                    return Err(Error::Syntax);
+                }
+            }
+        }
+        packets = next;
+    }
+    let mut out = Vec::new();
+    for p in packets {
+        if let Ok(bytes) = encode_packet(&p, active) {
+            if !out.contains(&bytes) {
+                out.push(bytes);
+            }
+        }
+    }
+    if out.is_empty() {
+        Err(Error::Operand)
+    } else {
+        Ok(out)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PacketBinding {
+    instructions: Vec<(usize, Vec<Binding>, bool)>,
+}
+/// Compiled complete-packet template; $name holes refer to semantic operands.
+#[derive(Clone, Debug)]
+pub struct Template {
+    words: Vec<Vec<PacketBinding>>,
+    inner_loop: bool,
+    outer_loop: bool,
+}
+fn packet_template_instruction(
+    text: &str,
+    sub: bool,
+    address: u64,
+    active: Option<&[&str]>,
+) -> Vec<(usize, Vec<Binding>, bool)> {
+    let extended = text.contains("##");
+    let mut out = Vec::new();
+    for spelling in if extended {
+        vec![text.replace("##", "#"), text.replace("##", "")]
+    } else {
+        vec![text.to_owned()]
+    } {
+        if let Ok(t) = WordTemplate::parse_with_features(&spelling, address, active) {
+            for (index, bindings) in t.patterns {
+                if (!PACKET_META[index].group.is_empty()) == sub
+                    && (!extended || PACKET_META[index].extend >= 0)
+                {
+                    out.push((index, bindings, extended));
+                }
+            }
+        }
+    }
+    out
+}
+
+impl Template {
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        Self::parse_at(text, 0)
+    }
+    pub fn parse_at(text: &str, address: u64) -> Result<Self, Error> {
+        Self::parse_with_features(text, address, None)
+    }
+    pub fn parse_with_features(text: &str, address: u64, active: Option<&[&str]>) -> Result<Self, Error> {
+        let (lines, inner_loop, outer_loop) = packet_lines(text)?;
+        let mut words = Vec::new();
+        for line in lines {
+            let mut candidates = packet_template_instruction(line, false, address, active)
+                .into_iter()
+                .map(|i| PacketBinding {
+                    instructions: vec![i],
+                })
+                .collect::<Vec<_>>();
+            for (index, ch) in line.char_indices() {
+                if ch != ';' {
+                    continue;
+                }
+                let low = packet_template_instruction(line[..index].trim(), true, address, active);
+                let high = packet_template_instruction(line[index + 1..].trim(), true, address, active);
+                for a in &low {
+                    for b in &high {
+                        if DUPLEX.iter().any(|&(x, y)| {
+                            x == PACKET_META[a.0].group && y == PACKET_META[b.0].group
+                        }) {
+                            candidates.push(PacketBinding {
+                                instructions: vec![a.clone(), b.clone()],
+                            });
+                        }
+                    }
+                }
+            }
+            if candidates.is_empty() {
+                return Err(Error::Syntax);
+            }
+            words.push(candidates);
+        }
+        Ok(Self {
+            words,
+            inner_loop,
+            outer_loop,
+        })
+    }
+    pub fn encode(&self, holes: &[(&str, i128)]) -> Result<Vec<Vec<u8>>, Error> {
+        let mut packets = vec![Packet {
+            inner_loop: self.inner_loop,
+            outer_loop: self.outer_loop,
+            ..Packet::default()
+        }];
+        for choices in &self.words {
+            let mut words = Vec::new();
+            for choice in choices {
+                let mut instructions = Vec::new();
+                for (index, bindings, extended) in &choice.instructions {
+                    let Some(values) = bindings
+                        .iter()
+                        .map(|b| b.encode_value(holes))
+                        .collect::<Option<Vec<_>>>()
+                    else {
+                        instructions.clear();
+                        break;
+                    };
+                    let mut i = PacketInstruction::new(ENCODINGS[*index].id, &values)?;
+                    i.extended = *extended;
+                    instructions.push(i);
+                }
+                if !instructions.is_empty() {
+                    words.push(PacketWord { instructions });
+                }
+            }
+            let mut next = Vec::new();
+            for p in &packets {
+                for w in &words {
+                    let mut q = p.clone();
+                    q.words.push(w.clone());
+                    next.push(q);
+                    if next.len() > 4096 {
+                        return Err(Error::Operand);
+                    }
+                }
+            }
+            packets = next;
+        }
+        let mut out = Vec::new();
+        for p in packets {
+            if let Ok(bytes) = encode_packet(&p, None) {
+                if !out.contains(&bytes) {
+                    out.push(bytes);
+                }
+            }
+        }
+        if out.is_empty() {
+            Err(Error::Operand)
+        } else {
+            Ok(out)
+        }
+    }
+    pub fn matches(&self, src: &[u8]) -> Option<(usize, Vec<(String, i128)>)> {
+        let p = decode(src).ok()?;
+        if p.inner_loop != self.inner_loop || p.outer_loop != self.outer_loop {
+            return None;
+        }
+        let mut at = 0;
+        let mut history = Vec::new();
+        let mut pending = None;
+        let mut holes = Vec::new();
+        for choices in &self.words {
+            // Automatic extenders are absent from the source template but are retained in
+            // decoded packets. An explicit immext template consumes that word itself.
+            while at < p.words.len()
+                && p.words[at].instructions.len() == 1
+                && pm(&p.words[at].instructions[0]).extender
+                && !choices
+                    .iter()
+                    .any(|c| c.instructions.len() == 1 && PACKET_META[c.instructions[0].0].extender)
+            {
+                pending = Some(p.words[at].instructions[0].decoded.values[0] as u32);
+                history.extend(p.words[at].instructions.clone());
+                at += 1;
+            }
+            let w = p.words.get(at)?;
+            let raw = u32::from_le_bytes(src.get(at * 4..at * 4 + 4)?.try_into().ok()?);
+            let mut selected = None;
+            for choice in choices {
+                if choice.instructions.len() != w.instructions.len() {
+                    continue;
+                }
+                let mut local = holes.clone();
+                let mut ok = true;
+                for (slot, (index, bindings, extended)) in choice.instructions.iter().enumerate() {
+                    let e = &ENCODINGS[*index];
+                    let m = &PACKET_META[*index];
+                    if *extended && !w.instructions[slot].extended {
+                        ok = false;
+                        break;
+                    }
+                    let value = if w.instructions.len() == 2 {
+                        (raw >> (slot * 16)) & 0x1fff
+                    } else {
+                        raw | 0xc000
+                    };
+                    let bytes = value.to_le_bytes();
+                    if bytes
+                        .iter()
+                        .zip(e.mask)
+                        .zip(e.value)
+                        .any(|((&b, &mask), &v)| b & mask != v)
+                    {
+                        ok = false;
+                        break;
+                    }
+                    let Some(values) = decode_values(e, &bytes) else {
+                        ok = false;
+                        break;
+                    };
+                    let mut i = PacketInstruction {
+                        decoded: DecodedWord {
+                            encoding_index: *index,
+                            values,
+                            length: 4,
+                        },
+                        extended: false,
+                        producer: None,
+                    };
+                    if let Some(upper) = pending {
+                        if w.instructions.len() == 1 || slot == 1 {
+                            if packet_extend(&mut i, upper).is_err() {
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if packet_new_value(&mut i, &history, false).is_err() {
+                        ok = false;
+                        break;
+                    }
+                    if m.new_value >= 0 {
+                        let mut canonical = i.clone();
+                        canonical.producer = None;
+                        if packet_new_value(&mut canonical, &history, true).is_err()
+                            || canonical.decoded.values[m.new_value as usize] != values[m.new_value as usize]
+                        {
+                            // Text names the register, so it selects its nearest producer.
+                            // An older same-register producer needs the structured packet API.
+                            ok = false;
+                            break;
+                        }
+                    }
+                    for (b, &v) in bindings.iter().zip(&i.decoded.values).flat_map(|(b,v)|b.atoms().map(move |atom|(atom,v))) {
+                        match b {
+                            Binding::Fixed(x) => {
+                                if *x != v {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+                            Binding::Any => {}
+                            Binding::All(_) => unreachable!(),
+                            Binding::Hole(n) => {
+                                if let Some((_, old)) = local.iter().find(|(name, _)| name == n) {
+                                    if *old != v {
+                                        ok = false;
+                                        break;
+                                    }
+                                } else {
+                                    local.push((n.clone(), v));
+                                }
+                            }
+                        }
+                    }
+                    if m.must_extend && !w.instructions[slot].extended {
+                        ok = false;
+                        break;
+                    }
+                }
+                if ok {
+                    selected = Some(local);
+                    break;
+                }
+            }
+            holes = selected?;
+            if w.instructions.len() == 1 && pm(&w.instructions[0]).extender {
+                pending = Some(w.instructions[0].decoded.values[0] as u32);
+            } else {
+                pending = None;
+            }
+            history.extend(w.instructions.clone());
+            at += 1;
+        }
+        if at != p.words.len() {
+            return None;
+        }
+        Some((p.length, holes))
+    }
+}
+
+#[cfg(test)]
+mod packet_tests {
+    use super::*;
+    #[test]
+    fn packets_and_templates() {
+        for text in [
+            "{\nr0 = #17\n}",
+            "{\nr0 = ##305419896\n}",
+            "{\nr0 = add(r1,r2)\nr3 = xor(r4,r5)\n}",
+            "{\nr0 = #1\nmemw(r1+#0) = r0.new\n}",
+            "{\nr0 = add(r0,#1) ; r1 = add(r1,#2)\n}",
+        ] {
+            for bytes in assemble(text).unwrap() {
+                let p = decode(&bytes).unwrap();
+                assert_eq!(p.length, bytes.len());
+                assert_eq!(encode_packet(&p, None).unwrap(), bytes);
+                assert!(assemble(&p.format(0)).unwrap().contains(&bytes));
+            }
+        }
+        let t = Template::parse("{\nr0 = ##$value\n}").unwrap();
+        let bytes = t.encode(&[("value", 305419896)]).unwrap();
+        for b in bytes {
+            let (n, holes) = t.matches(&b).unwrap();
+            assert_eq!(n, b.len());
+            assert!(holes.contains(&("value".into(), 305419896)));
+        }
+    }
+    #[test]
+    fn rejects_bad_framing() {
+        assert!(decode(&[]).is_err());
+        assert!(decode(&[0, 0x40, 0, 0]).is_err());
+        assert!(decode(&[0, 0xc0, 0, 0]).is_err());
+        assert!(decode(&[0, 0x20, 0, 0xf0]).is_err());
+    }
+}
+
+fn packet_delimiter_index(text: &str, delimiter: &str) -> Option<usize> {
+    let mut depth = 0;
+    for (i, c) in text.char_indices() {
+        if depth == 0 && text[i..].starts_with(delimiter) {
+            return Some(i);
+        }
+        match c {
+            '{' | '[' | '(' => depth += 1,
+            '}' | ']' | ')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn packet_normalize_syntax(s: &str) -> String {
+    let mut out = String::new();
+    let mut hole = false;
+    for ch in s.chars() {
+        if ch == '{' {
+            hole = true;
+        }
+        if hole {
+            out.push(ch);
+        } else if !ch.is_whitespace() {
+            out.extend(ch.to_lowercase());
+        }
+        if ch == '}' {
+            hole = false;
+        }
+    }
+    out
+}
+
+// Packet parallelism/new-value dependencies require explicit packet semantics.
+impl Packet {
+    pub fn semantic_recipe(&self,address:u64)->semantics::Recipe {
+        semantics::Recipe::unsupported("Hexagon packet semantics are not audited scalar recipes",address.wrapping_add(self.length as u64),32)
+    }
+}

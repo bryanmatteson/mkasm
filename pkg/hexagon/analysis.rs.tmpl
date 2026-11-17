@@ -1,0 +1,111 @@
+
+fn packet_new_value_union_domain()->Domain{
+    let(mut min,mut max)=(i128::MAX,i128::MIN);
+    for(index,m)in PACKET_META.iter().enumerate(){for &producer in m.producers{
+        let o=&ENCODINGS[index].operands[producer];if matches!(o.class,"DoubleRegs"|"GeneralDoubleLow8Regs"){continue;}
+        let d=o.domain();let(lo,hi)=if o.class=="HvxWR"{(d.min&!1,d.max|1)}else{(d.min,d.max)};min=min.min(lo);max=max.max(hi);
+    }}
+    Domain{min,max,step:1,exact:false}
+}
+fn packet_operand_domain(i:&PacketInstruction,index:usize,history:&[PacketInstruction])->Domain{
+    if pm(i).new_value==index as isize{
+        let(mut min,mut max)=(i128::MAX,i128::MIN);
+        for p in history{for selector in 0..2{if let Some(value)=packet_producer(p,selector){let mut candidate=i.clone();candidate.decoded.values[index]=value;candidate.producer=None;if packet_new_value(&mut candidate,history,true).is_ok(){min=min.min(value);max=max.max(value);}}}}
+        Domain{min,max,step:1,exact:false}
+    }else if i.extended&&pm(i).extend==index as isize{Domain::new(i32::MIN as i128,u32::MAX as i128,1,false)}else{let mut d=i.encoding().operands[index].domain();d.exact&=i.encoding().constraints.is_empty();d}
+}
+fn packet_instruction_describe(i:&PacketInstruction,address:u64,history:&[PacketInstruction])->Described{
+    let e=i.encoding();let m=pm(i);let mut syntax=escaped_syntax(e.syntax);
+    if i.extended&&m.extend>=0{let hole=format!("{{{}}}",e.operands[m.extend as usize].name);if syntax.contains(&format!("#{hole}")){syntax=syntax.replace(&format!("#{hole}"),&format!("##{hole}"));}else{syntax=syntax.replace(&hole,&format!("##{hole}"));}}
+    let mut rest=syntax.as_str();let mut out=Described{text:String::new(),operands:Vec::new()};
+    while let Some(n)=rest.find('{'){
+        out.text.push_str(&packet_literal_syntax(&rest[..n]));rest=&rest[n+1..];let Some(end)=rest.find('}')else{out.text.push('{');out.text.push_str(rest);return out;};let name=&rest[..end];rest=&rest[end+1..];
+        if let Some(index)=e.operands.iter().position(|o|o.name==name){let o=&e.operands[index];let value=i.decoded.values[index];let start=out.text.len();let _=write_operand(&mut out.text,&i.decoded,o,value,address).expect("String formatting cannot fail");out.operands.push(OperandSpan{start,end:out.text.len(),encoding:e.id,instruction_index:0,operand_index:index,name:o.name,class:o.class,kind:o.kind,value,position:o.position(),domain:packet_operand_domain(i,index,history)});}else{out.text.push('{');out.text.push_str(name);out.text.push('}');}
+    }
+    out.text.push_str(&packet_literal_syntax(rest));out
+}
+fn packet_refresh_extenders(p:&mut Packet){
+    let mut pending=None;let mut changes=Vec::new();
+    for(w,word)in p.words.iter().enumerate(){for(i,instruction)in word.instructions.iter().enumerate(){if pm(instruction).extender{pending=Some((w,i));}else if instruction.extended{if let Some((w,i))=pending.take(){let m=pm(instruction);if m.extend>=0{changes.push((w,i,instruction.decoded.values[m.extend as usize] as u32&!63));}}}}}
+    for(w,i,value)in changes{p.words[w].instructions[i].decoded.values[0]=value as i128;}
+}
+pub fn describe(src:&[u8],address:u64)->Result<Described,Error>{describe_with_features(src,address,None)}
+pub fn describe_with_features(src:&[u8],address:u64,active:Option<&[&str]>)->Result<Described,Error>{Ok(decode_with_features(src,active)?.describe(address))}
+impl Packet {
+    pub fn describe(&self,address:u64)->Described{
+        let mut out=Described{text:"{\n  ".into(),operands:Vec::new()};let mut instruction=0;let mut history=Vec::new();
+        for(w,word)in self.words.iter().enumerate(){if w>0{out.text.push_str("\n  ");}for(i,d)in word.instructions.iter().enumerate(){if i>0{out.text.push_str(" ; ");}let mut part=packet_instruction_describe(d,address,&history);let offset=out.text.len();for s in &mut part.operands{s.start+=offset;s.end+=offset;s.instruction_index=instruction;}out.text.push_str(&part.text);out.operands.extend(part.operands);instruction+=1;history.push(d.clone());}}
+        out.text.push_str("\n}");if self.inner_loop{out.text.push_str(":endloop0");}if self.outer_loop{out.text.push_str(":endloop1");}out
+    }
+    pub fn encode_into(&self,output:&mut[u8])->Result<usize,Error>{let b=encode_packet(self,None)?;if output.len()<b.len(){return Err(Error::BufferTooSmall);}output[..b.len()].copy_from_slice(&b);Ok(b.len())}
+    pub fn set_operand(&mut self,instruction:usize,name:&str,value:i128)->Result<(),Error>{
+        let mut next=self.clone();let i=next.words.iter_mut().flat_map(|w|&mut w.instructions).nth(instruction).ok_or(Error::Operand)?;let n=i.encoding().operands.iter().position(|o|o.name==name).ok_or(Error::Operand)?;i.decoded.values[n]=value;if pm(i).new_value==n as isize{i.producer=None;}packet_refresh_extenders(&mut next);let b=encode_packet(&next,None)?;if self.length>0&&b.len()!=self.length{return Err(Error::Operand);}*self=next;Ok(())
+    }
+    pub fn relocated(&self,from:u64,to:u64)->Result<Self,Error>{
+        let mut next=self.clone();if from!=to{for i in next.words.iter_mut().flat_map(|w|&mut w.instructions){for(n,o)in i.encoding().operands.iter().enumerate(){if o.relative{let target=relative_target(o,i.decoded.values[n],from);i.decoded.values[n]=o.position().value_for_target(to,target).ok_or(Error::Operand)?;}}}}
+        packet_refresh_extenders(&mut next);let b=encode_packet(&next,None)?;if self.length>0&&b.len()!=self.length{return Err(Error::Operand);}Ok(next)
+    }
+    pub fn relocate_into(&self,from:u64,to:u64,output:&mut[u8])->Result<usize,Error>{self.relocated(from,to)?.encode_into(output)}
+}
+impl Template {
+    pub fn encodings(&self)->Vec<&'static str>{let mut out=Vec::new();for choices in &self.words{for c in choices{for(i,_,_)in &c.instructions{if !out.contains(&ENCODINGS[*i].id){out.push(ENCODINGS[*i].id);}}}}out}
+    pub fn holes(&self)->Vec<Hole>{
+        let mut out:Vec<Hole>=Vec::new();for choices in &self.words{for c in choices{for(i,bindings,extended)in &c.instructions{let t=WordTemplate{patterns:vec![(*i,bindings.clone())],address:0};let m=&PACKET_META[*i];for mut h in t.holes(){for d in &mut h.domains{if m.new_value>=0&&d.operand==ENCODINGS[*i].operands[m.new_value as usize].name{d.domain=packet_new_value_union_domain();}else if *extended&&m.extend>=0&&d.operand==ENCODINGS[*i].operands[m.extend as usize].name{d.domain=Domain::new(i32::MIN as i128,u32::MAX as i128,1,false);}}if let Some(old)=out.iter_mut().find(|old|old.name==h.name){for d in h.domains{if !old.domains.contains(&d){old.domains.push(d);}}}else{out.push(h);}}}}}out
+    }
+    pub fn hole_position(&self,index:usize)->Option<Position>{self.holes().get(index)?.position()}
+    /// Packet framing and extenders are contextual; this uses the complete matcher.
+    pub fn could_match(&self,src:&[u8])->bool{self.matches(src).is_some()}
+}
+#[cfg(test)]mod packet_analysis_tests{
+    use super::*;
+    #[test]
+    fn direct_call_positions_survive_templates_and_relocation() {
+        for (word, mnemonic) in [(0x5a00c006u32, "call"), (0x5d00c006, "if (p0) call"), (0x5d20c006, "if (!p0) call")] {
+            let bytes = word.to_le_bytes();
+            for (pc, target) in [(0x1000u64, 0x100cu64), (0xfffffff8, 4)] {
+                let packet = decode(&bytes).unwrap();
+                let description = packet.describe(pc);
+                assert!(description.text.contains(&format!("{mnemonic} 0x{target:x}")), "{}", description.text);
+                let targets = description.operands.iter().filter_map(|o| o.position.target(pc, o.value)).collect::<Vec<_>>();
+                assert_eq!(targets, [target]);
+                let template = Template::parse_at(&description.text, pc).unwrap();
+                assert!(template.could_match(&bytes));
+                assert!(template.encode(&[]).unwrap().contains(&bytes.to_vec()));
+                let moved = packet.relocated(pc, pc + 4).unwrap();
+                assert_eq!(moved.describe(pc + 4).operands.iter().filter_map(|o| o.position.target(pc + 4, o.value)).collect::<Vec<_>>(), targets);
+            }
+        }
+    }
+    #[test]
+    fn tied_packet_operand_holes_retain_literal_constraints() {
+        let bytes = [0x10, 0x20, 0x21, 0x20];
+        for source in ["{ ${Edit} = add(r0,#1) ; r1 = add(r1,#2) }", "{ r0 = add(${Edit},#1) ; r1 = add(r1,#2) }"] {
+            let template = Template::parse(source).unwrap();
+            assert_eq!(template.matches(&bytes).unwrap().1, [("Edit".into(), 0)]);
+            assert!(template.encode(&[("Edit", 0)]).unwrap().contains(&bytes.to_vec()));
+            // Other forms may encode the edit, but the tied instruction
+            // cannot discard the unchanged literal register.
+            for encoded in template.encode(&[("Edit", 1)]).unwrap() {
+                let packet = decode(&encoded).unwrap();
+                assert_ne!(packet.words[0].instructions[0].encoding().id, "SA1_addi");
+                assert_eq!(template.matches(&encoded).unwrap().1, [("Edit".into(), 1)]);
+            }
+        }
+        let template = Template::parse("{ ${Dst} = add(${Src},#1) ; r1 = add(r1,#2) }").unwrap();
+        let captures = template.matches(&bytes).unwrap().1;
+        assert!(captures.contains(&("Dst".into(), 0)) && captures.contains(&("Src".into(), 0)));
+        for encoded in template.encode(&[("Dst", 0), ("Src", 1)]).unwrap() {
+            let packet = decode(&encoded).unwrap();
+            assert_ne!(packet.words[0].instructions[0].encoding().id, "SA1_addi");
+            let captures = template.matches(&encoded).unwrap().1;
+            assert!(captures.contains(&("Dst".into(), 0)) && captures.contains(&("Src".into(), 1)));
+        }
+    }
+    #[test]fn packet_spans_extenders_and_relocation(){
+        for text in ["{\nr0 = #17\n}","{\nr0 = ##305419896\n}","{\nr0 = #1\nmemw(r1+#0) = r0.new\n}","{\nr0 = add(r0,#1) ; r1 = add(r1,#2)\n}","{\njump ##268435456\n}"]{
+            for b in assemble(text).unwrap(){let p=decode(&b).unwrap();let a=p.describe(0x1000);assert_eq!(a.text,p.format(0x1000));assert_eq!(a,describe(&b,0x1000).unwrap());for s in &a.operands{assert!(!a.text[s.start..s.end].is_empty());assert!(s.domain.contains(s.value));}let t=Template::parse_at(&a.text,0x1000).unwrap();assert!(t.could_match(&b));assert!(!t.encodings().is_empty());let mut output=[0xcc;16];assert_eq!(p.relocate_into(0x1000,0x1000,&mut output).unwrap(),b.len());assert_eq!(&output[..b.len()],b);let m=p.relocated(0x1000,0x1004).unwrap();let aa=m.describe(0x1004);let targets=a.operands.iter().filter_map(|s|s.position.target(0x1000,s.value)).collect::<Vec<_>>();let moved=aa.operands.iter().filter_map(|s|s.position.target(0x1004,s.value)).collect::<Vec<_>>();assert_eq!(targets,moved);assert_eq!(encode_packet(&m,None).unwrap().len(),b.len());}
+        }
+        let t=Template::parse("{\nr0 = ##$Value:integer\n}").unwrap();assert_eq!(t.holes()[0].name,"Value");assert!(t.holes()[0].domains.iter().all(|d|d.domain.contains(305419896)));for b in t.encode(&[("Value",305419896)]).unwrap(){assert!(t.could_match(&b));let mut p=decode(&b).unwrap();let s=p.describe(0).operands.into_iter().find(|s|s.value==305419896).unwrap();p.set_operand(s.instruction_index,s.name,305419960).unwrap();let encoded=encode_packet(&p,None).unwrap();assert!(decode(&encoded).unwrap().describe(0).operands.iter().any(|s|s.value==305419960));let before=encoded;assert!(p.set_operand(0,"missing",0).is_err());assert_eq!(encode_packet(&p,None).unwrap(),before);}
+        let b=[24,64,0,120,0,196,66,32];let mut p=decode(&b).unwrap();let a=p.describe(0x1000);let s=a.operands.iter().find(|s|PACKET_META[catalog_entry(s.encoding).unwrap().0].new_value==s.operand_index as isize).unwrap();assert_eq!(s.value,24);assert!(s.domain.contains(24));assert!(!s.domain.contains(31));let mut pattern=a.text.clone();pattern.replace_range(s.start..s.end,"${Produced:register}");let t=Template::parse_at(&pattern,0x1000).unwrap();let hole=t.holes().into_iter().find(|h|h.name=="Produced").unwrap();assert!(hole.domains.iter().all(|d|d.domain.contains(24)));let(_,values)=t.matches(&b).unwrap();assert!(values.contains(&("Produced".into(),24)));let bindings=values.iter().map(|(n,v)|(n.as_str(),*v)).collect::<Vec<_>>();assert!(t.encode(&bindings).unwrap().contains(&b.to_vec()));assert!(p.set_operand(s.instruction_index,s.name,31).is_err());assert_eq!(encode_packet(&p,None).unwrap(),b);
+    }
+}
