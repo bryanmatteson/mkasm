@@ -1,0 +1,3163 @@
+[
+  {
+    "id": "brk_00_Signature",
+    "profile": "6502",
+    "bytes": "0000",
+    "assembly": "brk\n.byte $00",
+    "assembler_bytes": "0000",
+    "da65": "brk",
+    "status": "documented"
+  },
+  {
+    "id": "ora_01_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "0144",
+    "assembly": "ora ($44,x)",
+    "assembler_bytes": "0144",
+    "da65": "ora     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "ora_05_Direct",
+    "profile": "6502",
+    "bytes": "0544",
+    "assembly": "ora $44",
+    "assembler_bytes": "0544",
+    "da65": "ora     $44",
+    "status": "documented"
+  },
+  {
+    "id": "asl_06_Direct",
+    "profile": "6502",
+    "bytes": "0644",
+    "assembly": "asl $44",
+    "assembler_bytes": "0644",
+    "da65": "asl     $44",
+    "status": "documented"
+  },
+  {
+    "id": "php_08_Implicit",
+    "profile": "6502",
+    "bytes": "08",
+    "assembly": "php",
+    "assembler_bytes": "08",
+    "da65": "php",
+    "status": "documented"
+  },
+  {
+    "id": "ora_09_Immediate",
+    "profile": "6502",
+    "bytes": "0944",
+    "assembly": "ora #68",
+    "assembler_bytes": "0944",
+    "da65": "ora     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "asl_0a_Accumulator",
+    "profile": "6502",
+    "bytes": "0a",
+    "assembly": "asl a",
+    "assembler_bytes": "0a",
+    "da65": "asl     a",
+    "status": "documented"
+  },
+  {
+    "id": "ora_0d_Absolute",
+    "profile": "6502",
+    "bytes": "0d3412",
+    "assembly": "ora $1234",
+    "assembler_bytes": "0d3412",
+    "da65": "ora     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "asl_0e_Absolute",
+    "profile": "6502",
+    "bytes": "0e3412",
+    "assembly": "asl $1234",
+    "assembler_bytes": "0e3412",
+    "da65": "asl     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "bpl_10_Relative",
+    "profile": "6502",
+    "bytes": "1008",
+    "assembly": "bpl current+10",
+    "assembler_bytes": "1008",
+    "da65": "bpl     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "ora_11_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "1144",
+    "assembly": "ora ($44),y",
+    "assembler_bytes": "1144",
+    "da65": "ora     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "ora_15_DirectX",
+    "profile": "6502",
+    "bytes": "1544",
+    "assembly": "ora $44,x",
+    "assembler_bytes": "1544",
+    "da65": "ora     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "asl_16_DirectX",
+    "profile": "6502",
+    "bytes": "1644",
+    "assembly": "asl $44,x",
+    "assembler_bytes": "1644",
+    "da65": "asl     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "clc_18_Implicit",
+    "profile": "6502",
+    "bytes": "18",
+    "assembly": "clc",
+    "assembler_bytes": "18",
+    "da65": "clc",
+    "status": "documented"
+  },
+  {
+    "id": "ora_19_AbsoluteY",
+    "profile": "6502",
+    "bytes": "193412",
+    "assembly": "ora $1234,y",
+    "assembler_bytes": "193412",
+    "da65": "ora     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "ora_1d_AbsoluteX",
+    "profile": "6502",
+    "bytes": "1d3412",
+    "assembly": "ora $1234,x",
+    "assembler_bytes": "1d3412",
+    "da65": "ora     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "asl_1e_AbsoluteX",
+    "profile": "6502",
+    "bytes": "1e3412",
+    "assembly": "asl $1234,x",
+    "assembler_bytes": "1e3412",
+    "da65": "asl     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "jsr_20_Absolute",
+    "profile": "6502",
+    "bytes": "203412",
+    "assembly": "jsr $1234",
+    "assembler_bytes": "203412",
+    "da65": "jsr     0x1234",
+    "status": "documented"
+  },
+  {
+    "id": "and_21_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "2144",
+    "assembly": "and ($44,x)",
+    "assembler_bytes": "2144",
+    "da65": "and     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "bit_24_Direct",
+    "profile": "6502",
+    "bytes": "2444",
+    "assembly": "bit $44",
+    "assembler_bytes": "2444",
+    "da65": "bit     $44",
+    "status": "documented"
+  },
+  {
+    "id": "and_25_Direct",
+    "profile": "6502",
+    "bytes": "2544",
+    "assembly": "and $44",
+    "assembler_bytes": "2544",
+    "da65": "and     $44",
+    "status": "documented"
+  },
+  {
+    "id": "rol_26_Direct",
+    "profile": "6502",
+    "bytes": "2644",
+    "assembly": "rol $44",
+    "assembler_bytes": "2644",
+    "da65": "rol     $44",
+    "status": "documented"
+  },
+  {
+    "id": "plp_28_Implicit",
+    "profile": "6502",
+    "bytes": "28",
+    "assembly": "plp",
+    "assembler_bytes": "28",
+    "da65": "plp",
+    "status": "documented"
+  },
+  {
+    "id": "and_29_Immediate",
+    "profile": "6502",
+    "bytes": "2944",
+    "assembly": "and #68",
+    "assembler_bytes": "2944",
+    "da65": "and     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "rol_2a_Accumulator",
+    "profile": "6502",
+    "bytes": "2a",
+    "assembly": "rol a",
+    "assembler_bytes": "2a",
+    "da65": "rol     a",
+    "status": "documented"
+  },
+  {
+    "id": "bit_2c_Absolute",
+    "profile": "6502",
+    "bytes": "2c3412",
+    "assembly": "bit $1234",
+    "assembler_bytes": "2c3412",
+    "da65": "bit     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "and_2d_Absolute",
+    "profile": "6502",
+    "bytes": "2d3412",
+    "assembly": "and $1234",
+    "assembler_bytes": "2d3412",
+    "da65": "and     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "rol_2e_Absolute",
+    "profile": "6502",
+    "bytes": "2e3412",
+    "assembly": "rol $1234",
+    "assembler_bytes": "2e3412",
+    "da65": "rol     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "bmi_30_Relative",
+    "profile": "6502",
+    "bytes": "3008",
+    "assembly": "bmi current+10",
+    "assembler_bytes": "3008",
+    "da65": "bmi     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "and_31_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "3144",
+    "assembly": "and ($44),y",
+    "assembler_bytes": "3144",
+    "da65": "and     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "and_35_DirectX",
+    "profile": "6502",
+    "bytes": "3544",
+    "assembly": "and $44,x",
+    "assembler_bytes": "3544",
+    "da65": "and     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "rol_36_DirectX",
+    "profile": "6502",
+    "bytes": "3644",
+    "assembly": "rol $44,x",
+    "assembler_bytes": "3644",
+    "da65": "rol     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "sec_38_Implicit",
+    "profile": "6502",
+    "bytes": "38",
+    "assembly": "sec",
+    "assembler_bytes": "38",
+    "da65": "sec",
+    "status": "documented"
+  },
+  {
+    "id": "and_39_AbsoluteY",
+    "profile": "6502",
+    "bytes": "393412",
+    "assembly": "and $1234,y",
+    "assembler_bytes": "393412",
+    "da65": "and     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "and_3d_AbsoluteX",
+    "profile": "6502",
+    "bytes": "3d3412",
+    "assembly": "and $1234,x",
+    "assembler_bytes": "3d3412",
+    "da65": "and     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "rol_3e_AbsoluteX",
+    "profile": "6502",
+    "bytes": "3e3412",
+    "assembly": "rol $1234,x",
+    "assembler_bytes": "3e3412",
+    "da65": "rol     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "rti_40_Implicit",
+    "profile": "6502",
+    "bytes": "40",
+    "assembly": "rti",
+    "assembler_bytes": "40",
+    "da65": "rti",
+    "status": "documented"
+  },
+  {
+    "id": "eor_41_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "4144",
+    "assembly": "eor ($44,x)",
+    "assembler_bytes": "4144",
+    "da65": "eor     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "eor_45_Direct",
+    "profile": "6502",
+    "bytes": "4544",
+    "assembly": "eor $44",
+    "assembler_bytes": "4544",
+    "da65": "eor     $44",
+    "status": "documented"
+  },
+  {
+    "id": "lsr_46_Direct",
+    "profile": "6502",
+    "bytes": "4644",
+    "assembly": "lsr $44",
+    "assembler_bytes": "4644",
+    "da65": "lsr     $44",
+    "status": "documented"
+  },
+  {
+    "id": "pha_48_Implicit",
+    "profile": "6502",
+    "bytes": "48",
+    "assembly": "pha",
+    "assembler_bytes": "48",
+    "da65": "pha",
+    "status": "documented"
+  },
+  {
+    "id": "eor_49_Immediate",
+    "profile": "6502",
+    "bytes": "4944",
+    "assembly": "eor #68",
+    "assembler_bytes": "4944",
+    "da65": "eor     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "lsr_4a_Accumulator",
+    "profile": "6502",
+    "bytes": "4a",
+    "assembly": "lsr a",
+    "assembler_bytes": "4a",
+    "da65": "lsr     a",
+    "status": "documented"
+  },
+  {
+    "id": "jmp_4c_Absolute",
+    "profile": "6502",
+    "bytes": "4c3412",
+    "assembly": "jmp $1234",
+    "assembler_bytes": "4c3412",
+    "da65": "jmp     0x1234",
+    "status": "documented"
+  },
+  {
+    "id": "eor_4d_Absolute",
+    "profile": "6502",
+    "bytes": "4d3412",
+    "assembly": "eor $1234",
+    "assembler_bytes": "4d3412",
+    "da65": "eor     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "lsr_4e_Absolute",
+    "profile": "6502",
+    "bytes": "4e3412",
+    "assembly": "lsr $1234",
+    "assembler_bytes": "4e3412",
+    "da65": "lsr     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "bvc_50_Relative",
+    "profile": "6502",
+    "bytes": "5008",
+    "assembly": "bvc current+10",
+    "assembler_bytes": "5008",
+    "da65": "bvc     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "eor_51_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "5144",
+    "assembly": "eor ($44),y",
+    "assembler_bytes": "5144",
+    "da65": "eor     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "eor_55_DirectX",
+    "profile": "6502",
+    "bytes": "5544",
+    "assembly": "eor $44,x",
+    "assembler_bytes": "5544",
+    "da65": "eor     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "lsr_56_DirectX",
+    "profile": "6502",
+    "bytes": "5644",
+    "assembly": "lsr $44,x",
+    "assembler_bytes": "5644",
+    "da65": "lsr     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "cli_58_Implicit",
+    "profile": "6502",
+    "bytes": "58",
+    "assembly": "cli",
+    "assembler_bytes": "58",
+    "da65": "cli",
+    "status": "documented"
+  },
+  {
+    "id": "eor_59_AbsoluteY",
+    "profile": "6502",
+    "bytes": "593412",
+    "assembly": "eor $1234,y",
+    "assembler_bytes": "593412",
+    "da65": "eor     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "eor_5d_AbsoluteX",
+    "profile": "6502",
+    "bytes": "5d3412",
+    "assembly": "eor $1234,x",
+    "assembler_bytes": "5d3412",
+    "da65": "eor     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "lsr_5e_AbsoluteX",
+    "profile": "6502",
+    "bytes": "5e3412",
+    "assembly": "lsr $1234,x",
+    "assembler_bytes": "5e3412",
+    "da65": "lsr     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "rts_60_Implicit",
+    "profile": "6502",
+    "bytes": "60",
+    "assembly": "rts",
+    "assembler_bytes": "60",
+    "da65": "rts",
+    "status": "documented"
+  },
+  {
+    "id": "adc_61_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "6144",
+    "assembly": "adc ($44,x)",
+    "assembler_bytes": "6144",
+    "da65": "adc     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "adc_65_Direct",
+    "profile": "6502",
+    "bytes": "6544",
+    "assembly": "adc $44",
+    "assembler_bytes": "6544",
+    "da65": "adc     $44",
+    "status": "documented"
+  },
+  {
+    "id": "ror_66_Direct",
+    "profile": "6502",
+    "bytes": "6644",
+    "assembly": "ror $44",
+    "assembler_bytes": "6644",
+    "da65": "ror     $44",
+    "status": "documented"
+  },
+  {
+    "id": "pla_68_Implicit",
+    "profile": "6502",
+    "bytes": "68",
+    "assembly": "pla",
+    "assembler_bytes": "68",
+    "da65": "pla",
+    "status": "documented"
+  },
+  {
+    "id": "adc_69_Immediate",
+    "profile": "6502",
+    "bytes": "6944",
+    "assembly": "adc #68",
+    "assembler_bytes": "6944",
+    "da65": "adc     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "ror_6a_Accumulator",
+    "profile": "6502",
+    "bytes": "6a",
+    "assembly": "ror a",
+    "assembler_bytes": "6a",
+    "da65": "ror     a",
+    "status": "documented"
+  },
+  {
+    "id": "jmp_6c_JmpAbsoluteIndirect",
+    "profile": "6502",
+    "bytes": "6c3412",
+    "assembly": "jmp ($1234)",
+    "assembler_bytes": "6c3412",
+    "da65": "jmp     (0x1234)",
+    "status": "documented"
+  },
+  {
+    "id": "adc_6d_Absolute",
+    "profile": "6502",
+    "bytes": "6d3412",
+    "assembly": "adc $1234",
+    "assembler_bytes": "6d3412",
+    "da65": "adc     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "ror_6e_Absolute",
+    "profile": "6502",
+    "bytes": "6e3412",
+    "assembly": "ror $1234",
+    "assembler_bytes": "6e3412",
+    "da65": "ror     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "bvs_70_Relative",
+    "profile": "6502",
+    "bytes": "7008",
+    "assembly": "bvs current+10",
+    "assembler_bytes": "7008",
+    "da65": "bvs     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "adc_71_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "7144",
+    "assembly": "adc ($44),y",
+    "assembler_bytes": "7144",
+    "da65": "adc     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "adc_75_DirectX",
+    "profile": "6502",
+    "bytes": "7544",
+    "assembly": "adc $44,x",
+    "assembler_bytes": "7544",
+    "da65": "adc     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "ror_76_DirectX",
+    "profile": "6502",
+    "bytes": "7644",
+    "assembly": "ror $44,x",
+    "assembler_bytes": "7644",
+    "da65": "ror     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "sei_78_Implicit",
+    "profile": "6502",
+    "bytes": "78",
+    "assembly": "sei",
+    "assembler_bytes": "78",
+    "da65": "sei",
+    "status": "documented"
+  },
+  {
+    "id": "adc_79_AbsoluteY",
+    "profile": "6502",
+    "bytes": "793412",
+    "assembly": "adc $1234,y",
+    "assembler_bytes": "793412",
+    "da65": "adc     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "adc_7d_AbsoluteX",
+    "profile": "6502",
+    "bytes": "7d3412",
+    "assembly": "adc $1234,x",
+    "assembler_bytes": "7d3412",
+    "da65": "adc     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "ror_7e_AbsoluteX",
+    "profile": "6502",
+    "bytes": "7e3412",
+    "assembly": "ror $1234,x",
+    "assembler_bytes": "7e3412",
+    "da65": "ror     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "sta_81_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "8144",
+    "assembly": "sta ($44,x)",
+    "assembler_bytes": "8144",
+    "da65": "sta     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "sty_84_Direct",
+    "profile": "6502",
+    "bytes": "8444",
+    "assembly": "sty $44",
+    "assembler_bytes": "8444",
+    "da65": "sty     $44",
+    "status": "documented"
+  },
+  {
+    "id": "sta_85_Direct",
+    "profile": "6502",
+    "bytes": "8544",
+    "assembly": "sta $44",
+    "assembler_bytes": "8544",
+    "da65": "sta     $44",
+    "status": "documented"
+  },
+  {
+    "id": "stx_86_Direct",
+    "profile": "6502",
+    "bytes": "8644",
+    "assembly": "stx $44",
+    "assembler_bytes": "8644",
+    "da65": "stx     $44",
+    "status": "documented"
+  },
+  {
+    "id": "dey_88_Implicit",
+    "profile": "6502",
+    "bytes": "88",
+    "assembly": "dey",
+    "assembler_bytes": "88",
+    "da65": "dey",
+    "status": "documented"
+  },
+  {
+    "id": "txa_8a_Implicit",
+    "profile": "6502",
+    "bytes": "8a",
+    "assembly": "txa",
+    "assembler_bytes": "8a",
+    "da65": "txa",
+    "status": "documented"
+  },
+  {
+    "id": "sty_8c_Absolute",
+    "profile": "6502",
+    "bytes": "8c3412",
+    "assembly": "sty $1234",
+    "assembler_bytes": "8c3412",
+    "da65": "sty     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "sta_8d_Absolute",
+    "profile": "6502",
+    "bytes": "8d3412",
+    "assembly": "sta $1234",
+    "assembler_bytes": "8d3412",
+    "da65": "sta     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "stx_8e_Absolute",
+    "profile": "6502",
+    "bytes": "8e3412",
+    "assembly": "stx $1234",
+    "assembler_bytes": "8e3412",
+    "da65": "stx     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "bcc_90_Relative",
+    "profile": "6502",
+    "bytes": "9008",
+    "assembly": "bcc current+10",
+    "assembler_bytes": "9008",
+    "da65": "bcc     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "sta_91_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "9144",
+    "assembly": "sta ($44),y",
+    "assembler_bytes": "9144",
+    "da65": "sta     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "sty_94_DirectX",
+    "profile": "6502",
+    "bytes": "9444",
+    "assembly": "sty $44,x",
+    "assembler_bytes": "9444",
+    "da65": "sty     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "sta_95_DirectX",
+    "profile": "6502",
+    "bytes": "9544",
+    "assembly": "sta $44,x",
+    "assembler_bytes": "9544",
+    "da65": "sta     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "stx_96_DirectY",
+    "profile": "6502",
+    "bytes": "9644",
+    "assembly": "stx $44,y",
+    "assembler_bytes": "9644",
+    "da65": "stx     $44,y",
+    "status": "documented"
+  },
+  {
+    "id": "tya_98_Implicit",
+    "profile": "6502",
+    "bytes": "98",
+    "assembly": "tya",
+    "assembler_bytes": "98",
+    "da65": "tya",
+    "status": "documented"
+  },
+  {
+    "id": "sta_99_AbsoluteY",
+    "profile": "6502",
+    "bytes": "993412",
+    "assembly": "sta $1234,y",
+    "assembler_bytes": "993412",
+    "da65": "sta     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "txs_9a_Implicit",
+    "profile": "6502",
+    "bytes": "9a",
+    "assembly": "txs",
+    "assembler_bytes": "9a",
+    "da65": "txs",
+    "status": "documented"
+  },
+  {
+    "id": "sta_9d_AbsoluteX",
+    "profile": "6502",
+    "bytes": "9d3412",
+    "assembly": "sta $1234,x",
+    "assembler_bytes": "9d3412",
+    "da65": "sta     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "ldy_a0_Immediate",
+    "profile": "6502",
+    "bytes": "a044",
+    "assembly": "ldy #68",
+    "assembler_bytes": "a044",
+    "da65": "ldy     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "lda_a1_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "a144",
+    "assembly": "lda ($44,x)",
+    "assembler_bytes": "a144",
+    "da65": "lda     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "ldx_a2_Immediate",
+    "profile": "6502",
+    "bytes": "a244",
+    "assembly": "ldx #68",
+    "assembler_bytes": "a244",
+    "da65": "ldx     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "ldy_a4_Direct",
+    "profile": "6502",
+    "bytes": "a444",
+    "assembly": "ldy $44",
+    "assembler_bytes": "a444",
+    "da65": "ldy     $44",
+    "status": "documented"
+  },
+  {
+    "id": "lda_a5_Direct",
+    "profile": "6502",
+    "bytes": "a544",
+    "assembly": "lda $44",
+    "assembler_bytes": "a544",
+    "da65": "lda     $44",
+    "status": "documented"
+  },
+  {
+    "id": "ldx_a6_Direct",
+    "profile": "6502",
+    "bytes": "a644",
+    "assembly": "ldx $44",
+    "assembler_bytes": "a644",
+    "da65": "ldx     $44",
+    "status": "documented"
+  },
+  {
+    "id": "tay_a8_Implicit",
+    "profile": "6502",
+    "bytes": "a8",
+    "assembly": "tay",
+    "assembler_bytes": "a8",
+    "da65": "tay",
+    "status": "documented"
+  },
+  {
+    "id": "lda_a9_Immediate",
+    "profile": "6502",
+    "bytes": "a944",
+    "assembly": "lda #68",
+    "assembler_bytes": "a944",
+    "da65": "lda     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "tax_aa_Implicit",
+    "profile": "6502",
+    "bytes": "aa",
+    "assembly": "tax",
+    "assembler_bytes": "aa",
+    "da65": "tax",
+    "status": "documented"
+  },
+  {
+    "id": "ldy_ac_Absolute",
+    "profile": "6502",
+    "bytes": "ac3412",
+    "assembly": "ldy $1234",
+    "assembler_bytes": "ac3412",
+    "da65": "ldy     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "lda_ad_Absolute",
+    "profile": "6502",
+    "bytes": "ad3412",
+    "assembly": "lda $1234",
+    "assembler_bytes": "ad3412",
+    "da65": "lda     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "ldx_ae_Absolute",
+    "profile": "6502",
+    "bytes": "ae3412",
+    "assembly": "ldx $1234",
+    "assembler_bytes": "ae3412",
+    "da65": "ldx     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "bcs_b0_Relative",
+    "profile": "6502",
+    "bytes": "b008",
+    "assembly": "bcs current+10",
+    "assembler_bytes": "b008",
+    "da65": "bcs     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "lda_b1_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "b144",
+    "assembly": "lda ($44),y",
+    "assembler_bytes": "b144",
+    "da65": "lda     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "ldy_b4_DirectX",
+    "profile": "6502",
+    "bytes": "b444",
+    "assembly": "ldy $44,x",
+    "assembler_bytes": "b444",
+    "da65": "ldy     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "lda_b5_DirectX",
+    "profile": "6502",
+    "bytes": "b544",
+    "assembly": "lda $44,x",
+    "assembler_bytes": "b544",
+    "da65": "lda     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "ldx_b6_DirectY",
+    "profile": "6502",
+    "bytes": "b644",
+    "assembly": "ldx $44,y",
+    "assembler_bytes": "b644",
+    "da65": "ldx     $44,y",
+    "status": "documented"
+  },
+  {
+    "id": "clv_b8_Implicit",
+    "profile": "6502",
+    "bytes": "b8",
+    "assembly": "clv",
+    "assembler_bytes": "b8",
+    "da65": "clv",
+    "status": "documented"
+  },
+  {
+    "id": "lda_b9_AbsoluteY",
+    "profile": "6502",
+    "bytes": "b93412",
+    "assembly": "lda $1234,y",
+    "assembler_bytes": "b93412",
+    "da65": "lda     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "tsx_ba_Implicit",
+    "profile": "6502",
+    "bytes": "ba",
+    "assembly": "tsx",
+    "assembler_bytes": "ba",
+    "da65": "tsx",
+    "status": "documented"
+  },
+  {
+    "id": "ldy_bc_AbsoluteX",
+    "profile": "6502",
+    "bytes": "bc3412",
+    "assembly": "ldy $1234,x",
+    "assembler_bytes": "bc3412",
+    "da65": "ldy     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "lda_bd_AbsoluteX",
+    "profile": "6502",
+    "bytes": "bd3412",
+    "assembly": "lda $1234,x",
+    "assembler_bytes": "bd3412",
+    "da65": "lda     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "ldx_be_AbsoluteY",
+    "profile": "6502",
+    "bytes": "be3412",
+    "assembly": "ldx $1234,y",
+    "assembler_bytes": "be3412",
+    "da65": "ldx     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "cpy_c0_Immediate",
+    "profile": "6502",
+    "bytes": "c044",
+    "assembly": "cpy #68",
+    "assembler_bytes": "c044",
+    "da65": "cpy     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_c1_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "c144",
+    "assembly": "cmp ($44,x)",
+    "assembler_bytes": "c144",
+    "da65": "cmp     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "cpy_c4_Direct",
+    "profile": "6502",
+    "bytes": "c444",
+    "assembly": "cpy $44",
+    "assembler_bytes": "c444",
+    "da65": "cpy     $44",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_c5_Direct",
+    "profile": "6502",
+    "bytes": "c544",
+    "assembly": "cmp $44",
+    "assembler_bytes": "c544",
+    "da65": "cmp     $44",
+    "status": "documented"
+  },
+  {
+    "id": "dec_c6_Direct",
+    "profile": "6502",
+    "bytes": "c644",
+    "assembly": "dec $44",
+    "assembler_bytes": "c644",
+    "da65": "dec     $44",
+    "status": "documented"
+  },
+  {
+    "id": "iny_c8_Implicit",
+    "profile": "6502",
+    "bytes": "c8",
+    "assembly": "iny",
+    "assembler_bytes": "c8",
+    "da65": "iny",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_c9_Immediate",
+    "profile": "6502",
+    "bytes": "c944",
+    "assembly": "cmp #68",
+    "assembler_bytes": "c944",
+    "da65": "cmp     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "dex_ca_Implicit",
+    "profile": "6502",
+    "bytes": "ca",
+    "assembly": "dex",
+    "assembler_bytes": "ca",
+    "da65": "dex",
+    "status": "documented"
+  },
+  {
+    "id": "cpy_cc_Absolute",
+    "profile": "6502",
+    "bytes": "cc3412",
+    "assembly": "cpy $1234",
+    "assembler_bytes": "cc3412",
+    "da65": "cpy     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_cd_Absolute",
+    "profile": "6502",
+    "bytes": "cd3412",
+    "assembly": "cmp $1234",
+    "assembler_bytes": "cd3412",
+    "da65": "cmp     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "dec_ce_Absolute",
+    "profile": "6502",
+    "bytes": "ce3412",
+    "assembly": "dec $1234",
+    "assembler_bytes": "ce3412",
+    "da65": "dec     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "bne_d0_Relative",
+    "profile": "6502",
+    "bytes": "d008",
+    "assembly": "bne current+10",
+    "assembler_bytes": "d008",
+    "da65": "bne     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_d1_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "d144",
+    "assembly": "cmp ($44),y",
+    "assembler_bytes": "d144",
+    "da65": "cmp     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_d5_DirectX",
+    "profile": "6502",
+    "bytes": "d544",
+    "assembly": "cmp $44,x",
+    "assembler_bytes": "d544",
+    "da65": "cmp     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "dec_d6_DirectX",
+    "profile": "6502",
+    "bytes": "d644",
+    "assembly": "dec $44,x",
+    "assembler_bytes": "d644",
+    "da65": "dec     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "cld_d8_Implicit",
+    "profile": "6502",
+    "bytes": "d8",
+    "assembly": "cld",
+    "assembler_bytes": "d8",
+    "da65": "cld",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_d9_AbsoluteY",
+    "profile": "6502",
+    "bytes": "d93412",
+    "assembly": "cmp $1234,y",
+    "assembler_bytes": "d93412",
+    "da65": "cmp     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_dd_AbsoluteX",
+    "profile": "6502",
+    "bytes": "dd3412",
+    "assembly": "cmp $1234,x",
+    "assembler_bytes": "dd3412",
+    "da65": "cmp     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "dec_de_AbsoluteX",
+    "profile": "6502",
+    "bytes": "de3412",
+    "assembly": "dec $1234,x",
+    "assembler_bytes": "de3412",
+    "da65": "dec     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "cpx_e0_Immediate",
+    "profile": "6502",
+    "bytes": "e044",
+    "assembly": "cpx #68",
+    "assembler_bytes": "e044",
+    "da65": "cpx     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_e1_DirectXIndirect",
+    "profile": "6502",
+    "bytes": "e144",
+    "assembly": "sbc ($44,x)",
+    "assembler_bytes": "e144",
+    "da65": "sbc     ($44,x)",
+    "status": "documented"
+  },
+  {
+    "id": "cpx_e4_Direct",
+    "profile": "6502",
+    "bytes": "e444",
+    "assembly": "cpx $44",
+    "assembler_bytes": "e444",
+    "da65": "cpx     $44",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_e5_Direct",
+    "profile": "6502",
+    "bytes": "e544",
+    "assembly": "sbc $44",
+    "assembler_bytes": "e544",
+    "da65": "sbc     $44",
+    "status": "documented"
+  },
+  {
+    "id": "inc_e6_Direct",
+    "profile": "6502",
+    "bytes": "e644",
+    "assembly": "inc $44",
+    "assembler_bytes": "e644",
+    "da65": "inc     $44",
+    "status": "documented"
+  },
+  {
+    "id": "inx_e8_Implicit",
+    "profile": "6502",
+    "bytes": "e8",
+    "assembly": "inx",
+    "assembler_bytes": "e8",
+    "da65": "inx",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_e9_Immediate",
+    "profile": "6502",
+    "bytes": "e944",
+    "assembly": "sbc #68",
+    "assembler_bytes": "e944",
+    "da65": "sbc     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "nop_ea_Implicit",
+    "profile": "6502",
+    "bytes": "ea",
+    "assembly": "nop",
+    "assembler_bytes": "ea",
+    "da65": "nop",
+    "status": "documented"
+  },
+  {
+    "id": "cpx_ec_Absolute",
+    "profile": "6502",
+    "bytes": "ec3412",
+    "assembly": "cpx $1234",
+    "assembler_bytes": "ec3412",
+    "da65": "cpx     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_ed_Absolute",
+    "profile": "6502",
+    "bytes": "ed3412",
+    "assembly": "sbc $1234",
+    "assembler_bytes": "ed3412",
+    "da65": "sbc     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "inc_ee_Absolute",
+    "profile": "6502",
+    "bytes": "ee3412",
+    "assembly": "inc $1234",
+    "assembler_bytes": "ee3412",
+    "da65": "inc     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "beq_f0_Relative",
+    "profile": "6502",
+    "bytes": "f008",
+    "assembly": "beq current+10",
+    "assembler_bytes": "f008",
+    "da65": "beq     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_f1_DirectIndirectY",
+    "profile": "6502",
+    "bytes": "f144",
+    "assembly": "sbc ($44),y",
+    "assembler_bytes": "f144",
+    "da65": "sbc     ($44),y",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_f5_DirectX",
+    "profile": "6502",
+    "bytes": "f544",
+    "assembly": "sbc $44,x",
+    "assembler_bytes": "f544",
+    "da65": "sbc     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "inc_f6_DirectX",
+    "profile": "6502",
+    "bytes": "f644",
+    "assembly": "inc $44,x",
+    "assembler_bytes": "f644",
+    "da65": "inc     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "sed_f8_Implicit",
+    "profile": "6502",
+    "bytes": "f8",
+    "assembly": "sed",
+    "assembler_bytes": "f8",
+    "da65": "sed",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_f9_AbsoluteY",
+    "profile": "6502",
+    "bytes": "f93412",
+    "assembly": "sbc $1234,y",
+    "assembler_bytes": "f93412",
+    "da65": "sbc     $1234,y",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_fd_AbsoluteX",
+    "profile": "6502",
+    "bytes": "fd3412",
+    "assembly": "sbc $1234,x",
+    "assembler_bytes": "fd3412",
+    "da65": "sbc     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "inc_fe_AbsoluteX",
+    "profile": "6502",
+    "bytes": "fe3412",
+    "assembly": "inc $1234,x",
+    "assembler_bytes": "fe3412",
+    "da65": "inc     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "jam_02_Implicit",
+    "profile": "6502x",
+    "bytes": "02",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "slo_03_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "0344",
+    "assembly": "slo ($44,x)",
+    "assembler_bytes": "0344",
+    "da65": "slo     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_04_Direct",
+    "profile": "6502x",
+    "bytes": "0444",
+    "assembly": "nop $44",
+    "assembler_bytes": "0444",
+    "da65": "nop     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "slo_07_Direct",
+    "profile": "6502x",
+    "bytes": "0744",
+    "assembly": "slo $44",
+    "assembler_bytes": "0744",
+    "da65": "slo     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "anc_0b_Immediate",
+    "profile": "6502x",
+    "bytes": "0b44",
+    "assembly": "anc #68",
+    "assembler_bytes": "0b44",
+    "da65": "anc     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_0c_Absolute",
+    "profile": "6502x",
+    "bytes": "0c3412",
+    "assembly": "nop $1234",
+    "assembler_bytes": "0c3412",
+    "da65": "nop     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "slo_0f_Absolute",
+    "profile": "6502x",
+    "bytes": "0f3412",
+    "assembly": "slo $1234",
+    "assembler_bytes": "0f3412",
+    "da65": "slo     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_12_Implicit",
+    "profile": "6502x",
+    "bytes": "12",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "slo_13_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "1344",
+    "assembly": "slo ($44),y",
+    "assembler_bytes": "1344",
+    "da65": "slo     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_14_DirectX",
+    "profile": "6502x",
+    "bytes": "1444",
+    "assembly": "nop $44,x",
+    "assembler_bytes": "1444",
+    "da65": "nop     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "slo_17_DirectX",
+    "profile": "6502x",
+    "bytes": "1744",
+    "assembly": "slo $44,x",
+    "assembler_bytes": "1744",
+    "da65": "slo     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_1a_Implicit",
+    "profile": "6502x",
+    "bytes": "1a",
+    "assembly": "nop",
+    "assembler_bytes": "ea",
+    "da65": "nop",
+    "status": "undocumented"
+  },
+  {
+    "id": "slo_1b_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "1b3412",
+    "assembly": "slo $1234,y",
+    "assembler_bytes": "1b3412",
+    "da65": "slo     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_1c_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "1c3412",
+    "assembly": "nop $1234,x",
+    "assembler_bytes": "1c3412",
+    "da65": "nop     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "slo_1f_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "1f3412",
+    "assembly": "slo $1234,x",
+    "assembler_bytes": "1f3412",
+    "da65": "slo     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_22_Implicit",
+    "profile": "6502x",
+    "bytes": "22",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "rla_23_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "2344",
+    "assembly": "rla ($44,x)",
+    "assembler_bytes": "2344",
+    "da65": "rla     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "rla_27_Direct",
+    "profile": "6502x",
+    "bytes": "2744",
+    "assembly": "rla $44",
+    "assembler_bytes": "2744",
+    "da65": "rla     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "anc_2b_Immediate",
+    "profile": "6502x",
+    "bytes": "2b44",
+    "assembly": "anc #68",
+    "assembler_bytes": "0b44",
+    "da65": "anc     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "rla_2f_Absolute",
+    "profile": "6502x",
+    "bytes": "2f3412",
+    "assembly": "rla $1234",
+    "assembler_bytes": "2f3412",
+    "da65": "rla     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_32_Implicit",
+    "profile": "6502x",
+    "bytes": "32",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "rla_33_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "3344",
+    "assembly": "rla ($44),y",
+    "assembler_bytes": "3344",
+    "da65": "rla     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_34_DirectX",
+    "profile": "6502x",
+    "bytes": "3444",
+    "assembly": "nop $44,x",
+    "assembler_bytes": "1444",
+    "da65": "nop     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "rla_37_DirectX",
+    "profile": "6502x",
+    "bytes": "3744",
+    "assembly": "rla $44,x",
+    "assembler_bytes": "3744",
+    "da65": "rla     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_3a_Implicit",
+    "profile": "6502x",
+    "bytes": "3a",
+    "assembly": "nop",
+    "assembler_bytes": "ea",
+    "da65": "nop",
+    "status": "undocumented"
+  },
+  {
+    "id": "rla_3b_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "3b3412",
+    "assembly": "rla $1234,y",
+    "assembler_bytes": "3b3412",
+    "da65": "rla     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_3c_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "3c3412",
+    "assembly": "nop $1234,x",
+    "assembler_bytes": "1c3412",
+    "da65": "nop     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "rla_3f_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "3f3412",
+    "assembly": "rla $1234,x",
+    "assembler_bytes": "3f3412",
+    "da65": "rla     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_42_Implicit",
+    "profile": "6502x",
+    "bytes": "42",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "sre_43_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "4344",
+    "assembly": "sre ($44,x)",
+    "assembler_bytes": "4344",
+    "da65": "sre     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_44_Direct",
+    "profile": "6502x",
+    "bytes": "4444",
+    "assembly": "nop $44",
+    "assembler_bytes": "0444",
+    "da65": "nop     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "sre_47_Direct",
+    "profile": "6502x",
+    "bytes": "4744",
+    "assembly": "sre $44",
+    "assembler_bytes": "4744",
+    "da65": "sre     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "alr_4b_Immediate",
+    "profile": "6502x",
+    "bytes": "4b44",
+    "assembly": "alr #68",
+    "assembler_bytes": "4b44",
+    "da65": "alr     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "sre_4f_Absolute",
+    "profile": "6502x",
+    "bytes": "4f3412",
+    "assembly": "sre $1234",
+    "assembler_bytes": "4f3412",
+    "da65": "sre     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_52_Implicit",
+    "profile": "6502x",
+    "bytes": "52",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "sre_53_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "5344",
+    "assembly": "sre ($44),y",
+    "assembler_bytes": "5344",
+    "da65": "sre     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_54_DirectX",
+    "profile": "6502x",
+    "bytes": "5444",
+    "assembly": "nop $44,x",
+    "assembler_bytes": "1444",
+    "da65": "nop     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "sre_57_DirectX",
+    "profile": "6502x",
+    "bytes": "5744",
+    "assembly": "sre $44,x",
+    "assembler_bytes": "5744",
+    "da65": "sre     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_5a_Implicit",
+    "profile": "6502x",
+    "bytes": "5a",
+    "assembly": "nop",
+    "assembler_bytes": "ea",
+    "da65": "nop",
+    "status": "undocumented"
+  },
+  {
+    "id": "sre_5b_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "5b3412",
+    "assembly": "sre $1234,y",
+    "assembler_bytes": "5b3412",
+    "da65": "sre     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_5c_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "5c3412",
+    "assembly": "nop $1234,x",
+    "assembler_bytes": "1c3412",
+    "da65": "nop     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "sre_5f_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "5f3412",
+    "assembly": "sre $1234,x",
+    "assembler_bytes": "5f3412",
+    "da65": "sre     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_62_Implicit",
+    "profile": "6502x",
+    "bytes": "62",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "rra_63_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "6344",
+    "assembly": "rra ($44,x)",
+    "assembler_bytes": "6344",
+    "da65": "rra     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_64_Direct",
+    "profile": "6502x",
+    "bytes": "6444",
+    "assembly": "nop $44",
+    "assembler_bytes": "0444",
+    "da65": "nop     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "rra_67_Direct",
+    "profile": "6502x",
+    "bytes": "6744",
+    "assembly": "rra $44",
+    "assembler_bytes": "6744",
+    "da65": "rra     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "arr_6b_Immediate",
+    "profile": "6502x",
+    "bytes": "6b44",
+    "assembly": "arr #68",
+    "assembler_bytes": "6b44",
+    "da65": "arr     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "rra_6f_Absolute",
+    "profile": "6502x",
+    "bytes": "6f3412",
+    "assembly": "rra $1234",
+    "assembler_bytes": "6f3412",
+    "da65": "rra     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_72_Implicit",
+    "profile": "6502x",
+    "bytes": "72",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "rra_73_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "7344",
+    "assembly": "rra ($44),y",
+    "assembler_bytes": "7344",
+    "da65": "rra     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_74_DirectX",
+    "profile": "6502x",
+    "bytes": "7444",
+    "assembly": "nop $44,x",
+    "assembler_bytes": "1444",
+    "da65": "nop     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "rra_77_DirectX",
+    "profile": "6502x",
+    "bytes": "7744",
+    "assembly": "rra $44,x",
+    "assembler_bytes": "7744",
+    "da65": "rra     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_7a_Implicit",
+    "profile": "6502x",
+    "bytes": "7a",
+    "assembly": "nop",
+    "assembler_bytes": "ea",
+    "da65": "nop",
+    "status": "undocumented"
+  },
+  {
+    "id": "rra_7b_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "7b3412",
+    "assembly": "rra $1234,y",
+    "assembler_bytes": "7b3412",
+    "da65": "rra     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_7c_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "7c3412",
+    "assembly": "nop $1234,x",
+    "assembler_bytes": "1c3412",
+    "da65": "nop     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "rra_7f_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "7f3412",
+    "assembly": "rra $1234,x",
+    "assembler_bytes": "7f3412",
+    "da65": "rra     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_80_Immediate",
+    "profile": "6502x",
+    "bytes": "8044",
+    "assembly": "nop #68",
+    "assembler_bytes": "8044",
+    "da65": "nop     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_82_Immediate",
+    "profile": "6502x",
+    "bytes": "8244",
+    "assembly": "nop #68",
+    "assembler_bytes": "8044",
+    "da65": "nop     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "sax_83_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "8344",
+    "assembly": "sax ($44,x)",
+    "assembler_bytes": "8344",
+    "da65": "sax     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "sax_87_Direct",
+    "profile": "6502x",
+    "bytes": "8744",
+    "assembly": "sax $44",
+    "assembler_bytes": "8744",
+    "da65": "sax     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_89_Immediate",
+    "profile": "6502x",
+    "bytes": "8944",
+    "assembly": "nop #68",
+    "assembler_bytes": "8044",
+    "da65": "nop     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "xaa_8b_Immediate",
+    "profile": "6502x",
+    "bytes": "8b44",
+    "assembly": "ane #68",
+    "assembler_bytes": "8b44",
+    "da65": "xaa     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "sax_8f_Absolute",
+    "profile": "6502x",
+    "bytes": "8f3412",
+    "assembly": "sax $1234",
+    "assembler_bytes": "8f3412",
+    "da65": "sax     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_92_Implicit",
+    "profile": "6502x",
+    "bytes": "92",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "ahx_93_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "9344",
+    "assembly": "sha ($44),y",
+    "assembler_bytes": "9344",
+    "da65": "ahx     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "sax_97_DirectY",
+    "profile": "6502x",
+    "bytes": "9744",
+    "assembly": "sax $44,y",
+    "assembler_bytes": "9744",
+    "da65": "sax     $44,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "tas_9b_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "9b3412",
+    "assembly": "tas $1234,y",
+    "assembler_bytes": "9b3412",
+    "da65": "tas     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "shy_9c_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "9c3412",
+    "assembly": "shy $1234,x",
+    "assembler_bytes": "9c3412",
+    "da65": "shy     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "shx_9e_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "9e3412",
+    "assembly": "shx $1234,y",
+    "assembler_bytes": "9e3412",
+    "da65": "shx     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "ahx_9f_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "9f3412",
+    "assembly": "sha $1234,y",
+    "assembler_bytes": "9f3412",
+    "da65": "ahx     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "lax_a3_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "a344",
+    "assembly": "lax ($44,x)",
+    "assembler_bytes": "a344",
+    "da65": "lax     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "lax_a7_Direct",
+    "profile": "6502x",
+    "bytes": "a744",
+    "assembly": "lax $44",
+    "assembler_bytes": "a744",
+    "da65": "lax     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "lax_ab_Immediate",
+    "profile": "6502x",
+    "bytes": "ab44",
+    "assembly": "lax #68",
+    "assembler_bytes": "ab44",
+    "da65": "lax     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "lax_af_Absolute",
+    "profile": "6502x",
+    "bytes": "af3412",
+    "assembly": "lax $1234",
+    "assembler_bytes": "af3412",
+    "da65": "lax     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_b2_Implicit",
+    "profile": "6502x",
+    "bytes": "b2",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "lax_b3_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "b344",
+    "assembly": "lax ($44),y",
+    "assembler_bytes": "b344",
+    "da65": "lax     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "lax_b7_DirectY",
+    "profile": "6502x",
+    "bytes": "b744",
+    "assembly": "lax $44,y",
+    "assembler_bytes": "b744",
+    "da65": "lax     $44,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "las_bb_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "bb3412",
+    "assembly": "las $1234,y",
+    "assembler_bytes": "bb3412",
+    "da65": "las     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "lax_bf_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "bf3412",
+    "assembly": "lax $1234,y",
+    "assembler_bytes": "bf3412",
+    "da65": "lax     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_c2_Immediate",
+    "profile": "6502x",
+    "bytes": "c244",
+    "assembly": "nop #68",
+    "assembler_bytes": "8044",
+    "da65": "nop     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "dcp_c3_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "c344",
+    "assembly": "dcp ($44,x)",
+    "assembler_bytes": "c344",
+    "da65": "dcp     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "dcp_c7_Direct",
+    "profile": "6502x",
+    "bytes": "c744",
+    "assembly": "dcp $44",
+    "assembler_bytes": "c744",
+    "da65": "dcp     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "axs_cb_Immediate",
+    "profile": "6502x",
+    "bytes": "cb44",
+    "assembly": "axs #68",
+    "assembler_bytes": "cb44",
+    "da65": "axs     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "dcp_cf_Absolute",
+    "profile": "6502x",
+    "bytes": "cf3412",
+    "assembly": "dcp $1234",
+    "assembler_bytes": "cf3412",
+    "da65": "dcp     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_d2_Implicit",
+    "profile": "6502x",
+    "bytes": "d2",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "dcp_d3_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "d344",
+    "assembly": "dcp ($44),y",
+    "assembler_bytes": "d344",
+    "da65": "dcp     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_d4_DirectX",
+    "profile": "6502x",
+    "bytes": "d444",
+    "assembly": "nop $44,x",
+    "assembler_bytes": "1444",
+    "da65": "nop     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "dcp_d7_DirectX",
+    "profile": "6502x",
+    "bytes": "d744",
+    "assembly": "dcp $44,x",
+    "assembler_bytes": "d744",
+    "da65": "dcp     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_da_Implicit",
+    "profile": "6502x",
+    "bytes": "da",
+    "assembly": "nop",
+    "assembler_bytes": "ea",
+    "da65": "nop",
+    "status": "undocumented"
+  },
+  {
+    "id": "dcp_db_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "db3412",
+    "assembly": "dcp $1234,y",
+    "assembler_bytes": "db3412",
+    "da65": "dcp     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_dc_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "dc3412",
+    "assembly": "nop $1234,x",
+    "assembler_bytes": "1c3412",
+    "da65": "nop     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "dcp_df_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "df3412",
+    "assembly": "dcp $1234,x",
+    "assembler_bytes": "df3412",
+    "da65": "dcp     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_e2_Immediate",
+    "profile": "6502x",
+    "bytes": "e244",
+    "assembly": "nop #68",
+    "assembler_bytes": "8044",
+    "da65": "nop     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "isc_e3_DirectXIndirect",
+    "profile": "6502x",
+    "bytes": "e344",
+    "assembly": "isc ($44,x)",
+    "assembler_bytes": "e344",
+    "da65": "isc     ($44,x)",
+    "status": "undocumented"
+  },
+  {
+    "id": "isc_e7_Direct",
+    "profile": "6502x",
+    "bytes": "e744",
+    "assembly": "isc $44",
+    "assembler_bytes": "e744",
+    "da65": "isc     $44",
+    "status": "undocumented"
+  },
+  {
+    "id": "sbc_eb_Immediate",
+    "profile": "6502x",
+    "bytes": "eb44",
+    "assembly": "sbc #68",
+    "assembler_bytes": "e944",
+    "da65": "sbc     #$44",
+    "status": "undocumented"
+  },
+  {
+    "id": "isc_ef_Absolute",
+    "profile": "6502x",
+    "bytes": "ef3412",
+    "assembly": "isc $1234",
+    "assembler_bytes": "ef3412",
+    "da65": "isc     $1234",
+    "status": "undocumented"
+  },
+  {
+    "id": "jam_f2_Implicit",
+    "profile": "6502x",
+    "bytes": "f2",
+    "assembly": "jam",
+    "assembler_bytes": "02",
+    "da65": "jam",
+    "status": "undocumented"
+  },
+  {
+    "id": "isc_f3_DirectIndirectY",
+    "profile": "6502x",
+    "bytes": "f344",
+    "assembly": "isc ($44),y",
+    "assembler_bytes": "f344",
+    "da65": "isc     ($44),y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_f4_DirectX",
+    "profile": "6502x",
+    "bytes": "f444",
+    "assembly": "nop $44,x",
+    "assembler_bytes": "1444",
+    "da65": "nop     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "isc_f7_DirectX",
+    "profile": "6502x",
+    "bytes": "f744",
+    "assembly": "isc $44,x",
+    "assembler_bytes": "f744",
+    "da65": "isc     $44,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_fa_Implicit",
+    "profile": "6502x",
+    "bytes": "fa",
+    "assembly": "nop",
+    "assembler_bytes": "ea",
+    "da65": "nop",
+    "status": "undocumented"
+  },
+  {
+    "id": "isc_fb_AbsoluteY",
+    "profile": "6502x",
+    "bytes": "fb3412",
+    "assembly": "isc $1234,y",
+    "assembler_bytes": "fb3412",
+    "da65": "isc     $1234,y",
+    "status": "undocumented"
+  },
+  {
+    "id": "nop_fc_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "fc3412",
+    "assembly": "nop $1234,x",
+    "assembler_bytes": "1c3412",
+    "da65": "nop     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "isc_ff_AbsoluteX",
+    "profile": "6502x",
+    "bytes": "ff3412",
+    "assembly": "isc $1234,x",
+    "assembler_bytes": "ff3412",
+    "da65": "isc     $1234,x",
+    "status": "undocumented"
+  },
+  {
+    "id": "tsb_04_Direct",
+    "profile": "65sc02",
+    "bytes": "0444",
+    "assembly": "tsb $44",
+    "assembler_bytes": "0444",
+    "da65": "tsb     $44",
+    "status": "documented"
+  },
+  {
+    "id": "tsb_0c_Absolute",
+    "profile": "65sc02",
+    "bytes": "0c3412",
+    "assembly": "tsb $1234",
+    "assembler_bytes": "0c3412",
+    "da65": "tsb     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "ora_12_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "1244",
+    "assembly": "ora ($44)",
+    "assembler_bytes": "1244",
+    "da65": "ora     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "trb_14_Direct",
+    "profile": "65sc02",
+    "bytes": "1444",
+    "assembly": "trb $44",
+    "assembler_bytes": "1444",
+    "da65": "trb     $44",
+    "status": "documented"
+  },
+  {
+    "id": "inc_1a_Accumulator",
+    "profile": "65sc02",
+    "bytes": "1a",
+    "assembly": "inc a",
+    "assembler_bytes": "1a",
+    "da65": "inc     a",
+    "status": "documented"
+  },
+  {
+    "id": "trb_1c_Absolute",
+    "profile": "65sc02",
+    "bytes": "1c3412",
+    "assembly": "trb $1234",
+    "assembler_bytes": "1c3412",
+    "da65": "trb     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "and_32_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "3244",
+    "assembly": "and ($44)",
+    "assembler_bytes": "3244",
+    "da65": "and     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "bit_34_DirectX",
+    "profile": "65sc02",
+    "bytes": "3444",
+    "assembly": "bit $44,x",
+    "assembler_bytes": "3444",
+    "da65": "bit     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "dec_3a_Accumulator",
+    "profile": "65sc02",
+    "bytes": "3a",
+    "assembly": "dec a",
+    "assembler_bytes": "3a",
+    "da65": "dec     a",
+    "status": "documented"
+  },
+  {
+    "id": "bit_3c_AbsoluteX",
+    "profile": "65sc02",
+    "bytes": "3c3412",
+    "assembly": "bit $1234,x",
+    "assembler_bytes": "3c3412",
+    "da65": "bit     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "eor_52_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "5244",
+    "assembly": "eor ($44)",
+    "assembler_bytes": "5244",
+    "da65": "eor     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "phy_5a_Implicit",
+    "profile": "65sc02",
+    "bytes": "5a",
+    "assembly": "phy",
+    "assembler_bytes": "5a",
+    "da65": "phy",
+    "status": "documented"
+  },
+  {
+    "id": "stz_64_Direct",
+    "profile": "65sc02",
+    "bytes": "6444",
+    "assembly": "stz $44",
+    "assembler_bytes": "6444",
+    "da65": "stz     $44",
+    "status": "documented"
+  },
+  {
+    "id": "adc_72_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "7244",
+    "assembly": "adc ($44)",
+    "assembler_bytes": "7244",
+    "da65": "adc     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "stz_74_DirectX",
+    "profile": "65sc02",
+    "bytes": "7444",
+    "assembly": "stz $44,x",
+    "assembler_bytes": "7444",
+    "da65": "stz     $44,x",
+    "status": "documented"
+  },
+  {
+    "id": "ply_7a_Implicit",
+    "profile": "65sc02",
+    "bytes": "7a",
+    "assembly": "ply",
+    "assembler_bytes": "7a",
+    "da65": "ply",
+    "status": "documented"
+  },
+  {
+    "id": "jmp_7c_AbsoluteXIndirect",
+    "profile": "65sc02",
+    "bytes": "7c3412",
+    "assembly": "jmp ($1234,x)",
+    "assembler_bytes": "7c3412",
+    "da65": "jmp     (0x1234,x)",
+    "status": "documented"
+  },
+  {
+    "id": "bra_80_Relative",
+    "profile": "65sc02",
+    "bytes": "8008",
+    "assembly": "bra current+10",
+    "assembler_bytes": "8008",
+    "da65": "bra     0x100A",
+    "status": "documented"
+  },
+  {
+    "id": "bit_89_Immediate",
+    "profile": "65sc02",
+    "bytes": "8944",
+    "assembly": "bit #68",
+    "assembler_bytes": "8944",
+    "da65": "bit     #$44",
+    "status": "documented"
+  },
+  {
+    "id": "sta_92_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "9244",
+    "assembly": "sta ($44)",
+    "assembler_bytes": "9244",
+    "da65": "sta     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "stz_9c_Absolute",
+    "profile": "65sc02",
+    "bytes": "9c3412",
+    "assembly": "stz $1234",
+    "assembler_bytes": "9c3412",
+    "da65": "stz     $1234",
+    "status": "documented"
+  },
+  {
+    "id": "stz_9e_AbsoluteX",
+    "profile": "65sc02",
+    "bytes": "9e3412",
+    "assembly": "stz $1234,x",
+    "assembler_bytes": "9e3412",
+    "da65": "stz     $1234,x",
+    "status": "documented"
+  },
+  {
+    "id": "lda_b2_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "b244",
+    "assembly": "lda ($44)",
+    "assembler_bytes": "b244",
+    "da65": "lda     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "cmp_d2_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "d244",
+    "assembly": "cmp ($44)",
+    "assembler_bytes": "d244",
+    "da65": "cmp     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "phx_da_Implicit",
+    "profile": "65sc02",
+    "bytes": "da",
+    "assembly": "phx",
+    "assembler_bytes": "da",
+    "da65": "phx",
+    "status": "documented"
+  },
+  {
+    "id": "sbc_f2_DirectIndirect",
+    "profile": "65sc02",
+    "bytes": "f244",
+    "assembly": "sbc ($44)",
+    "assembler_bytes": "f244",
+    "da65": "sbc     ($44)",
+    "status": "documented"
+  },
+  {
+    "id": "plx_fa_Implicit",
+    "profile": "65sc02",
+    "bytes": "fa",
+    "assembly": "plx",
+    "assembler_bytes": "fa",
+    "da65": "plx",
+    "status": "documented"
+  },
+  {
+    "id": "rmb0_07_Direct",
+    "profile": "65c02",
+    "bytes": "0744",
+    "assembly": "rmb0 $44",
+    "assembler_bytes": "0744",
+    "da65": "rmb0    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr0_0f_BitBranch",
+    "profile": "65c02",
+    "bytes": "0f4408",
+    "assembly": "bbr0 $44, current+11",
+    "assembler_bytes": "0f4408",
+    "da65": "bbr0    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "rmb1_17_Direct",
+    "profile": "65c02",
+    "bytes": "1744",
+    "assembly": "rmb1 $44",
+    "assembler_bytes": "1744",
+    "da65": "rmb1    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr1_1f_BitBranch",
+    "profile": "65c02",
+    "bytes": "1f4408",
+    "assembly": "bbr1 $44, current+11",
+    "assembler_bytes": "1f4408",
+    "da65": "bbr1    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "rmb2_27_Direct",
+    "profile": "65c02",
+    "bytes": "2744",
+    "assembly": "rmb2 $44",
+    "assembler_bytes": "2744",
+    "da65": "rmb2    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr2_2f_BitBranch",
+    "profile": "65c02",
+    "bytes": "2f4408",
+    "assembly": "bbr2 $44, current+11",
+    "assembler_bytes": "2f4408",
+    "da65": "bbr2    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "rmb3_37_Direct",
+    "profile": "65c02",
+    "bytes": "3744",
+    "assembly": "rmb3 $44",
+    "assembler_bytes": "3744",
+    "da65": "rmb3    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr3_3f_BitBranch",
+    "profile": "65c02",
+    "bytes": "3f4408",
+    "assembly": "bbr3 $44, current+11",
+    "assembler_bytes": "3f4408",
+    "da65": "bbr3    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "rmb4_47_Direct",
+    "profile": "65c02",
+    "bytes": "4744",
+    "assembly": "rmb4 $44",
+    "assembler_bytes": "4744",
+    "da65": "rmb4    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr4_4f_BitBranch",
+    "profile": "65c02",
+    "bytes": "4f4408",
+    "assembly": "bbr4 $44, current+11",
+    "assembler_bytes": "4f4408",
+    "da65": "bbr4    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "rmb5_57_Direct",
+    "profile": "65c02",
+    "bytes": "5744",
+    "assembly": "rmb5 $44",
+    "assembler_bytes": "5744",
+    "da65": "rmb5    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr5_5f_BitBranch",
+    "profile": "65c02",
+    "bytes": "5f4408",
+    "assembly": "bbr5 $44, current+11",
+    "assembler_bytes": "5f4408",
+    "da65": "bbr5    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "rmb6_67_Direct",
+    "profile": "65c02",
+    "bytes": "6744",
+    "assembly": "rmb6 $44",
+    "assembler_bytes": "6744",
+    "da65": "rmb6    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr6_6f_BitBranch",
+    "profile": "65c02",
+    "bytes": "6f4408",
+    "assembly": "bbr6 $44, current+11",
+    "assembler_bytes": "6f4408",
+    "da65": "bbr6    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "rmb7_77_Direct",
+    "profile": "65c02",
+    "bytes": "7744",
+    "assembly": "rmb7 $44",
+    "assembler_bytes": "7744",
+    "da65": "rmb7    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbr7_7f_BitBranch",
+    "profile": "65c02",
+    "bytes": "7f4408",
+    "assembly": "bbr7 $44, current+11",
+    "assembler_bytes": "7f4408",
+    "da65": "bbr7    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb0_87_Direct",
+    "profile": "65c02",
+    "bytes": "8744",
+    "assembly": "smb0 $44",
+    "assembler_bytes": "8744",
+    "da65": "smb0    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs0_8f_BitBranch",
+    "profile": "65c02",
+    "bytes": "8f4408",
+    "assembly": "bbs0 $44, current+11",
+    "assembler_bytes": "8f4408",
+    "da65": "bbs0    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb1_97_Direct",
+    "profile": "65c02",
+    "bytes": "9744",
+    "assembly": "smb1 $44",
+    "assembler_bytes": "9744",
+    "da65": "smb1    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs1_9f_BitBranch",
+    "profile": "65c02",
+    "bytes": "9f4408",
+    "assembly": "bbs1 $44, current+11",
+    "assembler_bytes": "9f4408",
+    "da65": "bbs1    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb2_a7_Direct",
+    "profile": "65c02",
+    "bytes": "a744",
+    "assembly": "smb2 $44",
+    "assembler_bytes": "a744",
+    "da65": "smb2    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs2_af_BitBranch",
+    "profile": "65c02",
+    "bytes": "af4408",
+    "assembly": "bbs2 $44, current+11",
+    "assembler_bytes": "af4408",
+    "da65": "bbs2    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb3_b7_Direct",
+    "profile": "65c02",
+    "bytes": "b744",
+    "assembly": "smb3 $44",
+    "assembler_bytes": "b744",
+    "da65": "smb3    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs3_bf_BitBranch",
+    "profile": "65c02",
+    "bytes": "bf4408",
+    "assembly": "bbs3 $44, current+11",
+    "assembler_bytes": "bf4408",
+    "da65": "bbs3    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb4_c7_Direct",
+    "profile": "65c02",
+    "bytes": "c744",
+    "assembly": "smb4 $44",
+    "assembler_bytes": "c744",
+    "da65": "smb4    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs4_cf_BitBranch",
+    "profile": "65c02",
+    "bytes": "cf4408",
+    "assembly": "bbs4 $44, current+11",
+    "assembler_bytes": "cf4408",
+    "da65": "bbs4    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb5_d7_Direct",
+    "profile": "65c02",
+    "bytes": "d744",
+    "assembly": "smb5 $44",
+    "assembler_bytes": "d744",
+    "da65": "smb5    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs5_df_BitBranch",
+    "profile": "65c02",
+    "bytes": "df4408",
+    "assembly": "bbs5 $44, current+11",
+    "assembler_bytes": "df4408",
+    "da65": "bbs5    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb6_e7_Direct",
+    "profile": "65c02",
+    "bytes": "e744",
+    "assembly": "smb6 $44",
+    "assembler_bytes": "e744",
+    "da65": "smb6    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs6_ef_BitBranch",
+    "profile": "65c02",
+    "bytes": "ef4408",
+    "assembly": "bbs6 $44, current+11",
+    "assembler_bytes": "ef4408",
+    "da65": "bbs6    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "smb7_f7_Direct",
+    "profile": "65c02",
+    "bytes": "f744",
+    "assembly": "smb7 $44",
+    "assembler_bytes": "f744",
+    "da65": "smb7    $44",
+    "status": "documented"
+  },
+  {
+    "id": "bbs7_ff_BitBranch",
+    "profile": "65c02",
+    "bytes": "ff4408",
+    "assembly": "bbs7 $44, current+11",
+    "assembler_bytes": "ff4408",
+    "da65": "bbs7    $44,0x100B",
+    "status": "documented"
+  },
+  {
+    "id": "wai_cb_Implicit",
+    "profile": "w65c02",
+    "bytes": "cb",
+    "assembly": "wai",
+    "assembler_bytes": "cb",
+    "da65": "wai",
+    "status": "documented"
+  },
+  {
+    "id": "stp_db_Implicit",
+    "profile": "w65c02",
+    "bytes": "db",
+    "assembly": "stp",
+    "assembler_bytes": "db",
+    "da65": "stp",
+    "status": "documented"
+  },
+  {
+    "id": "nop_02_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "0244",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_03_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "03",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_0b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "0b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_13_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "13",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_1b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "1b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_22_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "2244",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_23_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "23",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_2b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "2b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_33_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "33",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_3b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "3b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_42_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "4244",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_43_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "43",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_44_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "4444",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_4b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "4b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_53_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "53",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_54_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "5444",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_5b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "5b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_5c_Padding16",
+    "profile": "w65c02+nops",
+    "bytes": "5c3412",
+    "assembly": "nop 4660",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_62_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "6244",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_63_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "63",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_6b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "6b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_73_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "73",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_7b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "7b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_82_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "8244",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_83_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "83",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_8b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "8b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_93_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "93",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_9b_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "9b",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_a3_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "a3",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_ab_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "ab",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_b3_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "b3",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_bb_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "bb",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_c2_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "c244",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_c3_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "c3",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_d3_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "d3",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_d4_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "d444",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_dc_Padding16",
+    "profile": "w65c02+nops",
+    "bytes": "dc3412",
+    "assembly": "nop 4660",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_e2_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "e244",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_e3_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "e3",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_eb_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "eb",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_f3_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "f3",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_f4_Padding8",
+    "profile": "w65c02+nops",
+    "bytes": "f444",
+    "assembly": "nop #68",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_fb_Implicit",
+    "profile": "w65c02+nops",
+    "bytes": "fb",
+    "assembly": "nop",
+    "status": "reserved-nop"
+  },
+  {
+    "id": "nop_fc_Padding16",
+    "profile": "w65c02+nops",
+    "bytes": "fc3412",
+    "assembly": "nop 4660",
+    "status": "reserved-nop"
+  }
+]

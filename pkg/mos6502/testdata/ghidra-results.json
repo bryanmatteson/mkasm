@@ -1,0 +1,1900 @@
+[
+  {
+    "delay_slots": 0,
+    "encoded": "00",
+    "flow": "COMPUTED_JUMP",
+    "id": "brk_00_Signature",
+    "length": 1,
+    "mnemonic": "BRK",
+    "text": "BRK"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0144",
+    "flow": "FALL_THROUGH",
+    "id": "ora_01_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "ORA",
+    "text": "ORA (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0544",
+    "flow": "FALL_THROUGH",
+    "id": "ora_05_Direct",
+    "length": 2,
+    "mnemonic": "ORA",
+    "text": "ORA 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0644",
+    "flow": "FALL_THROUGH",
+    "id": "asl_06_Direct",
+    "length": 2,
+    "mnemonic": "ASL",
+    "text": "ASL 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "08",
+    "flow": "FALL_THROUGH",
+    "id": "php_08_Implicit",
+    "length": 1,
+    "mnemonic": "PHP",
+    "text": "PHP"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0944",
+    "flow": "FALL_THROUGH",
+    "id": "ora_09_Immediate",
+    "length": 2,
+    "mnemonic": "ORA",
+    "text": "ORA #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0a",
+    "flow": "FALL_THROUGH",
+    "id": "asl_0a_Accumulator",
+    "length": 1,
+    "mnemonic": "ASL",
+    "text": "ASL A"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0d3412",
+    "flow": "FALL_THROUGH",
+    "id": "ora_0d_Absolute",
+    "length": 3,
+    "mnemonic": "ORA",
+    "text": "ORA 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0e3412",
+    "flow": "FALL_THROUGH",
+    "id": "asl_0e_Absolute",
+    "length": 3,
+    "mnemonic": "ASL",
+    "text": "ASL 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bpl_10_Relative",
+    "length": 2,
+    "mnemonic": "BPL",
+    "text": "BPL 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1144",
+    "flow": "FALL_THROUGH",
+    "id": "ora_11_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "ORA",
+    "text": "ORA (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1544",
+    "flow": "FALL_THROUGH",
+    "id": "ora_15_DirectX",
+    "length": 2,
+    "mnemonic": "ORA",
+    "text": "ORA 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1644",
+    "flow": "FALL_THROUGH",
+    "id": "asl_16_DirectX",
+    "length": 2,
+    "mnemonic": "ASL",
+    "text": "ASL 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "18",
+    "flow": "FALL_THROUGH",
+    "id": "clc_18_Implicit",
+    "length": 1,
+    "mnemonic": "CLC",
+    "text": "CLC"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "193412",
+    "flow": "FALL_THROUGH",
+    "id": "ora_19_AbsoluteY",
+    "length": 3,
+    "mnemonic": "ORA",
+    "text": "ORA 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1d3412",
+    "flow": "FALL_THROUGH",
+    "id": "ora_1d_AbsoluteX",
+    "length": 3,
+    "mnemonic": "ORA",
+    "text": "ORA 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1e3412",
+    "flow": "FALL_THROUGH",
+    "id": "asl_1e_AbsoluteX",
+    "length": 3,
+    "mnemonic": "ASL",
+    "text": "ASL 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "203412",
+    "flow": "UNCONDITIONAL_CALL",
+    "id": "jsr_20_Absolute",
+    "length": 3,
+    "mnemonic": "JSR",
+    "text": "JSR 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2144",
+    "flow": "FALL_THROUGH",
+    "id": "and_21_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "AND",
+    "text": "AND (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2444",
+    "flow": "FALL_THROUGH",
+    "id": "bit_24_Direct",
+    "length": 2,
+    "mnemonic": "BIT",
+    "text": "BIT 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2544",
+    "flow": "FALL_THROUGH",
+    "id": "and_25_Direct",
+    "length": 2,
+    "mnemonic": "AND",
+    "text": "AND 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2644",
+    "flow": "FALL_THROUGH",
+    "id": "rol_26_Direct",
+    "length": 2,
+    "mnemonic": "ROL",
+    "text": "ROL 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "28",
+    "flow": "FALL_THROUGH",
+    "id": "plp_28_Implicit",
+    "length": 1,
+    "mnemonic": "PLP",
+    "text": "PLP"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2944",
+    "flow": "FALL_THROUGH",
+    "id": "and_29_Immediate",
+    "length": 2,
+    "mnemonic": "AND",
+    "text": "AND #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2a",
+    "flow": "FALL_THROUGH",
+    "id": "rol_2a_Accumulator",
+    "length": 1,
+    "mnemonic": "ROL",
+    "text": "ROL A"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2c3412",
+    "flow": "FALL_THROUGH",
+    "id": "bit_2c_Absolute",
+    "length": 3,
+    "mnemonic": "BIT",
+    "text": "BIT 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2d3412",
+    "flow": "FALL_THROUGH",
+    "id": "and_2d_Absolute",
+    "length": 3,
+    "mnemonic": "AND",
+    "text": "AND 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2e3412",
+    "flow": "FALL_THROUGH",
+    "id": "rol_2e_Absolute",
+    "length": 3,
+    "mnemonic": "ROL",
+    "text": "ROL 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bmi_30_Relative",
+    "length": 2,
+    "mnemonic": "BMI",
+    "text": "BMI 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3144",
+    "flow": "FALL_THROUGH",
+    "id": "and_31_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "AND",
+    "text": "AND (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3544",
+    "flow": "FALL_THROUGH",
+    "id": "and_35_DirectX",
+    "length": 2,
+    "mnemonic": "AND",
+    "text": "AND 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3644",
+    "flow": "FALL_THROUGH",
+    "id": "rol_36_DirectX",
+    "length": 2,
+    "mnemonic": "ROL",
+    "text": "ROL 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "38",
+    "flow": "FALL_THROUGH",
+    "id": "sec_38_Implicit",
+    "length": 1,
+    "mnemonic": "SEC",
+    "text": "SEC"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "393412",
+    "flow": "FALL_THROUGH",
+    "id": "and_39_AbsoluteY",
+    "length": 3,
+    "mnemonic": "AND",
+    "text": "AND 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3d3412",
+    "flow": "FALL_THROUGH",
+    "id": "and_3d_AbsoluteX",
+    "length": 3,
+    "mnemonic": "AND",
+    "text": "AND 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3e3412",
+    "flow": "FALL_THROUGH",
+    "id": "rol_3e_AbsoluteX",
+    "length": 3,
+    "mnemonic": "ROL",
+    "text": "ROL 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "40",
+    "flow": "TERMINATOR",
+    "id": "rti_40_Implicit",
+    "length": 1,
+    "mnemonic": "RTI",
+    "text": "RTI"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4144",
+    "flow": "FALL_THROUGH",
+    "id": "eor_41_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "EOR",
+    "text": "EOR (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4544",
+    "flow": "FALL_THROUGH",
+    "id": "eor_45_Direct",
+    "length": 2,
+    "mnemonic": "EOR",
+    "text": "EOR 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4644",
+    "flow": "FALL_THROUGH",
+    "id": "lsr_46_Direct",
+    "length": 2,
+    "mnemonic": "LSR",
+    "text": "LSR 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "48",
+    "flow": "FALL_THROUGH",
+    "id": "pha_48_Implicit",
+    "length": 1,
+    "mnemonic": "PHA",
+    "text": "PHA"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4944",
+    "flow": "FALL_THROUGH",
+    "id": "eor_49_Immediate",
+    "length": 2,
+    "mnemonic": "EOR",
+    "text": "EOR #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4a",
+    "flow": "FALL_THROUGH",
+    "id": "lsr_4a_Accumulator",
+    "length": 1,
+    "mnemonic": "LSR",
+    "text": "LSR A"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4c3412",
+    "flow": "UNCONDITIONAL_JUMP",
+    "id": "jmp_4c_Absolute",
+    "length": 3,
+    "mnemonic": "JMP",
+    "text": "JMP 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4d3412",
+    "flow": "FALL_THROUGH",
+    "id": "eor_4d_Absolute",
+    "length": 3,
+    "mnemonic": "EOR",
+    "text": "EOR 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4e3412",
+    "flow": "FALL_THROUGH",
+    "id": "lsr_4e_Absolute",
+    "length": 3,
+    "mnemonic": "LSR",
+    "text": "LSR 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bvc_50_Relative",
+    "length": 2,
+    "mnemonic": "BVC",
+    "text": "BVC 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5144",
+    "flow": "FALL_THROUGH",
+    "id": "eor_51_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "EOR",
+    "text": "EOR (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5544",
+    "flow": "FALL_THROUGH",
+    "id": "eor_55_DirectX",
+    "length": 2,
+    "mnemonic": "EOR",
+    "text": "EOR 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5644",
+    "flow": "FALL_THROUGH",
+    "id": "lsr_56_DirectX",
+    "length": 2,
+    "mnemonic": "LSR",
+    "text": "LSR 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "58",
+    "flow": "FALL_THROUGH",
+    "id": "cli_58_Implicit",
+    "length": 1,
+    "mnemonic": "CLI",
+    "text": "CLI"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "593412",
+    "flow": "FALL_THROUGH",
+    "id": "eor_59_AbsoluteY",
+    "length": 3,
+    "mnemonic": "EOR",
+    "text": "EOR 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5d3412",
+    "flow": "FALL_THROUGH",
+    "id": "eor_5d_AbsoluteX",
+    "length": 3,
+    "mnemonic": "EOR",
+    "text": "EOR 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5e3412",
+    "flow": "FALL_THROUGH",
+    "id": "lsr_5e_AbsoluteX",
+    "length": 3,
+    "mnemonic": "LSR",
+    "text": "LSR 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "60",
+    "flow": "TERMINATOR",
+    "id": "rts_60_Implicit",
+    "length": 1,
+    "mnemonic": "RTS",
+    "text": "RTS"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6144",
+    "flow": "FALL_THROUGH",
+    "id": "adc_61_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "ADC",
+    "text": "ADC (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6544",
+    "flow": "FALL_THROUGH",
+    "id": "adc_65_Direct",
+    "length": 2,
+    "mnemonic": "ADC",
+    "text": "ADC 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6644",
+    "flow": "FALL_THROUGH",
+    "id": "ror_66_Direct",
+    "length": 2,
+    "mnemonic": "ROR",
+    "text": "ROR 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "68",
+    "flow": "FALL_THROUGH",
+    "id": "pla_68_Implicit",
+    "length": 1,
+    "mnemonic": "PLA",
+    "text": "PLA"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6944",
+    "flow": "FALL_THROUGH",
+    "id": "adc_69_Immediate",
+    "length": 2,
+    "mnemonic": "ADC",
+    "text": "ADC #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6a",
+    "flow": "FALL_THROUGH",
+    "id": "ror_6a_Accumulator",
+    "length": 1,
+    "mnemonic": "ROR",
+    "text": "ROR A"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6c3412",
+    "flow": "COMPUTED_JUMP",
+    "id": "jmp_6c_JmpAbsoluteIndirect",
+    "length": 3,
+    "mnemonic": "JMP",
+    "text": "JMP (0x1234)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6d3412",
+    "flow": "FALL_THROUGH",
+    "id": "adc_6d_Absolute",
+    "length": 3,
+    "mnemonic": "ADC",
+    "text": "ADC 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6e3412",
+    "flow": "FALL_THROUGH",
+    "id": "ror_6e_Absolute",
+    "length": 3,
+    "mnemonic": "ROR",
+    "text": "ROR 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bvs_70_Relative",
+    "length": 2,
+    "mnemonic": "BVS",
+    "text": "BVS 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7144",
+    "flow": "FALL_THROUGH",
+    "id": "adc_71_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "ADC",
+    "text": "ADC (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7544",
+    "flow": "FALL_THROUGH",
+    "id": "adc_75_DirectX",
+    "length": 2,
+    "mnemonic": "ADC",
+    "text": "ADC 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7644",
+    "flow": "FALL_THROUGH",
+    "id": "ror_76_DirectX",
+    "length": 2,
+    "mnemonic": "ROR",
+    "text": "ROR 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "78",
+    "flow": "FALL_THROUGH",
+    "id": "sei_78_Implicit",
+    "length": 1,
+    "mnemonic": "SEI",
+    "text": "SEI"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "793412",
+    "flow": "FALL_THROUGH",
+    "id": "adc_79_AbsoluteY",
+    "length": 3,
+    "mnemonic": "ADC",
+    "text": "ADC 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7d3412",
+    "flow": "FALL_THROUGH",
+    "id": "adc_7d_AbsoluteX",
+    "length": 3,
+    "mnemonic": "ADC",
+    "text": "ADC 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7e3412",
+    "flow": "FALL_THROUGH",
+    "id": "ror_7e_AbsoluteX",
+    "length": 3,
+    "mnemonic": "ROR",
+    "text": "ROR 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8144",
+    "flow": "FALL_THROUGH",
+    "id": "sta_81_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "STA",
+    "text": "STA (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8444",
+    "flow": "FALL_THROUGH",
+    "id": "sty_84_Direct",
+    "length": 2,
+    "mnemonic": "STY",
+    "text": "STY 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8544",
+    "flow": "FALL_THROUGH",
+    "id": "sta_85_Direct",
+    "length": 2,
+    "mnemonic": "STA",
+    "text": "STA 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8644",
+    "flow": "FALL_THROUGH",
+    "id": "stx_86_Direct",
+    "length": 2,
+    "mnemonic": "STX",
+    "text": "STX 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "88",
+    "flow": "FALL_THROUGH",
+    "id": "dey_88_Implicit",
+    "length": 1,
+    "mnemonic": "DEY",
+    "text": "DEY"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8a",
+    "flow": "FALL_THROUGH",
+    "id": "txa_8a_Implicit",
+    "length": 1,
+    "mnemonic": "TXA",
+    "text": "TXA"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8c3412",
+    "flow": "FALL_THROUGH",
+    "id": "sty_8c_Absolute",
+    "length": 3,
+    "mnemonic": "STY",
+    "text": "STY 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8d3412",
+    "flow": "FALL_THROUGH",
+    "id": "sta_8d_Absolute",
+    "length": 3,
+    "mnemonic": "STA",
+    "text": "STA 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8e3412",
+    "flow": "FALL_THROUGH",
+    "id": "stx_8e_Absolute",
+    "length": 3,
+    "mnemonic": "STX",
+    "text": "STX 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bcc_90_Relative",
+    "length": 2,
+    "mnemonic": "BCC",
+    "text": "BCC 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9144",
+    "flow": "FALL_THROUGH",
+    "id": "sta_91_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "STA",
+    "text": "STA (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9444",
+    "flow": "FALL_THROUGH",
+    "id": "sty_94_DirectX",
+    "length": 2,
+    "mnemonic": "STY",
+    "text": "STY 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9544",
+    "flow": "FALL_THROUGH",
+    "id": "sta_95_DirectX",
+    "length": 2,
+    "mnemonic": "STA",
+    "text": "STA 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9644",
+    "flow": "FALL_THROUGH",
+    "id": "stx_96_DirectY",
+    "length": 2,
+    "mnemonic": "STX",
+    "text": "STX 0x44,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "98",
+    "flow": "FALL_THROUGH",
+    "id": "tya_98_Implicit",
+    "length": 1,
+    "mnemonic": "TYA",
+    "text": "TYA"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "993412",
+    "flow": "FALL_THROUGH",
+    "id": "sta_99_AbsoluteY",
+    "length": 3,
+    "mnemonic": "STA",
+    "text": "STA 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9a",
+    "flow": "FALL_THROUGH",
+    "id": "txs_9a_Implicit",
+    "length": 1,
+    "mnemonic": "TXS",
+    "text": "TXS"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9d3412",
+    "flow": "FALL_THROUGH",
+    "id": "sta_9d_AbsoluteX",
+    "length": 3,
+    "mnemonic": "STA",
+    "text": "STA 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a044",
+    "flow": "FALL_THROUGH",
+    "id": "ldy_a0_Immediate",
+    "length": 2,
+    "mnemonic": "LDY",
+    "text": "LDY #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a144",
+    "flow": "FALL_THROUGH",
+    "id": "lda_a1_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "LDA",
+    "text": "LDA (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a244",
+    "flow": "FALL_THROUGH",
+    "id": "ldx_a2_Immediate",
+    "length": 2,
+    "mnemonic": "LDX",
+    "text": "LDX #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a444",
+    "flow": "FALL_THROUGH",
+    "id": "ldy_a4_Direct",
+    "length": 2,
+    "mnemonic": "LDY",
+    "text": "LDY 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a544",
+    "flow": "FALL_THROUGH",
+    "id": "lda_a5_Direct",
+    "length": 2,
+    "mnemonic": "LDA",
+    "text": "LDA 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a644",
+    "flow": "FALL_THROUGH",
+    "id": "ldx_a6_Direct",
+    "length": 2,
+    "mnemonic": "LDX",
+    "text": "LDX 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a8",
+    "flow": "FALL_THROUGH",
+    "id": "tay_a8_Implicit",
+    "length": 1,
+    "mnemonic": "TAY",
+    "text": "TAY"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a944",
+    "flow": "FALL_THROUGH",
+    "id": "lda_a9_Immediate",
+    "length": 2,
+    "mnemonic": "LDA",
+    "text": "LDA #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "aa",
+    "flow": "FALL_THROUGH",
+    "id": "tax_aa_Implicit",
+    "length": 1,
+    "mnemonic": "TAX",
+    "text": "TAX"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ac3412",
+    "flow": "FALL_THROUGH",
+    "id": "ldy_ac_Absolute",
+    "length": 3,
+    "mnemonic": "LDY",
+    "text": "LDY 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ad3412",
+    "flow": "FALL_THROUGH",
+    "id": "lda_ad_Absolute",
+    "length": 3,
+    "mnemonic": "LDA",
+    "text": "LDA 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ae3412",
+    "flow": "FALL_THROUGH",
+    "id": "ldx_ae_Absolute",
+    "length": 3,
+    "mnemonic": "LDX",
+    "text": "LDX 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bcs_b0_Relative",
+    "length": 2,
+    "mnemonic": "BCS",
+    "text": "BCS 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b144",
+    "flow": "FALL_THROUGH",
+    "id": "lda_b1_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "LDA",
+    "text": "LDA (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b444",
+    "flow": "FALL_THROUGH",
+    "id": "ldy_b4_DirectX",
+    "length": 2,
+    "mnemonic": "LDY",
+    "text": "LDY 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b544",
+    "flow": "FALL_THROUGH",
+    "id": "lda_b5_DirectX",
+    "length": 2,
+    "mnemonic": "LDA",
+    "text": "LDA 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b644",
+    "flow": "FALL_THROUGH",
+    "id": "ldx_b6_DirectY",
+    "length": 2,
+    "mnemonic": "LDX",
+    "text": "LDX 0x44,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b8",
+    "flow": "FALL_THROUGH",
+    "id": "clv_b8_Implicit",
+    "length": 1,
+    "mnemonic": "CLV",
+    "text": "CLV"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b93412",
+    "flow": "FALL_THROUGH",
+    "id": "lda_b9_AbsoluteY",
+    "length": 3,
+    "mnemonic": "LDA",
+    "text": "LDA 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ba",
+    "flow": "FALL_THROUGH",
+    "id": "tsx_ba_Implicit",
+    "length": 1,
+    "mnemonic": "TSX",
+    "text": "TSX"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "bc3412",
+    "flow": "FALL_THROUGH",
+    "id": "ldy_bc_AbsoluteX",
+    "length": 3,
+    "mnemonic": "LDY",
+    "text": "LDY 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "bd3412",
+    "flow": "FALL_THROUGH",
+    "id": "lda_bd_AbsoluteX",
+    "length": 3,
+    "mnemonic": "LDA",
+    "text": "LDA 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "be3412",
+    "flow": "FALL_THROUGH",
+    "id": "ldx_be_AbsoluteY",
+    "length": 3,
+    "mnemonic": "LDX",
+    "text": "LDX 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c044",
+    "flow": "FALL_THROUGH",
+    "id": "cpy_c0_Immediate",
+    "length": 2,
+    "mnemonic": "CPY",
+    "text": "CPY #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c144",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_c1_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "CMP",
+    "text": "CMP (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c444",
+    "flow": "FALL_THROUGH",
+    "id": "cpy_c4_Direct",
+    "length": 2,
+    "mnemonic": "CPY",
+    "text": "CPY 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c544",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_c5_Direct",
+    "length": 2,
+    "mnemonic": "CMP",
+    "text": "CMP 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c644",
+    "flow": "FALL_THROUGH",
+    "id": "dec_c6_Direct",
+    "length": 2,
+    "mnemonic": "DEC",
+    "text": "DEC 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c8",
+    "flow": "FALL_THROUGH",
+    "id": "iny_c8_Implicit",
+    "length": 1,
+    "mnemonic": "INY",
+    "text": "INY"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c944",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_c9_Immediate",
+    "length": 2,
+    "mnemonic": "CMP",
+    "text": "CMP #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ca",
+    "flow": "FALL_THROUGH",
+    "id": "dex_ca_Implicit",
+    "length": 1,
+    "mnemonic": "DEX",
+    "text": "DEX"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "cc3412",
+    "flow": "FALL_THROUGH",
+    "id": "cpy_cc_Absolute",
+    "length": 3,
+    "mnemonic": "CPY",
+    "text": "CPY 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "cd3412",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_cd_Absolute",
+    "length": 3,
+    "mnemonic": "CMP",
+    "text": "CMP 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ce3412",
+    "flow": "FALL_THROUGH",
+    "id": "dec_ce_Absolute",
+    "length": 3,
+    "mnemonic": "DEC",
+    "text": "DEC 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bne_d0_Relative",
+    "length": 2,
+    "mnemonic": "BNE",
+    "text": "BNE 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d144",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_d1_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "CMP",
+    "text": "CMP (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d544",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_d5_DirectX",
+    "length": 2,
+    "mnemonic": "CMP",
+    "text": "CMP 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d644",
+    "flow": "FALL_THROUGH",
+    "id": "dec_d6_DirectX",
+    "length": 2,
+    "mnemonic": "DEC",
+    "text": "DEC 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d8",
+    "flow": "FALL_THROUGH",
+    "id": "cld_d8_Implicit",
+    "length": 1,
+    "mnemonic": "CLD",
+    "text": "CLD"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d93412",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_d9_AbsoluteY",
+    "length": 3,
+    "mnemonic": "CMP",
+    "text": "CMP 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "dd3412",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_dd_AbsoluteX",
+    "length": 3,
+    "mnemonic": "CMP",
+    "text": "CMP 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "de3412",
+    "flow": "FALL_THROUGH",
+    "id": "dec_de_AbsoluteX",
+    "length": 3,
+    "mnemonic": "DEC",
+    "text": "DEC 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e044",
+    "flow": "FALL_THROUGH",
+    "id": "cpx_e0_Immediate",
+    "length": 2,
+    "mnemonic": "CPX",
+    "text": "CPX #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e144",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_e1_DirectXIndirect",
+    "length": 2,
+    "mnemonic": "SBC",
+    "text": "SBC (0x44,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e444",
+    "flow": "FALL_THROUGH",
+    "id": "cpx_e4_Direct",
+    "length": 2,
+    "mnemonic": "CPX",
+    "text": "CPX 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e544",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_e5_Direct",
+    "length": 2,
+    "mnemonic": "SBC",
+    "text": "SBC 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e644",
+    "flow": "FALL_THROUGH",
+    "id": "inc_e6_Direct",
+    "length": 2,
+    "mnemonic": "INC",
+    "text": "INC 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e8",
+    "flow": "FALL_THROUGH",
+    "id": "inx_e8_Implicit",
+    "length": 1,
+    "mnemonic": "INX",
+    "text": "INX"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e944",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_e9_Immediate",
+    "length": 2,
+    "mnemonic": "SBC",
+    "text": "SBC #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ea",
+    "flow": "FALL_THROUGH",
+    "id": "nop_ea_Implicit",
+    "length": 1,
+    "mnemonic": "NOP",
+    "text": "NOP"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ec3412",
+    "flow": "FALL_THROUGH",
+    "id": "cpx_ec_Absolute",
+    "length": 3,
+    "mnemonic": "CPX",
+    "text": "CPX 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ed3412",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_ed_Absolute",
+    "length": 3,
+    "mnemonic": "SBC",
+    "text": "SBC 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ee3412",
+    "flow": "FALL_THROUGH",
+    "id": "inc_ee_Absolute",
+    "length": 3,
+    "mnemonic": "INC",
+    "text": "INC 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f008",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "beq_f0_Relative",
+    "length": 2,
+    "mnemonic": "BEQ",
+    "text": "BEQ 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f144",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_f1_DirectIndirectY",
+    "length": 2,
+    "mnemonic": "SBC",
+    "text": "SBC (0x44),Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f544",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_f5_DirectX",
+    "length": 2,
+    "mnemonic": "SBC",
+    "text": "SBC 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f644",
+    "flow": "FALL_THROUGH",
+    "id": "inc_f6_DirectX",
+    "length": 2,
+    "mnemonic": "INC",
+    "text": "INC 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f8",
+    "flow": "FALL_THROUGH",
+    "id": "sed_f8_Implicit",
+    "length": 1,
+    "mnemonic": "SED",
+    "text": "SED"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f93412",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_f9_AbsoluteY",
+    "length": 3,
+    "mnemonic": "SBC",
+    "text": "SBC 0x1234,Y"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "fd3412",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_fd_AbsoluteX",
+    "length": 3,
+    "mnemonic": "SBC",
+    "text": "SBC 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "fe3412",
+    "flow": "FALL_THROUGH",
+    "id": "inc_fe_AbsoluteX",
+    "length": 3,
+    "mnemonic": "INC",
+    "text": "INC 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0444",
+    "flow": "FALL_THROUGH",
+    "id": "tsb_04_Direct",
+    "length": 2,
+    "mnemonic": "TSB",
+    "text": "TSB 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0c3412",
+    "flow": "FALL_THROUGH",
+    "id": "tsb_0c_Absolute",
+    "length": 3,
+    "mnemonic": "TSB",
+    "text": "TSB 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1244",
+    "flow": "FALL_THROUGH",
+    "id": "ora_12_DirectIndirect",
+    "length": 2,
+    "mnemonic": "ORA",
+    "text": "ORA (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1444",
+    "flow": "FALL_THROUGH",
+    "id": "trb_14_Direct",
+    "length": 2,
+    "mnemonic": "TRB",
+    "text": "TRB 0x0044"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1a",
+    "flow": "FALL_THROUGH",
+    "id": "inc_1a_Accumulator",
+    "length": 1,
+    "mnemonic": "INC",
+    "text": "INC A"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1c3412",
+    "flow": "FALL_THROUGH",
+    "id": "trb_1c_Absolute",
+    "length": 3,
+    "mnemonic": "TRB",
+    "text": "TRB 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3244",
+    "flow": "FALL_THROUGH",
+    "id": "and_32_DirectIndirect",
+    "length": 2,
+    "mnemonic": "AND",
+    "text": "AND (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3444",
+    "flow": "FALL_THROUGH",
+    "id": "bit_34_DirectX",
+    "length": 2,
+    "mnemonic": "BIT",
+    "text": "BIT 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3a",
+    "flow": "FALL_THROUGH",
+    "id": "dec_3a_Accumulator",
+    "length": 1,
+    "mnemonic": "DEC",
+    "text": "DEC A"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3c3412",
+    "flow": "FALL_THROUGH",
+    "id": "bit_3c_AbsoluteX",
+    "length": 3,
+    "mnemonic": "BIT",
+    "text": "BIT 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5244",
+    "flow": "FALL_THROUGH",
+    "id": "eor_52_DirectIndirect",
+    "length": 2,
+    "mnemonic": "EOR",
+    "text": "EOR (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5a",
+    "flow": "FALL_THROUGH",
+    "id": "phy_5a_Implicit",
+    "length": 1,
+    "mnemonic": "PHY",
+    "text": "PHY"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6444",
+    "flow": "FALL_THROUGH",
+    "id": "stz_64_Direct",
+    "length": 2,
+    "mnemonic": "STZ",
+    "text": "STZ 0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7244",
+    "flow": "FALL_THROUGH",
+    "id": "adc_72_DirectIndirect",
+    "length": 2,
+    "mnemonic": "ADC",
+    "text": "ADC (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7444",
+    "flow": "FALL_THROUGH",
+    "id": "stz_74_DirectX",
+    "length": 2,
+    "mnemonic": "STZ",
+    "text": "STZ 0x44,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7a",
+    "flow": "FALL_THROUGH",
+    "id": "ply_7a_Implicit",
+    "length": 1,
+    "mnemonic": "PLY",
+    "text": "PLY"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7c3412",
+    "flow": "COMPUTED_JUMP",
+    "id": "jmp_7c_AbsoluteXIndirect",
+    "length": 3,
+    "mnemonic": "JMP",
+    "text": "JMP (0x1234,X)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8008",
+    "flow": "UNCONDITIONAL_JUMP",
+    "id": "bra_80_Relative",
+    "length": 2,
+    "mnemonic": "BRA",
+    "text": "BRA 0x100a"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8944",
+    "flow": "FALL_THROUGH",
+    "id": "bit_89_Immediate",
+    "length": 2,
+    "mnemonic": "BIT",
+    "text": "BIT #0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9244",
+    "flow": "FALL_THROUGH",
+    "id": "sta_92_DirectIndirect",
+    "length": 2,
+    "mnemonic": "STA",
+    "text": "STA (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9c3412",
+    "flow": "FALL_THROUGH",
+    "id": "stz_9c_Absolute",
+    "length": 3,
+    "mnemonic": "STZ",
+    "text": "STZ 0x1234"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9e3412",
+    "flow": "FALL_THROUGH",
+    "id": "stz_9e_AbsoluteX",
+    "length": 3,
+    "mnemonic": "STZ",
+    "text": "STZ 0x1234,X"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b244",
+    "flow": "FALL_THROUGH",
+    "id": "lda_b2_DirectIndirect",
+    "length": 2,
+    "mnemonic": "LDA",
+    "text": "LDA (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d244",
+    "flow": "FALL_THROUGH",
+    "id": "cmp_d2_DirectIndirect",
+    "length": 2,
+    "mnemonic": "CMP",
+    "text": "CMP (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "da",
+    "flow": "FALL_THROUGH",
+    "id": "phx_da_Implicit",
+    "length": 1,
+    "mnemonic": "PHX",
+    "text": "PHX"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f244",
+    "flow": "FALL_THROUGH",
+    "id": "sbc_f2_DirectIndirect",
+    "length": 2,
+    "mnemonic": "SBC",
+    "text": "SBC (0x44)"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "fa",
+    "flow": "FALL_THROUGH",
+    "id": "plx_fa_Implicit",
+    "length": 1,
+    "mnemonic": "PLX",
+    "text": "PLX"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb0_07_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x0,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "0f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr0_0f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x0,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb1_17_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x1,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "1f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr1_1f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x1,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb2_27_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x2,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "2f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr2_2f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x2,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb3_37_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x3,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "3f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr3_3f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x3,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb4_47_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x4,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "4f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr4_4f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x4,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb5_57_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x5,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "5f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr5_5f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x5,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb6_67_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x6,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "6f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr6_6f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x6,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7744",
+    "flow": "FALL_THROUGH",
+    "id": "rmb7_77_Direct",
+    "length": 2,
+    "mnemonic": "RMB",
+    "text": "RMB #0x7,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "7f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbr7_7f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBR",
+    "text": "BBR #0x7,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8744",
+    "flow": "FALL_THROUGH",
+    "id": "smb0_87_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x0,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "8f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs0_8f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x0,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9744",
+    "flow": "FALL_THROUGH",
+    "id": "smb1_97_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x1,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "9f4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs1_9f_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x1,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "a744",
+    "flow": "FALL_THROUGH",
+    "id": "smb2_a7_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x2,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "af4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs2_af_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x2,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "b744",
+    "flow": "FALL_THROUGH",
+    "id": "smb3_b7_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x3,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "bf4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs3_bf_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x3,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "c744",
+    "flow": "FALL_THROUGH",
+    "id": "smb4_c7_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x4,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "cf4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs4_cf_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x4,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "d744",
+    "flow": "FALL_THROUGH",
+    "id": "smb5_d7_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x5,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "df4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs5_df_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x5,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "e744",
+    "flow": "FALL_THROUGH",
+    "id": "smb6_e7_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x6,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ef4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs6_ef_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x6,0x44,0x100b"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "f744",
+    "flow": "FALL_THROUGH",
+    "id": "smb7_f7_Direct",
+    "length": 2,
+    "mnemonic": "SMB",
+    "text": "SMB #0x7,0x44"
+  },
+  {
+    "delay_slots": 0,
+    "encoded": "ff4408",
+    "flow": "CONDITIONAL_JUMP",
+    "id": "bbs7_ff_BitBranch",
+    "length": 3,
+    "mnemonic": "BBS",
+    "text": "BBS #0x7,0x44,0x100b"
+  },
+  {
+    "error": "AssemblySyntaxException: Syntax Error: Expected [ADC, AND, ASL, BBR, BBS, BCC, BCS, BEQ, BIT, BMI, ...]. Got WAI",
+    "id": "wai_cb_Implicit"
+  },
+  {
+    "error": "AssemblySyntaxException: Syntax Error: Expected [ADC, AND, ASL, BBR, BBS, BCC, BCS, BEQ, BIT, BMI, ...]. Got STP",
+    "id": "stp_db_Implicit"
+  }
+]
