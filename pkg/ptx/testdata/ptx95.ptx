@@ -1,0 +1,20 @@
+.version 9.5
+.target sm_107f
+.address_size 64
+.metadata_section {
+  .metadata_domain 1
+  .metadata 1 { "kernel: event", "PTX 9.5 fixture", .b32 1 }
+  .metadata 2 { "event association", .b32 0, .metadata_label "event_label", .metadata_index 1 }
+}
+.visible .entry latest() {
+ .reg .b32 %r;
+ .reg .f32 %f;
+ .reg .pred %p;
+ mov.b32 %r, 42;
+ mov.f32 %f, 0f3f000000;
+ setp.eq.u32 %p, %r, 42;
+ sin.approx.2pi.ftz.f32 %f, %f;
+ trace.mark.b32 0, %r, event_label;
+ trace.mark.cond.b32 0, !%p, %r, event_label;
+ ret;
+}
