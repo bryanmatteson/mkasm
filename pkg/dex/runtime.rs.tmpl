@@ -1,0 +1,1345 @@
+use std::collections::BTreeMap;
+#[derive(Clone, Debug)]
+pub struct Field {
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub bit: usize,
+    pub width: usize,
+    pub signed: bool,
+    pub shift: u32,
+    pub wide: bool,
+}
+#[derive(Clone, Debug)]
+pub struct Definition {
+    pub opcode: u16,
+    pub mnemonic: &'static str,
+    pub format: &'static str,
+    pub index_kind: &'static str,
+    pub flags: &'static str,
+    pub verify: &'static str,
+    pub min_version: u16,
+    pub reserved: bool,
+    pub fields: &'static [Field],
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    Truncated,
+    Malformed(String),
+    Reserved,
+    Version,
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+impl std::error::Error for Error {}
+type Result<T> = std::result::Result<T, Error>;
+fn bad(s: &str) -> Error {
+    Error::Malformed(s.into())
+}
+pub const LATEST_VERSION: u16 = 41;
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RegisterRange {
+    pub start: u16,
+    pub count: u16,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Payload {
+    pub first_key: i32,
+    pub keys: Vec<i32>,
+    pub targets: Vec<i32>,
+    pub element_width: u16,
+    pub data: Vec<u8>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Instruction {
+    pub opcode: u16,
+    pub offset: u32,
+    pub length: usize,
+    pub values: BTreeMap<String, i64>,
+    pub registers: Vec<u16>,
+    pub range: Option<RegisterRange>,
+    pub payload: Option<Payload>,
+}
+const fn opcode_slot(op: u16) -> Option<usize> {
+    match op { 0..=255 => Some(op as usize), 0x100 => Some(256), 0x200 => Some(257), 0x300 => Some(258), _ => None }
+}
+static OPCODE_INDEX: [u16; 259] = {
+    let mut index = [u16::MAX; 259];
+    let mut i = 0;
+    while i < INSTRUCTIONS.len() {
+        if let Some(slot) = opcode_slot(INSTRUCTIONS[i].opcode) { index[slot] = i as u16; }
+        i += 1;
+    }
+    index
+};
+pub fn definition(op: u16) -> Option<&'static Definition> {
+    INSTRUCTIONS.get(OPCODE_INDEX[opcode_slot(op)?] as usize)
+}
+
+/// Reusable named operand bindings; unbound fields are captured when matching.
+#[derive(Clone, Debug)]
+pub struct InstructionTemplate {
+    definition: &'static Definition,
+    version: u16,
+    fixed: BTreeMap<String, i64>,
+    registers: Option<Vec<u16>>,
+    range: Option<RegisterRange>,
+    payload: Option<Payload>,
+}
+fn template_instruction(d: &Definition) -> Instruction {
+    let mut i = Instruction {
+        opcode: d.opcode,
+        ..Default::default()
+    };
+    for f in d.fields {
+        i.values
+            .insert(f.name.into(), if f.kind == "target" { 1 } else { 0 });
+    }
+    match d.format {
+        "35c" | "45cc" => i.registers = vec![0],
+        "3rc" | "4rcc" => i.range = Some(RegisterRange { start: 0, count: 1 }),
+        _ => {}
+    }
+    if d.opcode >= 256 {
+        i.payload = Some(Payload {
+            element_width: if d.opcode == 0x300 { 1 } else { 0 },
+            ..Default::default()
+        });
+    }
+    i
+}
+impl InstructionTemplate {
+    pub fn new(mnemonic: &str) -> Result<Self> {
+        Self::new_version(mnemonic, LATEST_VERSION)
+    }
+    pub fn new_version(mnemonic: &str, v: u16) -> Result<Self> {
+        version(v)?;
+        let d = INSTRUCTIONS
+            .iter()
+            .find(|d| !d.reserved && d.mnemonic == mnemonic)
+            .ok_or_else(|| bad("unknown template mnemonic"))?;
+        if v < d.min_version {
+            return Err(Error::Version);
+        }
+        Ok(Self {
+            definition: d,
+            version: v,
+            fixed: BTreeMap::new(),
+            registers: None,
+            range: None,
+            payload: None,
+        })
+    }
+    pub fn set(&mut self, name: &str, value: i64) -> Result<&mut Self> {
+        let mut i = template_instruction(self.definition);
+        let field = i
+            .values
+            .get_mut(name)
+            .ok_or_else(|| bad("unknown template operand"))?;
+        *field = value;
+        encode_version(&i, 0, self.version)?;
+        self.fixed.insert(name.into(), value);
+        Ok(self)
+    }
+    pub fn set_registers(&mut self, value: &[u16]) -> Result<&mut Self> {
+        if !matches!(self.definition.format, "35c" | "45cc") {
+            return Err(bad("template has no invoke register list"));
+        }
+        let mut i = template_instruction(self.definition);
+        i.registers = value.to_vec();
+        encode_version(&i, 0, self.version)?;
+        self.registers = Some(i.registers);
+        Ok(self)
+    }
+    pub fn set_range(&mut self, value: RegisterRange) -> Result<&mut Self> {
+        if !matches!(self.definition.format, "3rc" | "4rcc") {
+            return Err(bad("template has no invoke register range"));
+        }
+        let mut i = template_instruction(self.definition);
+        i.range = Some(value.clone());
+        encode_version(&i, 0, self.version)?;
+        self.range = Some(value);
+        Ok(self)
+    }
+    pub fn set_payload(&mut self, value: &Payload) -> Result<&mut Self> {
+        if self.definition.opcode < 256 {
+            return Err(bad("template has no payload"));
+        }
+        let mut i = template_instruction(self.definition);
+        i.payload = Some(value.clone());
+        encode_version(&i, 0, self.version)?;
+        self.payload = i.payload;
+        Ok(self)
+    }
+    pub fn encode(&self, offset: u32) -> Result<Vec<u8>> {
+        let mut i = template_instruction(self.definition);
+        for f in self.definition.fields {
+            i.values.insert(
+                f.name.into(),
+                *self
+                    .fixed
+                    .get(f.name)
+                    .ok_or_else(|| bad("missing template operand"))?,
+            );
+        }
+        if matches!(self.definition.format, "35c" | "45cc") {
+            i.registers = self
+                .registers
+                .clone()
+                .ok_or_else(|| bad("missing template invoke registers"))?;
+        }
+        if i.range.is_some() {
+            i.range = Some(
+                self.range
+                    .clone()
+                    .ok_or_else(|| bad("missing template invoke range"))?,
+            );
+        }
+        if i.payload.is_some() {
+            i.payload = Some(
+                self.payload
+                    .clone()
+                    .ok_or_else(|| bad("missing template payload"))?,
+            );
+        }
+        encode_version(&i, offset, self.version)
+    }
+    pub fn match_instruction(&self, src: &[u8], offset: u32) -> Option<Instruction> {
+        let i = decode_version(src, offset, self.version).ok()?;
+        if i.opcode != self.definition.opcode
+            || self
+                .fixed
+                .iter()
+                .any(|(name, value)| i.values.get(name) != Some(value))
+            || self.registers.as_ref().is_some_and(|v| *v != i.registers)
+            || self
+                .range
+                .as_ref()
+                .is_some_and(|v| Some(v) != i.range.as_ref())
+            || self
+                .payload
+                .as_ref()
+                .is_some_and(|v| Some(v) != i.payload.as_ref())
+        {
+            return None;
+        }
+        Some(i)
+    }
+}
+fn version(v: u16) -> Result<()> {
+    if [35, 37, 38, 39, 40, 41].contains(&v) {
+        Ok(())
+    } else {
+        Err(bad("unknown DEX version"))
+    }
+}
+fn get(b: &[u8], bit: usize, width: usize) -> u64 {
+    let mut v = 0;
+    for i in 0..width {
+        v |= (((b[(bit + i) / 8] >> ((bit + i) % 8)) & 1) as u64) << i;
+    }
+    v
+}
+fn put(b: &mut [u8], bit: usize, width: usize, v: u64) {
+    for i in 0..width {
+        if v & (1u64 << i) != 0 {
+            b[(bit + i) / 8] |= 1 << ((bit + i) % 8);
+        }
+    }
+}
+fn sx(v: u64, w: usize) -> i64 {
+    if w < 64 && v & (1u64 << (w - 1)) != 0 {
+        (v | (!0u64 << w)) as i64
+    } else {
+        v as i64
+    }
+}
+fn u16at(b: &[u8], p: usize) -> u16 {
+    u16::from_le_bytes([b[p], b[p + 1]])
+}
+fn u32at(b: &[u8], p: usize) -> u32 {
+    u32::from_le_bytes([b[p], b[p + 1], b[p + 2], b[p + 3]])
+}
+fn store16(b: &mut [u8], p: usize, v: u16) {
+    b[p..p + 2].copy_from_slice(&v.to_le_bytes());
+}
+fn store32(b: &mut [u8], p: usize, v: u32) {
+    b[p..p + 4].copy_from_slice(&v.to_le_bytes());
+}
+fn val(i: &Instruction, n: &str) -> Result<i64> {
+    i.values
+        .get(n)
+        .copied()
+        .ok_or_else(|| bad("missing operand"))
+}
+fn validate(d: &Definition, i: &Instruction) -> Result<()> {
+    if i.payload.is_some() {
+        return Err(bad("payload on ordinary opcode"));
+    }
+    for f in d.fields {
+        let v = val(i, f.name)?;
+        if f.shift > 0 && (v as u64) & ((1u64 << f.shift) - 1) != 0 {
+            return Err(bad("nonzero low literal bits"));
+        }
+        let raw = (v >> f.shift) as i128;
+        if f.signed {
+            if f.width < 64 && (raw < -(1i128 << (f.width - 1)) || raw >= (1i128 << (f.width - 1)))
+            {
+                return Err(bad("signed operand out of range"));
+            }
+        } else if raw < 0 || raw >= (1i128 << f.width) {
+            return Err(bad("unsigned operand out of range"));
+        }
+        if f.kind == "target"
+            && v == 0
+            && (i.opcode == 0x28 || i.opcode == 0x29 || (0x32..=0x3d).contains(&i.opcode))
+        {
+            return Err(bad("zero branch offset"));
+        }
+    }
+    if i.values
+        .keys()
+        .any(|k| !d.fields.iter().any(|f| f.name == k))
+    {
+        return Err(bad("unknown operand"));
+    }
+    let list = d.format == "35c" || d.format == "45cc";
+    let range = d.format == "3rc" || d.format == "4rcc";
+    if list {
+        if i.range.is_some() || i.registers.len() > 5 || i.registers.iter().any(|r| *r > 15) {
+            return Err(bad("invalid invoke registers"));
+        }
+        if d.verify.contains("kVerifyVarArgNonZero") && i.registers.is_empty() {
+            return Err(bad("invoke requires receiver"));
+        }
+    } else if !i.registers.is_empty() {
+        return Err(bad("unexpected register list"));
+    }
+    if range {
+        let r = i
+            .range
+            .as_ref()
+            .ok_or_else(|| bad("missing register range"))?;
+        if r.count > 255 || r.start as u32 + r.count as u32 > 65536 {
+            return Err(bad("invalid register range"));
+        }
+        if d.verify.contains("kVerifyVarArgRangeNonZero") && r.count == 0 {
+            return Err(bad("invoke range requires receiver"));
+        }
+    } else if i.range.is_some() {
+        return Err(bad("unexpected register range"));
+    }
+    Ok(())
+}
+pub fn decode(b: &[u8], offset: u32) -> Result<Instruction> {
+    decode_version(b, offset, LATEST_VERSION)
+}
+pub fn decode_version(b: &[u8], offset: u32, v: u16) -> Result<Instruction> {
+    version(v)?;
+    if b.len() < 2 {
+        return Err(Error::Truncated);
+    }
+    let op = if b[0] == 0 && b[1] != 0 {
+        u16at(b, 0)
+    } else {
+        b[0] as u16
+    };
+    let d = definition(op).ok_or(Error::Reserved)?;
+    if d.reserved {
+        return Err(Error::Reserved);
+    }
+    if v < d.min_version {
+        return Err(Error::Version);
+    }
+    let mut i = Instruction {
+        opcode: op,
+        offset,
+        ..Default::default()
+    };
+    if op >= 256 {
+        decode_payload(&mut i, b)?;
+        return Ok(i);
+    }
+    let n = (d.format.as_bytes()[0] - b'0') as usize * 2;
+    if b.len() < n {
+        return Err(Error::Truncated);
+    }
+    i.length = n;
+    let mut mask = vec![0u8; n];
+    mask[0] = 255;
+    for f in d.fields {
+        let raw = get(b, f.bit, f.width);
+        let value = if f.signed {
+            sx(raw, f.width)
+        } else {
+            raw as i64
+        };
+        i.values
+            .insert(f.name.into(), ((value as u64) << f.shift) as i64);
+        put(&mut mask, f.bit, f.width, !0);
+    }
+    match d.format {
+        "35c" | "45cc" => {
+            let count = (b[1] >> 4) as usize;
+            if count > 5 {
+                return Err(bad("invoke count exceeds five"));
+            }
+            mask[1] = 255;
+            mask[4] = 255;
+            mask[5] = 255;
+            for (j, p) in [32, 36, 40, 44, 8].iter().enumerate() {
+                let r = get(b, *p, 4) as u16;
+                if j < count {
+                    i.registers.push(r);
+                } else if r != 0 {
+                    return Err(bad("nonzero unused invoke register"));
+                }
+            }
+        }
+        "3rc" | "4rcc" => {
+            mask[1] = 255;
+            mask[4] = 255;
+            mask[5] = 255;
+            i.range = Some(RegisterRange {
+                start: u16at(b, 4),
+                count: b[1] as u16,
+            });
+        }
+        _ => {}
+    }
+    if (0..n).any(|j| b[j] & !mask[j] != 0) {
+        return Err(bad("nonzero reserved format bits"));
+    }
+    validate(d, &i)?;
+    Ok(i)
+}
+pub fn encode(i: &Instruction, offset: u32) -> Result<Vec<u8>> {
+    encode_version(i, offset, LATEST_VERSION)
+}
+pub fn encode_version(i: &Instruction, offset: u32, v: u16) -> Result<Vec<u8>> {
+    version(v)?;
+    let d = definition(i.opcode).ok_or(Error::Reserved)?;
+    if d.reserved {
+        return Err(Error::Reserved);
+    }
+    if v < d.min_version {
+        return Err(Error::Version);
+    }
+    if i.opcode >= 256 {
+        return encode_payload(i, offset);
+    }
+    validate(d, i)?;
+    let mut b = vec![0u8; (d.format.as_bytes()[0] - b'0') as usize * 2];
+    b[0] = i.opcode as u8;
+    for f in d.fields {
+        put(&mut b, f.bit, f.width, (val(i, f.name)? >> f.shift) as u64);
+    }
+    match d.format {
+        "35c" | "45cc" => {
+            b[1] = (i.registers.len() as u8) << 4;
+            for (j, r) in i.registers.iter().enumerate() {
+                put(&mut b, [32, 36, 40, 44, 8][j], 4, *r as u64);
+            }
+        }
+        "3rc" | "4rcc" => {
+            let r = i.range.as_ref().unwrap();
+            b[1] = r.count as u8;
+            store16(&mut b, 4, r.start);
+        }
+        _ => {}
+    }
+    Ok(b)
+}
+fn decode_payload(i: &mut Instruction, b: &[u8]) -> Result<()> {
+    if i.offset % 2 != 0 {
+        return Err(bad("payload alignment"));
+    }
+    if b.len() < 4 {
+        return Err(Error::Truncated);
+    }
+    let mut p = Payload::default();
+    let mut count = u16at(b, 2) as u64;
+    let n = match i.opcode {
+        0x100 => 8 + count * 4,
+        0x200 => 4 + count * 8,
+        0x300 => {
+            if b.len() < 8 {
+                return Err(Error::Truncated);
+            }
+            p.element_width = count as u16;
+            if ![1, 2, 4, 8].contains(&p.element_width) {
+                return Err(bad("invalid array width"));
+            }
+            count = u32at(b, 4) as u64;
+            (8 + count * p.element_width as u64 + 1) & !1
+        }
+        _ => return Err(Error::Reserved),
+    };
+    if n > b.len() as u64 {
+        return Err(Error::Truncated);
+    }
+    i.length = n as usize;
+    match i.opcode {
+        0x100 => {
+            p.first_key = u32at(b, 4) as i32;
+            if count > 0 && p.first_key as i64 + count as i64 - 1 > i32::MAX as i64 {
+                return Err(bad("packed key overflow"));
+            }
+            for j in 0..count as usize {
+                p.targets.push(u32at(b, 8 + j * 4) as i32);
+            }
+        }
+        0x200 => {
+            for j in 0..count as usize {
+                p.keys.push(u32at(b, 4 + j * 4) as i32);
+                p.targets
+                    .push(u32at(b, 4 + count as usize * 4 + j * 4) as i32);
+                if j > 0 && p.keys[j] <= p.keys[j - 1] {
+                    return Err(bad("unordered sparse keys"));
+                }
+            }
+        }
+        0x300 => {
+            let size = count as usize * p.element_width as usize;
+            p.data = b[8..8 + size].to_vec();
+            if size % 2 != 0 && b[i.length - 1] != 0 {
+                return Err(bad("nonzero array padding"));
+            }
+        }
+        _ => unreachable!(),
+    };
+    i.payload = Some(p);
+    Ok(())
+}
+fn encode_payload(i: &Instruction, offset: u32) -> Result<Vec<u8>> {
+    if offset % 2 != 0 {
+        return Err(bad("payload alignment"));
+    }
+    let p = i.payload.as_ref().ok_or_else(|| bad("missing payload"))?;
+    if !i.values.is_empty() || !i.registers.is_empty() || i.range.is_some() {
+        return Err(bad("unexpected payload operands"));
+    }
+    let mut count = p.targets.len();
+    let n = match i.opcode {
+        0x100 => {
+            if count > 65535
+                || !p.keys.is_empty()
+                || p.element_width != 0
+                || !p.data.is_empty()
+                || count > 0 && p.first_key as i64 + count as i64 - 1 > i32::MAX as i64
+            {
+                return Err(bad("invalid packed payload"));
+            }
+            8 + 4 * count
+        }
+        0x200 => {
+            if count > 65535
+                || count != p.keys.len()
+                || p.first_key != 0
+                || p.element_width != 0
+                || !p.data.is_empty()
+                || p.keys.windows(2).any(|w| w[0] >= w[1])
+            {
+                return Err(bad("invalid sparse payload"));
+            }
+            4 + 8 * count
+        }
+        0x300 => {
+            let w = p.element_width as usize;
+            if ![1, 2, 4, 8].contains(&w)
+                || count != 0
+                || !p.keys.is_empty()
+                || p.first_key != 0
+                || p.data.len() % w != 0
+                || p.data.len() / w > u32::MAX as usize
+            {
+                return Err(bad("invalid array payload"));
+            }
+            count = p.data.len() / w;
+            (8 + p.data.len() + 1) & !1
+        }
+        _ => return Err(Error::Reserved),
+    };
+    let mut b = vec![0u8; n];
+    store16(&mut b, 0, i.opcode);
+    match i.opcode {
+        0x100 => {
+            store16(&mut b, 2, count as u16);
+            store32(&mut b, 4, p.first_key as u32);
+            for (j, t) in p.targets.iter().enumerate() {
+                store32(&mut b, 8 + j * 4, *t as u32);
+            }
+        }
+        0x200 => {
+            store16(&mut b, 2, count as u16);
+            for (j, k) in p.keys.iter().enumerate() {
+                store32(&mut b, 4 + j * 4, *k as u32);
+                store32(&mut b, 4 + count * 4 + j * 4, p.targets[j] as u32);
+            }
+        }
+        0x300 => {
+            store16(&mut b, 2, p.element_width);
+            store32(&mut b, 4, count as u32);
+            b[8..8 + p.data.len()].copy_from_slice(&p.data);
+        }
+        _ => unreachable!(),
+    };
+    Ok(b)
+}
+fn pool(k: &str) -> &str {
+    match k {
+        "String" => "string",
+        "Type" => "type",
+        "Field" => "field",
+        "Method" | "MethodAndProto" => "method",
+        "Proto" => "proto",
+        "CallSite" => "call_site",
+        "MethodHandle" => "method_handle",
+        _ => k,
+    }
+}
+pub fn format(i: &Instruction) -> String {
+    let d = match definition(i.opcode) {
+        Some(d) => d,
+        None => return "<unknown>".into(),
+    };
+    let mut args = Vec::new();
+    if let Some(p) = &i.payload {
+        match i.opcode {
+            0x100 => {
+                return format!(
+                    "{} {}, {{{}}}",
+                    d.mnemonic,
+                    p.first_key,
+                    p.targets
+                        .iter()
+                        .map(|v| format!("{:+}", v))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            0x200 => {
+                return format!(
+                    "{} {{{}}}",
+                    d.mnemonic,
+                    p.targets
+                        .iter()
+                        .enumerate()
+                        .map(|(j, v)| format!("{}:{:+}", p.keys[j], v))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            0x300 => {
+                let w = p.element_width as usize;
+                if w == 0 {
+                    return "<invalid array>".into();
+                }
+                return format!(
+                    "{} {}, {{{}}}",
+                    d.mnemonic,
+                    w,
+                    p.data
+                        .chunks_exact(w)
+                        .map(|b| {
+                            let mut v = 0u64;
+                            for (j, x) in b.iter().enumerate() {
+                                v |= (*x as u64) << (j * 8);
+                            }
+                            format!("0x{:x}", v)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            _ => {}
+        }
+    }
+    if d.format == "35c" || d.format == "45cc" {
+        args.push(format!(
+            "{{{}}}",
+            i.registers
+                .iter()
+                .map(|r| format!("v{}", r))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(r) = &i.range {
+        args.push(if r.count == 0 && r.start == 0 {
+            "{}".into()
+        } else {
+            format!(
+                "{{v{} .. v{}}}",
+                r.start,
+                r.start as i64 + r.count as i64 - 1
+            )
+        });
+    }
+    for f in d.fields {
+        let v = i.values.get(f.name).copied().unwrap_or(0);
+        args.push(match f.kind {
+            "register" => format!("v{}", v),
+            "literal" => format!("#{}", v),
+            "target" => {
+                let t = i.offset as i64 + v;
+                if t < 0 {
+                    format!("{}", t)
+                } else {
+                    format!("0x{:x}", t)
+                }
+            }
+            _ => format!("{}@{}", pool(f.kind), v),
+        });
+    }
+    if args.is_empty() {
+        d.mnemonic.into()
+    } else {
+        format!("{} {}", d.mnemonic, args.join(", "))
+    }
+}
+fn number(s: &str) -> Result<i64> {
+    let s = s.trim().trim_start_matches('#');
+    let (neg, d) = if let Some(t) = s.strip_prefix('-') {
+        (true, t)
+    } else {
+        (false, s.strip_prefix('+').unwrap_or(s))
+    };
+    let (radix, d) = if let Some(t) = d.strip_prefix("0x") {
+        (16, t)
+    } else if let Some(t) = d.strip_prefix("0b") {
+        (2, t)
+    } else {
+        (10, d)
+    };
+    let n = i128::from_str_radix(d, radix).map_err(|_| bad("invalid number"))?;
+    let n = if neg { -n } else { n };
+    i64::try_from(n).map_err(|_| bad("number out of range"))
+}
+fn parts(s: &str) -> Result<Vec<&str>> {
+    if s.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let mut out = vec![];
+    let (mut depth, mut start) = (0, 0);
+    for (j, c) in s.char_indices() {
+        match c {
+            '{' => {
+                depth += 1;
+                if depth > 1 {
+                    return Err(bad("nested operands"));
+                }
+            }
+            '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return Err(bad("unexpected brace"));
+                }
+            }
+            ',' if depth == 0 => {
+                out.push(s[start..j].trim());
+                start = j + 1;
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        return Err(bad("unclosed operand list"));
+    }
+    out.push(s[start..].trim());
+    Ok(out)
+}
+fn body(s: &str) -> Result<&str> {
+    s.trim()
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .ok_or_else(|| bad("expected braces"))
+}
+fn reg(s: &str) -> Result<u16> {
+    s.trim()
+        .strip_prefix('v')
+        .ok_or_else(|| bad("expected v register"))?
+        .parse()
+        .map_err(|_| bad("invalid register"))
+}
+pub fn assemble(s: &str, offset: u32) -> Result<Vec<u8>> {
+    assemble_version(s, offset, LATEST_VERSION)
+}
+pub fn assemble_version(s: &str, offset: u32, v: u16) -> Result<Vec<u8>> {
+    let s = s.split("//").next().unwrap_or("").trim();
+    let (name, args) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
+    let d = INSTRUCTIONS
+        .iter()
+        .find(|d| d.mnemonic == name)
+        .ok_or_else(|| bad("unknown mnemonic"))?;
+    let mut i = Instruction {
+        opcode: d.opcode,
+        offset,
+        ..Default::default()
+    };
+    let t = parts(args.trim())?;
+    if d.opcode >= 256 {
+        let mut p = Payload::default();
+        let bs = match d.opcode {
+            0x100 => {
+                if t.len() != 2 {
+                    return Err(bad("packed payload operands"));
+                }
+                p.first_key = i32::try_from(number(t[0])?).map_err(|_| bad("first key range"))?;
+                body(t[1])?
+            }
+            0x200 => {
+                if t.len() != 1 {
+                    return Err(bad("sparse payload operands"));
+                }
+                body(t[0])?
+            }
+            0x300 => {
+                if t.len() != 2 {
+                    return Err(bad("array payload operands"));
+                }
+                p.element_width = u16::try_from(number(t[0])?).map_err(|_| bad("array width"))?;
+                if ![1, 2, 4, 8].contains(&p.element_width) {
+                    return Err(bad("array width"));
+                }
+                body(t[1])?
+            }
+            _ => return Err(Error::Reserved),
+        };
+        for mut s in parts(bs)? {
+            if d.opcode == 0x300 {
+                let w = p.element_width as usize;
+                let x = if let Some(x) = s.strip_prefix("0x") {
+                    u64::from_str_radix(x, 16).map_err(|_| bad("array value"))?
+                } else {
+                    match s.parse::<u64>() {
+                        Ok(n) => n,
+                        Err(_) => number(s)? as u64,
+                    }
+                };
+                if w < 8 && x >= (1u64 << (w * 8)) {
+                    return Err(bad("array value range"));
+                }
+                p.data.extend_from_slice(&x.to_le_bytes()[..w]);
+                continue;
+            }
+            if d.opcode == 0x200 {
+                let (k, t) = s.split_once(':').ok_or_else(|| bad("sparse pair"))?;
+                p.keys
+                    .push(i32::try_from(number(k)?).map_err(|_| bad("key range"))?);
+                s = t;
+            }
+            p.targets
+                .push(i32::try_from(number(s)?).map_err(|_| bad("target range"))?);
+        }
+        i.payload = Some(p);
+        return encode_version(&i, offset, v);
+    }
+    let list = d.format == "35c" || d.format == "45cc";
+    let range = d.format == "3rc" || d.format == "4rcc";
+    let extra = usize::from(list || range);
+    if t.len() != d.fields.len() + extra {
+        return Err(bad("operand count"));
+    }
+    if extra == 1 {
+        let b = body(t[0])?;
+        if range {
+            let mut r = RegisterRange::default();
+            if !b.trim().is_empty() {
+                let (a, z) = b.split_once("..").ok_or_else(|| bad("range syntax"))?;
+                r.start = reg(a)?;
+                let last = number(z.trim().strip_prefix('v').ok_or_else(|| bad("range end"))?)?;
+                if last < r.start as i64 - 1 || last > 65535 || last - r.start as i64 + 1 > 255 {
+                    return Err(bad("range end"));
+                }
+                r.count = (last - r.start as i64 + 1) as u16;
+            }
+            i.range = Some(r);
+        } else {
+            for s in parts(b)? {
+                i.registers.push(reg(s)?);
+            }
+        }
+    }
+    for (j, f) in d.fields.iter().enumerate() {
+        let s = t[j + extra];
+        let value = match f.kind {
+            "register" => reg(s)? as i64,
+            "literal" => number(s)?,
+            "target" => {
+                let n = number(s)?;
+                i32::try_from(n - offset as i64).map_err(|_| bad("target range"))? as i64
+            }
+            _ => number(
+                s.strip_prefix(&format!("{}@", pool(f.kind)))
+                    .ok_or_else(|| bad("pool prefix"))?,
+            )?,
+        };
+        i.values.insert(f.name.into(), value);
+    }
+    encode_version(&i, offset, v)
+}
+pub fn templates() -> Vec<String> {
+    let mut out = vec![];
+    for d in INSTRUCTIONS {
+        if d.reserved {
+            continue;
+        }
+        let mut i = Instruction {
+            opcode: d.opcode,
+            ..Default::default()
+        };
+        for f in d.fields {
+            i.values
+                .insert(f.name.into(), if f.kind == "target" { 1 } else { 0 });
+        }
+        if d.format == "35c" || d.format == "45cc" {
+            i.registers = vec![0];
+        }
+        if d.format == "3rc" || d.format == "4rcc" {
+            i.range = Some(RegisterRange { start: 0, count: 1 });
+        }
+        if d.opcode >= 256 {
+            i.payload = Some(Payload {
+                element_width: if d.opcode == 0x300 { 1 } else { 0 },
+                ..Default::default()
+            });
+        }
+        out.push(format(&i));
+    }
+    out
+}
+pub fn decode_method(b: &[u8], v: u16) -> Result<Vec<Instruction>> {
+    if b.len() % 2 != 0 {
+        return Err(Error::Truncated);
+    }
+    if b.len() / 2 > u32::MAX as usize {
+        return Err(bad("method too large"));
+    }
+    let mut out = vec![];
+    let mut pos = 0;
+    while pos < b.len() {
+        let i = decode_version(&b[pos..], (pos / 2) as u32, v)?;
+        pos += i.length;
+        out.push(i);
+    }
+    validate_method(&out, (b.len() / 2) as u32)?;
+    Ok(out)
+}
+fn target<'a>(
+    by: &BTreeMap<u32, &'a Instruction>,
+    units: u32,
+    base: u32,
+    delta: i32,
+    payload: bool,
+) -> Result<&'a Instruction> {
+    let v = base as i64 + delta as i64;
+    if v < 0 || v >= units as i64 {
+        return Err(bad("target outside method"));
+    }
+    let t = by
+        .get(&(v as u32))
+        .ok_or_else(|| bad("target is not an instruction boundary"))?;
+    if !payload && t.payload.is_some() {
+        return Err(bad("branch targets data"));
+    }
+    Ok(t)
+}
+pub fn validate_method(ins: &[Instruction], units: u32) -> Result<()> {
+    validate_method_entries(ins, units, &[0])
+}
+fn validate_method_entries(ins: &[Instruction], units: u32, entries: &[u32]) -> Result<()> {
+    if ins.is_empty() {
+        return Err(bad("empty method"));
+    }
+    let mut by = BTreeMap::new();
+    let mut next = 0u64;
+    for i in ins {
+        if i.offset as u64 != next
+            || i.length < 2
+            || i.length % 2 != 0
+            || next + i.length as u64 / 2 > units as u64
+        {
+            return Err(bad("noncontiguous instruction array"));
+        }
+        if encode(i, i.offset)?.len() != i.length {
+            return Err(bad("instruction length disagrees with format"));
+        }
+        by.insert(i.offset, i);
+        next += i.length as u64 / 2;
+    }
+    if next != units as u64 || ins[0].payload.is_some() {
+        return Err(bad("invalid method size or entry"));
+    }
+    let mut edges: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for i in ins {
+        if i.payload.is_some() {
+            continue;
+        }
+        let d = definition(i.opcode).ok_or(Error::Reserved)?;
+        if let Some(v) = i.values.get("target") {
+            let payload = d.format == "31t";
+            let to = target(&by, units, i.offset, *v as i32, payload)?;
+            if payload {
+                let expected = match i.opcode {
+                    0x2b => 0x100,
+                    0x2c => 0x200,
+                    _ => 0x300,
+                };
+                if to.opcode != expected {
+                    return Err(bad("wrong payload kind"));
+                }
+                let p = to.payload.as_ref().ok_or_else(|| bad("missing payload"))?;
+                for delta in &p.targets {
+                    let case = target(&by, units, i.offset, *delta, false)?;
+                    edges.entry(i.offset).or_default().push(case.offset);
+                }
+            } else {
+                edges.entry(i.offset).or_default().push(to.offset);
+            }
+        }
+        if d.flags.contains("kContinue") {
+            let off = i.offset + i.length as u32 / 2;
+            edges.entry(i.offset).or_default().push(off);
+        }
+    }
+    let mut stack = entries.to_vec();
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(off) = stack.pop() {
+        if !seen.insert(off) {
+            continue;
+        }
+        if by.get(&off).map_or(true, |i| i.payload.is_some()) {
+            return Err(bad("reachable flow outside code or into payload"));
+        }
+        if let Some(es) = edges.get(&off) {
+            stack.extend_from_slice(es);
+        }
+    }
+    Ok(())
+}
+pub type PoolSizes = BTreeMap<String, u32>;
+pub fn validate_registers(
+    ins: &[Instruction],
+    registers: u16,
+    outs: u16,
+    pools: &PoolSizes,
+) -> Result<()> {
+    for i in ins {
+        if i.payload.is_some() {
+            continue;
+        }
+        let d = definition(i.opcode).ok_or(Error::Reserved)?;
+        for f in d.fields {
+            let v = val(i, f.name)?;
+            if f.kind == "register" {
+                if v < 0 || v + if f.wide { 2 } else { 1 } > registers as i64 {
+                    return Err(bad("register exceeds frame"));
+                }
+            } else {
+                let k = if f.kind == "MethodAndProto" {
+                    "Method"
+                } else {
+                    f.kind
+                };
+                if let Some(n) = pools.get(k) {
+                    if v < 0 || v as u64 >= *n as u64 {
+                        return Err(bad("pool index out of range"));
+                    }
+                }
+            }
+        }
+        if i.registers.iter().any(|r| *r >= registers) {
+            return Err(bad("invoke register exceeds frame"));
+        }
+        let count = if let Some(r) = &i.range {
+            if r.start as u32 + r.count as u32 > registers as u32 {
+                return Err(bad("range exceeds frame"));
+            }
+            r.count as usize
+        } else {
+            i.registers.len()
+        };
+        if (d.flags.contains("kInvoke") || i.opcode == 0xfc || i.opcode == 0xfd)
+            && count > outs as usize
+        {
+            return Err(bad("invoke exceeds outs_size"));
+        }
+    }
+    Ok(())
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CodeItem {
+    pub registers_size: u16,
+    pub ins_size: u16,
+    pub outs_size: u16,
+    pub debug_info_offset: u32,
+    pub instructions: Vec<Instruction>,
+    pub tries: Vec<Try>,
+    pub handlers: Vec<CatchHandler>,
+    pub length: usize,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Try {
+    pub start: u32,
+    pub count: u16,
+    pub handler: usize,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CatchHandler {
+    pub catches: Vec<Catch>,
+    pub catch_all: Option<u32>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Catch {
+    pub type_index: u32,
+    pub address: u32,
+}
+fn uleb(b: &[u8], p: &mut usize) -> Result<u32> {
+    let mut v = 0u32;
+    for j in 0..5 {
+        let x = *b.get(*p).ok_or(Error::Truncated)?;
+        *p += 1;
+        if j == 4 && x > 15 {
+            return Err(bad("ULEB overflow"));
+        }
+        v |= ((x & 127) as u32) << (j * 7);
+        if x < 128 {
+            return Ok(v);
+        }
+    }
+    Err(bad("invalid ULEB"))
+}
+fn sleb(b: &[u8], p: &mut usize) -> Result<i32> {
+    let mut v = 0u32;
+    for j in 0..5 {
+        let x = *b.get(*p).ok_or(Error::Truncated)?;
+        *p += 1;
+        if j == 4 && (x & 0x78 != 0 && x & 0x78 != 0x78) {
+            return Err(bad("SLEB overflow"));
+        }
+        v |= ((x & 127) as u32) << (j * 7);
+        if x < 128 {
+            let bits = (j + 1) * 7;
+            if bits < 32 && x & 64 != 0 {
+                v |= !0u32 << bits;
+            }
+            return Ok(v as i32);
+        }
+    }
+    Err(bad("invalid SLEB"))
+}
+fn push_uleb(b: &mut Vec<u8>, mut v: u32) {
+    loop {
+        let mut n = (v & 127) as u8;
+        v >>= 7;
+        if v != 0 {
+            n |= 128;
+        }
+        b.push(n);
+        if v == 0 {
+            return;
+        }
+    }
+}
+fn push_sleb(b: &mut Vec<u8>, mut v: i32) {
+    loop {
+        let mut n = (v as u8) & 127;
+        v >>= 7;
+        let done = (v == 0 && n & 64 == 0) || (v == -1 && n & 64 != 0);
+        if !done {
+            n |= 128;
+        }
+        b.push(n);
+        if done {
+            return;
+        }
+    }
+}
+fn validate_code_item(ci: &CodeItem, units: u32, pools: &PoolSizes) -> Result<()> {
+    if ci.ins_size > ci.registers_size || ci.tries.len() > 65535 {
+        return Err(bad("invalid code_item header"));
+    }
+    validate_registers(&ci.instructions, ci.registers_size, ci.outs_size, pools)?;
+    let by = ci
+        .instructions
+        .iter()
+        .map(|i| (i.offset, i))
+        .collect::<BTreeMap<_, _>>();
+    let valid = |a: u32| by.get(&a).map_or(false, |i| i.payload.is_none());
+    let mut last = 0u64;
+    for t in &ci.tries {
+        let end = t.start as u64 + t.count as u64;
+        if t.count == 0
+            || (t.start as u64) < last
+            || end > units as u64
+            || !valid(t.start)
+            || (end < units as u64 && !by.contains_key(&(end as u32)))
+            || t.handler >= ci.handlers.len()
+        {
+            return Err(bad("invalid try item"));
+        }
+        last = end;
+    }
+    if ci.tries.is_empty() && !ci.handlers.is_empty() {
+        return Err(bad("handlers without tries"));
+    }
+    for h in &ci.handlers {
+        if h.catches.is_empty() && h.catch_all.is_none() {
+            return Err(bad("empty catch handler"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for p in &h.catches {
+            if !valid(p.address) || !seen.insert(p.type_index) {
+                return Err(bad("invalid catch handler"));
+            }
+            if pools.get("Type").map_or(false, |n| p.type_index >= *n) {
+                return Err(bad("catch type outside pool"));
+            }
+        }
+        if h.catch_all.map_or(false, |a| !valid(a)) {
+            return Err(bad("catch-all outside code"));
+        }
+    }
+    let mut entries = vec![0];
+    for h in &ci.handlers {
+        for p in &h.catches {
+            entries.push(p.address);
+        }
+        if let Some(a) = h.catch_all {
+            entries.push(a);
+        }
+    }
+    validate_method_entries(&ci.instructions, units, &entries)
+}
+pub fn decode_code_item(b: &[u8], v: u16) -> Result<CodeItem> {
+    if b.len() < 16 {
+        return Err(Error::Truncated);
+    }
+    let mut ci = CodeItem {
+        registers_size: u16at(b, 0),
+        ins_size: u16at(b, 2),
+        outs_size: u16at(b, 4),
+        debug_info_offset: u32at(b, 8),
+        ..Default::default()
+    };
+    let tries = u16at(b, 6) as usize;
+    let units = u32at(b, 12);
+    let end = 16 + units as u64 * 2;
+    if end > b.len() as u64 {
+        return Err(Error::Truncated);
+    }
+    ci.instructions = decode_method(&b[16..end as usize], v)?;
+    let mut pos = end as usize;
+    if tries > 0 {
+        if units % 2 != 0 {
+            if pos + 2 > b.len() {
+                return Err(Error::Truncated);
+            }
+            if u16at(b, pos) != 0 {
+                return Err(bad("nonzero code padding"));
+            }
+            pos += 2;
+        }
+        if pos + tries * 8 > b.len() {
+            return Err(Error::Truncated);
+        }
+        let trystart = pos;
+        pos += tries * 8;
+        let handlerstart = pos;
+        let count = uleb(b, &mut pos)? as usize;
+        if count > b.len() - pos {
+            return Err(Error::Truncated);
+        }
+        let mut offsets = BTreeMap::new();
+        for j in 0..count {
+            offsets.insert(pos - handlerstart, j);
+            let size = sleb(b, &mut pos)?;
+            let n = (size as i64).unsigned_abs() as usize;
+            if n > (b.len() - pos) / 2 {
+                return Err(Error::Truncated);
+            }
+            let mut h = CatchHandler::default();
+            for _ in 0..n {
+                h.catches.push(Catch {
+                    type_index: uleb(b, &mut pos)?,
+                    address: uleb(b, &mut pos)?,
+                });
+            }
+            if size <= 0 {
+                h.catch_all = Some(uleb(b, &mut pos)?);
+            }
+            ci.handlers.push(h);
+        }
+        for j in 0..tries {
+            let p = trystart + j * 8;
+            let handler = *offsets
+                .get(&(u16at(b, p + 6) as usize))
+                .ok_or_else(|| bad("handler offset boundary"))?;
+            ci.tries.push(Try {
+                start: u32at(b, p),
+                count: u16at(b, p + 4),
+                handler,
+            });
+        }
+    }
+    ci.length = pos;
+    validate_code_item(&ci, units, &BTreeMap::new())?;
+    Ok(ci)
+}
+pub fn encode_code_item(ci: &CodeItem, v: u16) -> Result<Vec<u8>> {
+    let mut code = vec![];
+    for i in &ci.instructions {
+        if i.offset as usize != code.len() / 2 {
+            return Err(bad("noncontiguous code_item"));
+        }
+        code.extend_from_slice(&encode_version(i, i.offset, v)?);
+    }
+    let units = u32::try_from(code.len() / 2).map_err(|_| bad("method too large"))?;
+    let ins = decode_method(&code, v)?;
+    let mut copy = ci.clone();
+    copy.instructions = ins;
+    validate_code_item(&copy, units, &BTreeMap::new())?;
+    let mut b = vec![0u8; 16];
+    store16(&mut b, 0, ci.registers_size);
+    store16(&mut b, 2, ci.ins_size);
+    store16(&mut b, 4, ci.outs_size);
+    store16(&mut b, 6, ci.tries.len() as u16);
+    store32(&mut b, 8, ci.debug_info_offset);
+    store32(&mut b, 12, units);
+    b.extend_from_slice(&code);
+    if !ci.tries.is_empty() {
+        if units % 2 != 0 {
+            b.extend_from_slice(&[0, 0]);
+        }
+        let mut handlers = vec![];
+        push_uleb(&mut handlers, ci.handlers.len() as u32);
+        let mut offsets = vec![];
+        for h in &ci.handlers {
+            offsets.push(handlers.len());
+            let mut n = i32::try_from(h.catches.len()).map_err(|_| bad("too many catches"))?;
+            if h.catch_all.is_some() {
+                n = -n;
+            }
+            push_sleb(&mut handlers, n);
+            for p in &h.catches {
+                push_uleb(&mut handlers, p.type_index);
+                push_uleb(&mut handlers, p.address);
+            }
+            if let Some(a) = h.catch_all {
+                push_uleb(&mut handlers, a);
+            }
+        }
+        for t in &ci.tries {
+            let off =
+                u16::try_from(offsets[t.handler]).map_err(|_| bad("handler offset too large"))?;
+            b.extend_from_slice(&t.start.to_le_bytes());
+            b.extend_from_slice(&t.count.to_le_bytes());
+            b.extend_from_slice(&off.to_le_bytes());
+        }
+        b.extend_from_slice(&handlers);
+    }
+    Ok(b)
+}

@@ -1,0 +1,52 @@
+use mkasm_dex::*;
+#[test] fn structured_templates() {
+    for line in include_str!("oracle.tsv").lines() {
+        let fields: Vec<_> = line.split('\t').collect();
+        let expected = bytes(fields[2]);
+        let i = decode(&expected, 100).unwrap();
+        let d = definition(i.opcode).unwrap();
+        let a=i.describe().unwrap();assert_eq!(a.text,format(&i));for span in &a.operands{assert!(!a.text[span.start..span.end].is_empty());}assert_eq!(i.relocated(100).unwrap(),i);if let Ok(moved)=i.relocated(102){for f in d.fields{if f.kind=="target"{assert_eq!(moved.values[f.name]+102,i.values[f.name]+100);}}}
+        let mut t = InstructionTemplate::new(d.mnemonic).unwrap();assert!(t.could_match(&expected));assert!(t.holes().iter().all(|h|!h.name.is_empty()&&!h.kind.is_empty()));
+        assert_eq!(t.match_instruction(&expected, 100).unwrap(), i);
+        for (name, value) in &i.values { t.set(name, *value).unwrap(); }
+        match d.format {
+            "35c" | "45cc" => { t.set_registers(&i.registers).unwrap(); },
+            "3rc" | "4rcc" => { t.set_range(i.range.clone().unwrap()).unwrap(); },
+            _ => {}
+        }
+        if let Some(p) = &i.payload { t.set_payload(p).unwrap(); }
+        assert_eq!(t.encode(100).unwrap(), expected);assert!(t.holes().is_empty());
+    }
+    let mut t = InstructionTemplate::new("const/4").unwrap();
+    assert!(t.encode(0).is_err()); assert!(t.set("a",16).is_err());
+    t.set("a",3).unwrap(); assert!(t.match_instruction(&[0x12,0x42],0).is_none());
+    assert!(t.set_registers(&[]).is_err());
+    assert!(matches!(InstructionTemplate::new_version("invoke-polymorphic",35),Err(Error::Version)));
+    let mut t = InstructionTemplate::new("array-data-payload").unwrap();
+    let mut p = Payload {element_width:1,data:vec![1,2,3],..Default::default()};
+    t.set_payload(&p).unwrap(); p.data[0]=99;
+    assert_eq!(t.encode(0).unwrap()[8],1); assert!(t.encode(1).is_err());
+}
+fn bytes(s:&str)->Vec<u8>{s.as_bytes().chunks_exact(2).map(|b|u8::from_str_radix(std::str::from_utf8(b).unwrap(),16).unwrap()).collect()}
+fn sample(d:&Definition)->Instruction{let mut i=Instruction{opcode:d.opcode,offset:100,..Default::default()};for f in d.fields{let v=match f.kind{"register"=>match f.name{"a"=>3,"b"=>5,_=>7},"literal"=>-7i64<<f.shift,"target"=>-3,_=>5};i.values.insert(f.name.into(),v);}match d.format{"35c"|"45cc"=>i.registers=vec![1,3,5,7,9],"3rc"|"4rcc"=>i.range=Some(RegisterRange{start:257,count:6}),_=>{}}i}
+#[test]fn oracle_all_forms(){let mut count=0;for line in include_str!("oracle.tsv").lines(){let t=line.split('\t').collect::<Vec<_>>();let op=t[0].parse::<u16>().unwrap();let d=definition(op).unwrap();let mut i=sample(d);if op>=256{let mut p=Payload::default();match op{256=>{p.first_key=-5;p.targets=vec![-3,-1,1];},512=>{p.keys=vec![-5,-2,1];p.targets=vec![-3,-1,1];},768=>{p.element_width=t[1][5..].parse().unwrap();p.data=vec![0;3*p.element_width as usize];for j in 0..3{p.data[j*p.element_width as usize]=(j+1)as u8;}},_=>unreachable!()}i.payload=Some(p);}let expected=bytes(t[2]);let b=encode(&i,100).unwrap();assert_eq!(b,expected,"{}",d.mnemonic);let decoded=decode(&b,100).unwrap();assert_eq!(encode(&decoded,100).unwrap(),b);let text=format(&decoded);assert_eq!(assemble(&text,100).unwrap(),b,"{}",text);for n in 0..b.len(){assert_eq!(decode(&b[..n],100),Err(Error::Truncated),"{} prefix{}",d.mnemonic,n);}count+=1;}assert_eq!(count,templates().len()+3);}
+#[test]fn actual_smali_code_items(){let methods:&[(&[u8],u16)]=&[METHODS];assert_eq!(methods.len(),5);for(b,v)in methods{let ci=decode_code_item(b,*v).unwrap();assert_eq!(ci.length,b.len());assert_eq!(encode_code_item(&ci,*v).unwrap(),*b);for i in &ci.instructions{let text=format(i);assert_eq!(assemble_version(&text,i.offset,*v).unwrap(),encode_version(i,i.offset,*v).unwrap());}}}
+#[test]fn invalid_and_version(){for b in [&[0,4][..],&[0x0e,1],&[0x6e,0x60,0,0,0,0],&[0x28,0],&[0x32,0,0,0],&[0,3,1,0,1,0,0,0,5,1]]{assert!(decode(b,0).is_err());}for op in [0xfa,0xfc,0xfe,0xff]{assert_eq!(encode_version(&sample(definition(op).unwrap()),0,35),Err(Error::Version));}assert!(decode_method(&[0x28,2,0x14,0,0,0,0,0,0x0e,0],39).is_err());for text in templates(){assert!(assemble(&text,0).is_ok(),"{}",text);}}
+#[test]fn bounded_random_decode(){let mut state=0x123456789abcdefu64;for n in 0..100000{let mut b=vec![0u8;n%64];for x in &mut b{state^=state<<13;state^=state>>7;state^=state<<17;*x=state as u8;}let offset=(n%6)as u32;if let Ok(i)=decode(&b,offset){assert_eq!(encode(&i,offset).unwrap(),b[..i.length]);let text=format(&i);assert_eq!(assemble(&text,offset).unwrap(),b[..i.length],"{}",text);}let _=decode_code_item(&b,39);}}
+
+#[cfg(test)]
+mod opcode_index_tests {
+    use super::*;
+    #[test]
+    fn definition_matches_catalog_for_every_opcode() {
+        for op in 0..=u16::MAX {
+            let expected = INSTRUCTIONS.iter().find(|d| d.opcode == op);
+            let actual = definition(op);
+            assert!(match (expected, actual) {
+                (Some(a), Some(b)) => std::ptr::eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }, "opcode {op:#x}");
+        }
+    }
+}
