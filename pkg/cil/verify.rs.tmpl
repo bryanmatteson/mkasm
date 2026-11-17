@@ -1,0 +1,67 @@
+/// Metadata-resolved variable stack effect. Explicit-this signatures count this
+/// in parameters and set has_this=false.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CallEffect { pub parameters:usize, pub has_this:bool, pub returns_value:bool }
+#[derive(Clone, Copy, Debug, Default)]
+pub struct VerificationContext { pub arguments:usize, pub locals:usize, pub returns_value:bool }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StackAnalysis { pub max_stack:u16, pub heights:BTreeMap<u32,usize>, pub reachable_instructions:usize }
+
+/// Analyze evaluation-stack heights across branches, switches and EH entries.
+/// Assignability and external type loading are separate from this analysis.
+pub fn analyze_stack(body:&MethodBody,ctx:VerificationContext,mut resolve:impl FnMut(u32)->Result<CallEffect>)->Result<StackAnalysis>{
+    let ins=decode_method(&body.code)?;
+    if ins.is_empty(){return malformed("empty method");}
+    validate_eh(&body.sections,&ins,body.code.len())?;
+    let indexes:BTreeMap<u32,usize>=ins.iter().enumerate().map(|(i,x)|(x.offset,i)).collect();
+    let mut out=StackAnalysis{max_stack:0,heights:BTreeMap::new(),reachable_instructions:0};
+    let mut queue=std::collections::VecDeque::new();
+    fn add(at:u32,h:usize,indexes:&BTreeMap<u32,usize>,out:&mut StackAnalysis,queue:&mut std::collections::VecDeque<u32>)->Result<()>{
+        if !indexes.contains_key(&at){return malformed("control flow falls outside method");}
+        if let Some(old)=out.heights.get(&at){if *old!=h{return malformed("inconsistent stack height");}}else{out.heights.insert(at,h);queue.push_back(at);}Ok(())
+    }
+    add(0,0,&indexes,&mut out,&mut queue)?;
+    for s in &body.sections {for c in &s.clauses{
+        add(c.handler_offset,usize::from(c.flags==0||c.flags==1),&indexes,&mut out,&mut queue)?;
+        if c.flags==1{add(c.class_token_or_filter_offset,1,&indexes,&mut out,&mut queue)?;}
+    }}
+    while let Some(at)=queue.pop_front(){
+        let x=&ins[indexes[&at]];let d=definition(x.opcode).ok_or(Error::Reserved(x.opcode))?;let name=d.mnemonic;
+        let h=out.heights[&at];out.max_stack=out.max_stack.max(u16::try_from(h).map_err(|_|Error::Malformed("maxstack overflow"))?);out.reachable_instructions+=1;
+        for (prefix,count) in [("ldarg",ctx.arguments),("ldarga",ctx.arguments),("starg",ctx.arguments),("ldloc",ctx.locals),("ldloca",ctx.locals),("stloc",ctx.locals)]{
+            if name==prefix||name.strip_prefix(prefix).is_some_and(|s|s.starts_with('.')){
+                let index=name.strip_prefix(prefix).and_then(|s|s.strip_prefix('.')).and_then(|s|s.parse::<usize>().ok()).or_else(||if let Operand::Variable(v)=x.operand{Some(v as usize)}else{None}).ok_or(Error::Malformed("variable index"))?;
+                if index>=count{return malformed("variable index out of range");}
+            }
+        }
+        let(mut pop,mut push)=(d.pop_count,d.push_count);
+        if name=="ret"{pop=i32::from(ctx.returns_value);push=0;}
+        else if matches!(name,"call"|"callvirt"|"calli"|"newobj"|"jmp"){
+            let token=if let Operand::Token(v)=x.operand{v}else{return malformed("call token");};let e=resolve(token)?;
+            pop=i32::try_from(e.parameters).map_err(|_|Error::Malformed("call parameters overflow"))?;
+            if e.has_this&&name!="newobj"{pop=pop.checked_add(1).ok_or(Error::Malformed("call parameters overflow"))?;}
+            if name=="calli"{pop=pop.checked_add(1).ok_or(Error::Malformed("call parameters overflow"))?;}
+            push=i32::from(e.returns_value||name=="newobj");
+            if name=="jmp"{if h!=0{return malformed("jmp requires empty stack");}pop=0;push=0;}
+        }
+        if pop<0||push<0{return malformed("unresolved variable stack effect");}
+        if h<pop as usize{return malformed("stack underflow");}
+        let mut next=h-pop as usize+push as usize;
+        out.max_stack=out.max_stack.max(u16::try_from(next).map_err(|_|Error::Malformed("maxstack overflow"))?);
+        if matches!(name,"throw"|"rethrow"|"endfinally"){continue;}
+        if matches!(name,"ret"|"endfilter"|"jmp"){if next!=0{return malformed("nonempty terminal stack");}continue;}
+        if matches!(name,"leave"|"leave.s"){next=0;}
+        for target in x.branch_targets(){let t=u32::try_from(target).map_err(|_|Error::Malformed("branch overflow"))?;add(t,next,&indexes,&mut out,&mut queue)?;}
+        if d.flow!="BRANCH"{add(x.offset+x.length as u32,next,&indexes,&mut out,&mut queue)?;}
+    }
+    Ok(out)
+}
+pub fn verify_stack(body:&MethodBody,ctx:VerificationContext,resolve:impl FnMut(u32)->Result<CallEffect>)->Result<StackAnalysis>{
+    let out=analyze_stack(body,ctx,resolve)?;if out.max_stack>body.max_stack{return malformed("declared maxstack below required");}Ok(out)
+}
+
+#[cfg(test)]mod stack_tests{use super::*;
+    fn body(text:&str,max:u16)->MethodBody{let code=assemble_method(text).unwrap();let mut raw=vec![3,0x30];raw.extend(max.to_le_bytes());raw.extend((code.len() as u32).to_le_bytes());raw.extend(0u32.to_le_bytes());raw.extend(code);decode_method_body(&raw).unwrap()}
+    #[test]fn control_flow_and_calls(){let ctx=VerificationContext{arguments:1,returns_value:true,..Default::default()};let b=body("ldarg.0\nldc.i4.1\nadd\nret",2);assert_eq!(verify_stack(&b,ctx,|_|Err(Error::Unsupported)).unwrap().max_stack,2);let b=body("ldc.i4.1\ncall 0x06000001\nret",1);assert_eq!(verify_stack(&b,ctx,|_|Ok(CallEffect{parameters:1,returns_value:true,has_this:false})).unwrap().max_stack,1);}
+    #[test]fn rejects_invalid_stacks(){for text in ["pop\nret","ldc.i4.1\nret","ldloc.0\npop\nret","ldarg.0\npop\nret","nop","ldc.i4.0\nbrtrue.s end\nldc.i4.1\nend: ret"]{assert!(verify_stack(&body(text,8),VerificationContext::default(),|_|Err(Error::Unsupported)).is_err(),"{}",text);}assert!(verify_stack(&body("ldc.i4.1\nldc.i4.2\nadd\npop\nret",1),VerificationContext::default(),|_|Err(Error::Unsupported)).is_err());}
+}

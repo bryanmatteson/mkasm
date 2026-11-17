@@ -1,0 +1,35 @@
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct OperandSpan {pub start:usize,pub end:usize,pub kind:&'static str,pub value:Operand,pub position_dependent:bool}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Described {pub text:String,pub operands:Vec<OperandSpan>}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Hole {pub name:String,pub kind:&'static str,pub source_operand:&'static str,pub position_dependent:bool}
+impl Instruction {
+    pub fn describe(&self)->Result<Described>{let text=format(self)?;let d=definition(self.opcode).ok_or(Error::Reserved(self.opcode))?;let operands=if self.operand==Operand::None{vec![]}else{vec![OperandSpan{start:d.mnemonic.len()+1,end:text.len(),kind:d.operand_kind,value:self.operand.clone(),position_dependent:matches!(self.operand,Operand::Branch(_)|Operand::Switch(_))}]};Ok(Described{text,operands})}
+    pub fn set_operand(&mut self,value:Operand)->Result<()>{let mut next=self.clone();next.operand=value;let b=encode(&next,self.offset)?;*self=decode(&b,self.offset)?;Ok(())}
+    /// Moves one exact opcode while retaining all branch and switch targets.
+    /// Whole-method edits must also update EH ranges and metadata references.
+    pub fn relocated(&self,to:u32)->Result<Self>{
+        let mut next=self.clone();let delta=i64::from(self.offset)-i64::from(to);
+        let shift=|v:i32|i32::try_from(i64::from(v)+delta).map_err(|_|Error::Malformed("relocation range"));
+        match &mut next.operand{Operand::Branch(v)=>*v=shift(*v)?,Operand::Switch(v)=>{for value in v{*value=shift(*value)?;}},_=>{}}
+        let b=encode(&next,to)?;decode(&b,to)
+    }
+    pub fn encode_into(&self,output:&mut[u8])->Result<usize>{let b=encode(self,self.offset)?;if output.len()<b.len(){return malformed("output buffer too small");}output[..b.len()].copy_from_slice(&b);Ok(b.len())}
+    pub fn relocate_into(&self,to:u32,output:&mut[u8])->Result<usize>{self.relocated(to)?.encode_into(output)}
+}
+impl Template {
+    pub fn definition(&self)->&'static Definition{definition(self.opcode).expect("validated template opcode")}
+    pub fn holes(&self)->Vec<Hole>{let d=self.definition();match &self.capture{Some(name)if self.fixed.is_none()&&d.operand_kind!="none"=>vec![Hole{name:name.clone(),kind:d.operand_kind,source_operand:d.operand,position_dependent:matches!(d.operand_kind,"branch"|"switch")}],_=>vec![]}}
+    pub fn captures(&self,src:&[u8],offset:u32)->Option<Vec<(String,Operand)>>{let i=self.matches(src,offset)?;Some(if self.holes().is_empty(){vec![]}else{vec![(self.capture.as_ref()?.clone(),i.operand)]})}
+    pub fn could_match(&self,src:&[u8])->bool{let d=self.definition();if d.size==2{src.starts_with(&[0xfe,d.opcode as u8])}else{src.first()==Some(&(d.opcode as u8))}}
+}
+#[cfg(test)]mod analysis_tests{
+    use super::*;
+    #[test]fn typed_captures_edits_and_relocation(){
+        let bytes=assemble("br.s IL_0010",0).unwrap();let mut i=decode(&bytes,0).unwrap();let a=i.describe().unwrap();assert_eq!(&a.text[a.operands[0].start..a.operands[0].end],"IL_0010");assert!(a.operands[0].position_dependent);let t=Template::parse("br.s $Target",0).unwrap();assert_eq!(t.holes()[0].name,"Target");assert_eq!(t.captures(&bytes,0).unwrap(),vec![("Target".into(),i.operand.clone())]);assert!(t.could_match(&bytes));let moved=i.relocated(4).unwrap();assert_eq!(moved.branch_targets(),i.branch_targets());assert!(i.relocated(1000).is_err());let mut out=[0xcc;4];assert!(i.relocate_into(1000,&mut out).is_err());assert_eq!(out,[0xcc;4]);assert!(i.set_operand(Operand::Integer(1)).is_err());assert_eq!(encode(&i,0).unwrap(),bytes);
+        let b=assemble("switch (IL_0010, IL_0020)",0).unwrap();let i=decode(&b,0).unwrap();assert_eq!(i.relocated(3).unwrap().branch_targets(),i.branch_targets());
+        assert!(Template::parse("br.s $",0).is_err());assert!(Template::parse("br.s _",0).unwrap().holes().is_empty());assert!(Template::new("ldstr").unwrap().holes()[0].source_operand=="InlineString");
+    }
+}

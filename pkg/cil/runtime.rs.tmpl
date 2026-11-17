@@ -1,0 +1,1148 @@
+//! Lossless public .NET CIL codec. Generated from pinned dotnet/runtime opcode.def.
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    Truncated,
+    Reserved(u16),
+    Malformed(&'static str),
+    Unsupported,
+}
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+impl std::error::Error for Error {}
+type Result<T> = std::result::Result<T, Error>;
+#[derive(Clone, Copy, Debug)]
+pub struct Definition {
+    pub opcode: u16,
+    pub mnemonic: &'static str,
+    pub id: &'static str,
+    pub size: usize,
+    pub operand: &'static str,
+    pub operand_kind: &'static str,
+    pub pop: &'static str,
+    pub push: &'static str,
+    pub pop_count: i32,
+    pub push_count: i32,
+    pub kind: &'static str,
+    pub flow: &'static str,
+    pub prefix: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Operand {
+    None,
+    Integer(i64),
+    Variable(u16),
+    Token(u32),
+    Float32(u32),
+    Float64(u64),
+    Branch(i32),
+    Switch(Vec<i32>),
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Instruction {
+    pub opcode: u16,
+    pub offset: u32,
+    pub length: usize,
+    pub operand: Operand,
+}
+impl Instruction {
+    pub fn new(name: &str, operand: Operand) -> Result<Self> {
+        let d = lookup(name).ok_or(Error::Malformed("unknown mnemonic"))?;
+        validate_operand(d, &operand)?;
+        Ok(Self {
+            opcode: d.opcode,
+            offset: 0,
+            length: 0,
+            operand,
+        })
+    }
+    pub fn branch_targets(&self) -> Vec<i64> {
+        let length=definition(self.opcode).map(|d|d.size as usize+if let Operand::Switch(v)=&self.operand{4+4*v.len()}else{operand_bytes(d)}).unwrap_or(self.length);
+        let base = i64::from(self.offset) + length as i64;
+        match &self.operand {
+            Operand::Branch(v) => vec![base + i64::from(*v)],
+            Operand::Switch(v) => v.iter().map(|x| base + i64::from(*x)).collect(),
+            _ => vec![],
+        }
+    }
+}
+static OPCODE_INDEX: [u16; 512] = {
+    let mut index = [u16::MAX; 512];
+    let mut i = 0;
+    while i < DEFINITIONS.len() {
+        let op = DEFINITIONS[i].opcode;
+        let slot = if op < 256 { op as usize } else { 256 + (op & 255) as usize };
+        index[slot] = i as u16; i += 1;
+    }
+    index
+};
+pub fn definition(op: u16) -> Option<&'static Definition> {
+    let slot = if op < 256 { op as usize } else if op >> 8 == 0xfe { 256 + (op & 255) as usize } else { return None; };
+    DEFINITIONS.get(OPCODE_INDEX[slot] as usize)
+}
+pub fn lookup(name: &str) -> Option<&'static Definition> {
+    let name = name.to_ascii_lowercase();
+    DEFINITIONS
+        .iter()
+        .find(|d| d.mnemonic == name || d.id.eq_ignore_ascii_case(&name))
+        .or_else(|| {
+            ALIASES
+                .iter()
+                .find(|(n, _)| *n == name)
+                .and_then(|(_, op)| definition(*op))
+        })
+}
+fn malformed<T>(s: &'static str) -> Result<T> {
+    Err(Error::Malformed(s))
+}
+fn operand_bytes(d: &Definition) -> usize {
+    match d.operand {
+        "InlineNone" => 0,
+        "ShortInlineI" | "ShortInlineVar" | "ShortInlineBrTarget" => 1,
+        "InlineVar" => 2,
+        "InlineI8" | "InlineR" => 8,
+        _ => 4,
+    }
+}
+fn token_valid(class: &str, v: u32) -> bool {
+    if v & 0xffffff == 0 {
+        return false;
+    }
+    let t = v >> 24;
+    match class {
+        "InlineMethod" => matches!(t, 6 | 10 | 43),
+        "InlineField" => matches!(t, 4 | 10),
+        "InlineType" => matches!(t, 1 | 2 | 27),
+        "InlineSig" => t == 17,
+        "InlineString" => t == 112,
+        "InlineTok" => matches!(t, 1 | 2 | 4 | 6 | 10 | 27 | 43),
+        _ => false,
+    }
+}
+fn validate_operand(d: &Definition, o: &Operand) -> Result<()> {
+    let n = operand_bytes(d);
+    match (d.operand_kind, o) {
+        ("none", Operand::None) => {}
+        ("integer", Operand::Integer(v)) => {
+            if d.mnemonic == "unaligned." {
+                if !matches!(v, 1 | 2 | 4) {
+                    return malformed("invalid unaligned alignment");
+                }
+            } else if n == 1 && i8::try_from(*v).is_err() || n == 4 && i32::try_from(*v).is_err() {
+                return malformed("integer range");
+            }
+        }
+        ("variable", Operand::Variable(v)) => {
+            if n == 1 && *v > 255 {
+                return malformed("variable index range");
+            }
+        }
+        ("token", Operand::Token(v)) => {
+            if !token_valid(d.operand, *v) {
+                return malformed("invalid token");
+            }
+        }
+        ("float32", Operand::Float32(_)) | ("float64", Operand::Float64(_)) => {}
+        ("branch", Operand::Branch(v)) => {
+            if n == 1 && i8::try_from(*v).is_err() {
+                return malformed("branch range");
+            }
+        }
+        ("switch", Operand::Switch(v)) => {
+            if v.len() > i32::MAX as usize / 4 {
+                return malformed("switch too large");
+            }
+        }
+        _ => return malformed("operand kind"),
+    };
+    Ok(())
+}
+fn u16at(s: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes(s[at..at + 2].try_into().unwrap())
+}
+fn u32at(s: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(s[at..at + 4].try_into().unwrap())
+}
+fn u64at(s: &[u8], at: usize) -> u64 {
+    u64::from_le_bytes(s[at..at + 8].try_into().unwrap())
+}
+fn put16(s: &mut [u8], at: usize, v: u16) {
+    s[at..at + 2].copy_from_slice(&v.to_le_bytes())
+}
+fn put32(s: &mut [u8], at: usize, v: u32) {
+    s[at..at + 4].copy_from_slice(&v.to_le_bytes())
+}
+pub fn decode(s: &[u8], offset: u32) -> Result<Instruction> {
+    if s.is_empty() {
+        return Err(Error::Truncated);
+    }
+    let (op, size) = if s[0] == 0xfe {
+        if s.len() < 2 {
+            return Err(Error::Truncated);
+        }
+        (0xfe00 | u16::from(s[1]), 2)
+    } else {
+        (u16::from(s[0]), 1)
+    };
+    let d = definition(op).ok_or(Error::Reserved(op))?;
+    let mut n = operand_bytes(d);
+    let operand = if d.operand_kind == "switch" {
+        if s.len() < size + 4 {
+            return Err(Error::Truncated);
+        }
+        let count = u32at(s, size) as usize;
+        if count > (s.len() - size - 4) / 4 {
+            return Err(Error::Truncated);
+        }
+        if count > i32::MAX as usize / 4 {
+            return malformed("switch too large");
+        }
+        n = 4 + 4 * count;
+        Operand::Switch(
+            (0..count)
+                .map(|i| u32at(s, size + 4 + 4 * i) as i32)
+                .collect(),
+        )
+    } else {
+        if s.len() < size + n {
+            return Err(Error::Truncated);
+        }
+        let raw = match n {
+            0 => 0,
+            1 => u64::from(s[size]),
+            2 => u64::from(u16at(s, size)),
+            4 => u64::from(u32at(s, size)),
+            8 => u64at(s, size),
+            _ => unreachable!(),
+        };
+        match d.operand_kind {
+            "none" => Operand::None,
+            "integer" => Operand::Integer(if d.mnemonic == "unaligned." {
+                raw as i64
+            } else {
+                match n {
+                    1 => raw as i8 as i64,
+                    4 => raw as i32 as i64,
+                    _ => raw as i64,
+                }
+            }),
+            "variable" => Operand::Variable(raw as u16),
+            "token" => Operand::Token(raw as u32),
+            "float32" => Operand::Float32(raw as u32),
+            "float64" => Operand::Float64(raw),
+            "branch" => Operand::Branch(if n == 1 { raw as i8 as i32 } else { raw as i32 }),
+            _ => return malformed("unknown operand"),
+        }
+    };
+    validate_operand(d, &operand)?;
+    let length = size + n;
+    if u64::from(offset) + length as u64 > u64::from(u32::MAX) {
+        return malformed("offset overflow");
+    }
+    Ok(Instruction {
+        opcode: op,
+        offset,
+        length,
+        operand,
+    })
+}
+pub fn encode(x: &Instruction, offset: u32) -> Result<Vec<u8>> {
+    let d = definition(x.opcode).ok_or(Error::Reserved(x.opcode))?;
+    validate_operand(d, &x.operand)?;
+    let mut out = if d.size == 2 {
+        vec![0xfe, d.opcode as u8]
+    } else {
+        vec![d.opcode as u8]
+    };
+    if let Operand::Switch(v) = &x.operand {
+        out.extend_from_slice(&(v.len() as u32).to_le_bytes());
+        for x in v {
+            out.extend_from_slice(&x.to_le_bytes())
+        }
+    } else {
+        let raw = match x.operand {
+            Operand::None => 0,
+            Operand::Integer(v) => v as u64,
+            Operand::Variable(v) => u64::from(v),
+            Operand::Token(v) => u64::from(v),
+            Operand::Float32(v) => u64::from(v),
+            Operand::Float64(v) => v,
+            Operand::Branch(v) => v as u64,
+            Operand::Switch(_) => unreachable!(),
+        };
+        out.extend_from_slice(&raw.to_le_bytes()[..operand_bytes(d)])
+    }
+    if u64::from(offset) + out.len() as u64 > u64::from(u32::MAX) {
+        return malformed("offset overflow");
+    }
+    Ok(out)
+}
+fn prefix_allowed(p: &str, n: &str) -> bool {
+    match p {
+        "tail." => matches!(n, "call" | "calli" | "callvirt"),
+        "constrained." => matches!(n, "call" | "callvirt" | "ldftn"),
+        "readonly." => n == "ldelema",
+        "unaligned." => {
+            n.starts_with("ldind.")
+                || n.starts_with("stind.")
+                || matches!(
+                    n,
+                    "ldfld" | "stfld" | "ldobj" | "stobj" | "cpblk" | "initblk"
+                )
+        }
+        "volatile." => {
+            n.starts_with("ldind.")
+                || n.starts_with("stind.")
+                || matches!(
+                    n,
+                    "ldfld"
+                        | "stfld"
+                        | "ldsfld"
+                        | "stsfld"
+                        | "ldobj"
+                        | "stobj"
+                        | "cpblk"
+                        | "initblk"
+                )
+        }
+        _ => false,
+    }
+}
+fn validate_method(ins: &[Instruction], size: usize) -> Result<()> {
+    let mut starts = BTreeSet::new();
+    let mut prefixes = Vec::new();
+    for (i, x) in ins.iter().enumerate() {
+        let d = definition(x.opcode).ok_or(Error::Reserved(x.opcode))?;
+        if prefixes.is_empty() {
+            starts.insert(x.offset);
+        }
+        if d.prefix {
+            if prefixes.contains(&d.mnemonic) {
+                return malformed("duplicate prefix");
+            }
+            prefixes.push(d.mnemonic);
+            continue;
+        }
+        for p in &prefixes {
+            if !prefix_allowed(p, d.mnemonic) {
+                return malformed("invalid prefix target");
+            }
+            if *p == "tail."
+                && (i + 1 >= ins.len() || definition(ins[i + 1].opcode).unwrap().mnemonic != "ret")
+            {
+                return malformed("tail must be followed by ret");
+            }
+        }
+        prefixes.clear();
+    }
+    if !prefixes.is_empty() {
+        return malformed("dangling prefix");
+    }
+    for x in ins {
+        for target in x.branch_targets() {
+            if target < 0 || target >= size as i64 || !starts.contains(&(target as u32)) {
+                return malformed("invalid branch boundary");
+            }
+        }
+    }
+    Ok(())
+}
+pub fn decode_method(code: &[u8]) -> Result<Vec<Instruction>> {
+    if code.len() > i32::MAX as usize {
+        return malformed("method too large");
+    }
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < code.len() {
+        let x = decode(&code[at..], at as u32)?;
+        at += x.length;
+        out.push(x)
+    }
+    validate_method(&out, code.len())?;
+    Ok(out)
+}
+pub fn encode_method(ins: &[Instruction]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut normalized = Vec::new();
+    for x in ins {
+        let b = encode(x, out.len() as u32)?;
+        let mut x = x.clone();
+        x.offset = out.len() as u32;
+        x.length = b.len();
+        normalized.push(x);
+        out.extend(b);
+        if out.len() > i32::MAX as usize {
+            return malformed("method too large");
+        }
+    }
+    validate_method(&normalized, out.len())?;
+    Ok(out)
+}
+fn target_text(v: i64) -> String {
+    if v < 0 {
+        format!("IL_-{:04x}", v.unsigned_abs())
+    } else {
+        format!("IL_{:04x}", v)
+    }
+}
+fn parse_num(s: &str) -> Result<i64> {
+    let s = s.trim();
+    let (neg, s) = if let Some(s) = s.strip_prefix('-') {
+        (true, s)
+    } else if let Some(s) = s.strip_prefix('+') {
+        (false, s)
+    } else {
+        (false, s)
+    };
+    let (base, s) = if let Some(s) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        (16, s)
+    } else if let Some(s) = s.strip_prefix("0o") {
+        (8, s)
+    } else if let Some(s) = s.strip_prefix("0b") {
+        (2, s)
+    } else {
+        (10, s)
+    };
+    let n = u64::from_str_radix(s, base).map_err(|_| Error::Malformed("number"))?;
+    if neg {
+        if n == 1u64 << 63 {
+            Ok(i64::MIN)
+        } else {
+            let n = i64::try_from(n).map_err(|_| Error::Malformed("number range"))?;
+            Ok(-n)
+        }
+    } else {
+        i64::try_from(n).map_err(|_| Error::Malformed("number range"))
+    }
+}
+fn parse_bits(s: &str) -> Result<u64> {
+    let s = s.trim();
+    if let Some(s) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u64::from_str_radix(s, 16)
+    } else {
+        s.parse::<u64>()
+    }
+    .map_err(|_| Error::Malformed("bits"))
+}
+fn parse_target(s: &str) -> Result<i64> {
+    let s = s.trim();
+    if s.get(..3).is_some_and(|s| s.eq_ignore_ascii_case("IL_")) {
+        let s = &s[3..];
+        let (neg, s) = if let Some(s) = s.strip_prefix('-') {
+            (true, s)
+        } else {
+            (false, s)
+        };
+        let v = i64::from_str_radix(s, 16).map_err(|_| Error::Malformed("target"))?;
+        Ok(if neg { -v } else { v })
+    } else {
+        parse_num(s)
+    }
+}
+pub fn format(x: &Instruction) -> Result<String> {
+    let b = encode(x, x.offset)?;
+    let d = definition(x.opcode).unwrap();
+    let base = i64::from(x.offset) + b.len() as i64;
+    let text = match &x.operand {
+        Operand::None => return Ok(d.mnemonic.to_string()),
+        Operand::Integer(v) => v.to_string(),
+        Operand::Variable(v) => v.to_string(),
+        Operand::Token(v) => format!("0x{:08x}", v),
+        Operand::Float32(v) => format!("bits(0x{:08x})", v),
+        Operand::Float64(v) => format!("bits(0x{:016x})", v),
+        Operand::Branch(v) => target_text(base + i64::from(*v)),
+        Operand::Switch(v) => format!(
+            "({})",
+            v.iter()
+                .map(|v| target_text(base + i64::from(*v)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    Ok(format!("{} {}", d.mnemonic, text))
+}
+fn split_instruction(text: &str) -> (String, &str) {
+    let text = text.trim();
+    if let Some(i) = text.find(char::is_whitespace) {
+        (text[..i].to_ascii_lowercase(), text[i..].trim())
+    } else {
+        (text.to_ascii_lowercase(), "")
+    }
+}
+fn switch_tokens(s: &str) -> Result<Vec<&str>> {
+    let s = s
+        .trim()
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .ok_or(Error::Malformed("switch targets"))?
+        .trim();
+    if s.is_empty() {
+        return Ok(Vec::new());
+    }
+    let a: Vec<_> = s.split(',').map(str::trim).collect();
+    if a.iter().any(|s| s.is_empty()) {
+        return malformed("empty target");
+    }
+    Ok(a)
+}
+pub fn assemble(text: &str, offset: u32) -> Result<Vec<u8>> {
+    let (name, s) = split_instruction(text);
+    let d = lookup(&name).ok_or(Error::Malformed("unknown mnemonic"))?;
+    let operand = match d.operand_kind {
+        "none" => {
+            if !s.is_empty() {
+                return malformed("unexpected operand");
+            }
+            Operand::None
+        }
+        "integer" => Operand::Integer(parse_num(s)?),
+        "variable" => Operand::Variable(
+            u16::try_from(parse_num(s)?).map_err(|_| Error::Malformed("variable range"))?,
+        ),
+        "token" => Operand::Token(
+            u32::try_from(parse_num(s)?).map_err(|_| Error::Malformed("token range"))?,
+        ),
+        "float32" => {
+            let v = if let Some(v) = s.strip_prefix("bits(").and_then(|s| s.strip_suffix(')')) {
+                u32::try_from(parse_bits(v)?).map_err(|_| Error::Malformed("float32 range"))?
+            } else {
+                s.parse::<f32>()
+                    .map_err(|_| Error::Malformed("float32"))?
+                    .to_bits()
+            };
+            Operand::Float32(v)
+        }
+        "float64" => {
+            let v = if let Some(v) = s.strip_prefix("bits(").and_then(|s| s.strip_suffix(')')) {
+                parse_bits(v)?
+            } else {
+                s.parse::<f64>()
+                    .map_err(|_| Error::Malformed("float64"))?
+                    .to_bits()
+            };
+            Operand::Float64(v)
+        }
+        "branch" => {
+            let base = i64::from(offset) + (d.size + operand_bytes(d)) as i64;
+            Operand::Branch(
+                i32::try_from(
+                    parse_target(s)?
+                        .checked_sub(base)
+                        .ok_or(Error::Malformed("branch range"))?,
+                )
+                .map_err(|_| Error::Malformed("branch range"))?,
+            )
+        }
+        "switch" => {
+            let a = switch_tokens(s)?;
+            if a.len() > i32::MAX as usize / 4 {
+                return malformed("switch too large");
+            }
+            let base = i64::from(offset) + (d.size + 4 + 4 * a.len()) as i64;
+            Operand::Switch(
+                a.iter()
+                    .map(|v| {
+                        let n = parse_target(v)?
+                            .checked_sub(base)
+                            .ok_or(Error::Malformed("switch range"))?;
+                        i32::try_from(n).map_err(|_| Error::Malformed("switch range"))
+                    })
+                    .collect::<Result<_>>()?,
+            )
+        }
+        _ => return malformed("unknown operand"),
+    };
+    encode(
+        &Instruction {
+            opcode: d.opcode,
+            offset,
+            length: 0,
+            operand,
+        },
+        offset,
+    )
+}
+pub fn format_method(ins: &[Instruction]) -> Result<String> {
+    let mut out = String::new();
+    let mut at = 0;
+    for x in ins {
+        let mut x = x.clone();
+        x.offset = at;
+        let b = encode(&x, at)?;
+        x.length = b.len();
+        out.push_str(&format!("IL_{:04x}: {}\n", at, format(&x)?));
+        at = at
+            .checked_add(b.len() as u32)
+            .ok_or(Error::Malformed("offset overflow"))?;
+    }
+    Ok(out)
+}
+pub fn assemble_method(text: &str) -> Result<Vec<u8>> {
+    let mut labels = BTreeMap::new();
+    let mut lines = Vec::new();
+    let mut at = 0usize;
+    for s in text.lines() {
+        let mut s = s.split_once("//").map_or(s, |(s, _)| s).trim();
+        if s.is_empty() {
+            continue;
+        }
+        if let Some((label, rest)) = s.split_once(':') {
+            let label = label.trim();
+            if label.is_empty()
+                || label
+                    .chars()
+                    .any(|c| c.is_whitespace() || "(),".contains(c))
+                || labels.insert(label, at).is_some()
+            {
+                return malformed("invalid or duplicate label");
+            }
+            s = rest.trim();
+            if s.is_empty() {
+                continue;
+            }
+        }
+        let (name, operand) = split_instruction(s);
+        let d = lookup(&name).ok_or(Error::Malformed("unknown mnemonic"))?;
+        let n = if d.operand_kind == "switch" {
+            4 + 4 * switch_tokens(operand)?.len()
+        } else {
+            operand_bytes(d)
+        };
+        lines.push((s, at));
+        at = at
+            .checked_add(d.size + n)
+            .ok_or(Error::Malformed("method size"))?;
+        if at > i32::MAX as usize {
+            return malformed("method too large");
+        }
+    }
+    let mut code = Vec::new();
+    for (s, at) in lines {
+        let (name, operand) = split_instruction(s);
+        let d = lookup(&name).unwrap();
+        let replace = |s: &str| {
+            labels
+                .get(s)
+                .map(|v| target_text(*v as i64))
+                .unwrap_or_else(|| s.to_string())
+        };
+        let operand = if d.operand_kind == "branch" {
+            replace(operand)
+        } else if d.operand_kind == "switch" {
+            format!(
+                "({})",
+                switch_tokens(operand)?
+                    .iter()
+                    .map(|s| replace(s))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            operand.to_string()
+        };
+        code.extend(assemble(&format!("{} {}", name, operand), at as u32)?)
+    }
+    decode_method(&code)?;
+    Ok(code)
+}
+#[derive(Clone, Debug)]
+pub struct Template {
+    opcode: u16,
+    fixed: Option<Operand>,
+    capture: Option<String>,
+}
+impl Template {
+    pub fn new(name: &str) -> Result<Self> {
+        let d = lookup(name).ok_or(Error::Malformed("unknown template"))?;
+        Ok(Self {
+            opcode: d.opcode,
+            fixed: None,
+            capture: Some("operand".into()),
+        })
+    }
+    pub fn parse(text: &str, offset: u32) -> Result<Self> {
+        let (name, o) = split_instruction(text);
+        let mut t = Self::new(&name)?;
+        if o == "_" || o.starts_with('$') {
+            if o.chars().any(|c| c.is_whitespace() || "(),".contains(c)) {
+                return malformed("invalid capture");
+            }
+            if definition(t.opcode).unwrap().operand_kind == "none" {
+                return malformed("operand-free capture");
+            }
+            if o == "_" { t.capture=None; } else {
+                let name=o.strip_prefix("${").and_then(|s|s.strip_suffix('}')).or_else(||o.strip_prefix('$')).ok_or(Error::Malformed("invalid capture"))?;
+                if name.is_empty()||!name.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'){return malformed("invalid capture");}
+                t.capture=Some(name.into());
+            }
+            return Ok(t);
+        }
+        let b = assemble(text, offset)?;
+        t.bind(decode(&b, offset)?.operand)?;
+        Ok(t)
+    }
+    pub fn bind(&mut self, o: Operand) -> Result<()> {
+        validate_operand(definition(self.opcode).unwrap(), &o)?;
+        self.fixed = Some(o);
+        Ok(())
+    }
+    pub fn encode(&self, o: Option<Operand>, offset: u32) -> Result<Vec<u8>> {
+        let operand = match &self.fixed {
+            Some(v) => {
+                if o.as_ref().is_some_and(|o| o != v) {
+                    return malformed("fixed binding disagreement");
+                }
+                v.clone()
+            }
+            None => o.unwrap_or(Operand::None),
+        };
+        encode(
+            &Instruction {
+                opcode: self.opcode,
+                offset,
+                length: 0,
+                operand,
+            },
+            offset,
+        )
+    }
+    pub fn matches(&self, s: &[u8], offset: u32) -> Option<Instruction> {
+        let x = decode(s, offset).ok()?;
+        if x.opcode != self.opcode || self.fixed.as_ref().is_some_and(|v| *v != x.operand) {
+            return None;
+        }
+        Some(x)
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExceptionClause {
+    pub flags: u32,
+    pub try_offset: u32,
+    pub try_length: u32,
+    pub handler_offset: u32,
+    pub handler_length: u32,
+    pub class_token_or_filter_offset: u32,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExceptionSection {
+    pub fat: bool,
+    pub clauses: Vec<ExceptionClause>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MethodBody {
+    pub tiny: bool,
+    pub max_stack: u16,
+    pub init_locals: bool,
+    pub local_signature_token: u32,
+    pub code: Vec<u8>,
+    pub sections: Vec<ExceptionSection>,
+    pub padding: Vec<u8>,
+    pub length: usize,
+}
+fn validate_eh(sections: &[ExceptionSection], ins: &[Instruction], size: usize) -> Result<()> {
+    let mut starts = BTreeSet::new();
+    let mut pending = false;
+    for x in ins {
+        if !pending {
+            starts.insert(x.offset);
+        }
+        pending = definition(x.opcode).unwrap().prefix;
+    }
+    let mut ends = starts.clone();
+    ends.insert(size as u32);
+    for s in sections {
+        for e in &s.clauses {
+            if !matches!(e.flags, 0 | 1 | 2 | 4) {
+                return malformed("EH flags");
+            }
+            let te = u64::from(e.try_offset) + u64::from(e.try_length);
+            let he = u64::from(e.handler_offset) + u64::from(e.handler_length);
+            if e.try_length == 0 || e.handler_length == 0 || te > size as u64 || he > size as u64 {
+                return malformed("EH bounds");
+            }
+            if !starts.contains(&e.try_offset)
+                || !starts.contains(&e.handler_offset)
+                || !ends.contains(&(te as u32))
+                || !ends.contains(&(he as u32))
+            {
+                return malformed("EH boundary");
+            }
+            match e.flags {
+                0 => {
+                    if !token_valid("InlineType", e.class_token_or_filter_offset) {
+                        return malformed("catch token");
+                    }
+                }
+                1 => {
+                    if !starts.contains(&e.class_token_or_filter_offset)
+                        || e.class_token_or_filter_offset >= e.handler_offset
+                    {
+                        return malformed("filter offset");
+                    }
+                }
+                _ => {
+                    if e.class_token_or_filter_offset != 0 {
+                        return malformed("EH reserved value");
+                    }
+                }
+            }
+        }
+    }
+    validate_eh_nesting(sections, ins)
+}
+#[derive(Clone, Copy)]
+struct EhRegion {
+    start: u32,
+    end: u32,
+    filter: bool,
+}
+fn eh_regions(e: &ExceptionClause) -> Vec<EhRegion> {
+    let mut r = vec![
+        EhRegion {
+            start: e.try_offset,
+            end: e.try_offset + e.try_length,
+            filter: false,
+        },
+        EhRegion {
+            start: e.handler_offset,
+            end: e.handler_offset + e.handler_length,
+            filter: false,
+        },
+    ];
+    if e.flags == 1 {
+        r.push(EhRegion {
+            start: e.class_token_or_filter_offset,
+            end: e.handler_offset,
+            filter: true,
+        })
+    }
+    r
+}
+fn eh_overlap(a: EhRegion, b: EhRegion) -> bool {
+    a.start < b.end && b.start < a.end
+}
+fn eh_disjoint(a: &[EhRegion], b: &[EhRegion]) -> bool {
+    a.iter().all(|a| b.iter().all(|b| !eh_overlap(*a, *b)))
+}
+fn eh_nested(a: &[EhRegion], b: &[EhRegion]) -> bool {
+    b.iter()
+        .any(|b| !b.filter && a.iter().all(|a| b.start <= a.start && a.end <= b.end))
+}
+fn validate_eh_nesting(sections: &[ExceptionSection], ins: &[Instruction]) -> Result<()> {
+    let entries: Vec<_> = sections.iter().flat_map(|s| s.clauses.iter()).collect();
+    for (i, a) in entries.iter().enumerate() {
+        let ar = eh_regions(a);
+        for x in 0..ar.len() {
+            for y in 0..x {
+                if eh_overlap(ar[x], ar[y]) {
+                    return malformed("overlapping EH regions");
+                }
+            }
+        }
+        if a.flags == 1 {
+            let last = ins
+                .iter()
+                .filter(|x| {
+                    x.offset >= a.class_token_or_filter_offset && x.offset < a.handler_offset
+                })
+                .last()
+                .and_then(|x| definition(x.opcode))
+                .map(|d| d.mnemonic);
+            if last != Some("endfilter") {
+                return malformed("filter must end with endfilter");
+            }
+        }
+        for b in entries.iter().take(i) {
+            let br = eh_regions(b);
+            if eh_nested(&br, &ar) || eh_disjoint(&ar, &br) {
+                continue;
+            }
+            if a.try_offset == b.try_offset
+                && a.try_length == b.try_length
+                && matches!(a.flags, 0 | 1)
+                && matches!(b.flags, 0 | 1)
+                && eh_disjoint(&ar[1..], &br[1..])
+            {
+                continue;
+            }
+            return malformed("EH nesting or ordering");
+        }
+    }
+    Ok(())
+}
+pub fn decode_method_body(s: &[u8]) -> Result<MethodBody> {
+    if s.is_empty() {
+        return Err(Error::Truncated);
+    }
+    let mut b = MethodBody {
+        tiny: false,
+        max_stack: 0,
+        init_locals: false,
+        local_signature_token: 0,
+        code: Vec::new(),
+        sections: Vec::new(),
+        padding: Vec::new(),
+        length: 0,
+    };
+    let (start, size, mut more) = match s[0] & 3 {
+        2 => {
+            b.tiny = true;
+            b.max_stack = 8;
+            (1, (s[0] >> 2) as usize, false)
+        }
+        3 => {
+            if s.len() < 12 {
+                return Err(Error::Truncated);
+            }
+            let flags = u16at(s, 0);
+            if flags >> 12 != 3 || flags & 0x0fe4 != 0 {
+                return malformed("fat header");
+            }
+            b.max_stack = u16at(s, 2);
+            let size = u32at(s, 4) as usize;
+            if size > i32::MAX as usize {
+                return malformed("method size");
+            }
+            b.local_signature_token = u32at(s, 8);
+            if b.local_signature_token != 0 && !token_valid("InlineSig", b.local_signature_token) {
+                return malformed("local signature");
+            };
+            b.init_locals = flags & 16 != 0;
+            (12, size, flags & 8 != 0)
+        }
+        _ => return malformed("method header"),
+    };
+    if size > s.len() - start {
+        return Err(Error::Truncated);
+    }
+    b.code = s[start..start + size].to_vec();
+    let ins = decode_method(&b.code)?;
+    let mut at = start + size;
+    if more {
+        let aligned = (at + 3) & !3;
+        if aligned > s.len() {
+            return Err(Error::Truncated);
+        }
+        b.padding = s[at..aligned].to_vec();
+        at = aligned;
+    }
+    while more {
+        if s.len() - at < 4 {
+            return Err(Error::Truncated);
+        }
+        let kind = s[at];
+        if kind & 0x3f != 1 {
+            return Err(Error::Unsupported);
+        }
+        let fat = kind & 0x40 != 0;
+        more = kind & 0x80 != 0;
+        let mut n = s[at + 1] as usize;
+        let width = if fat {
+            n |= (s[at + 2] as usize) << 8 | (s[at + 3] as usize) << 16;
+            24
+        } else {
+            if s[at + 2] != 0 || s[at + 3] != 0 {
+                return malformed("small EH reserved bytes");
+            }
+            12
+        };
+        if n < 4 || (n - 4) % width != 0 {
+            return malformed("EH size");
+        }
+        if n > s.len() - at {
+            return Err(Error::Truncated);
+        }
+        let mut clauses = Vec::new();
+        for i in 0..(n - 4) / width {
+            let p = &s[at + 4 + i * width..];
+            let e = if fat {
+                ExceptionClause {
+                    flags: u32at(p, 0),
+                    try_offset: u32at(p, 4),
+                    try_length: u32at(p, 8),
+                    handler_offset: u32at(p, 12),
+                    handler_length: u32at(p, 16),
+                    class_token_or_filter_offset: u32at(p, 20),
+                }
+            } else {
+                ExceptionClause {
+                    flags: u16at(p, 0) as u32,
+                    try_offset: u16at(p, 2) as u32,
+                    try_length: p[4] as u32,
+                    handler_offset: u16at(p, 5) as u32,
+                    handler_length: p[7] as u32,
+                    class_token_or_filter_offset: u32at(p, 8),
+                }
+            };
+            clauses.push(e)
+        }
+        b.sections.push(ExceptionSection { fat, clauses });
+        at += n;
+    }
+    b.length = at;
+    validate_eh(&b.sections, &ins, size)?;
+    Ok(b)
+}
+pub fn encode_method_body(b: &MethodBody) -> Result<Vec<u8>> {
+    let ins = decode_method(&b.code)?;
+    if b.local_signature_token != 0 && !token_valid("InlineSig", b.local_signature_token) {
+        return malformed("local signature");
+    }
+    validate_eh(&b.sections, &ins, b.code.len())?;
+    if b.tiny {
+        if b.code.len() >= 64
+            || b.max_stack != 8
+            || b.init_locals
+            || b.local_signature_token != 0
+            || !b.sections.is_empty()
+            || !b.padding.is_empty()
+        {
+            return malformed("tiny attributes");
+        }
+        let mut out = vec![(b.code.len() as u8) << 2 | 2];
+        out.extend_from_slice(&b.code);
+        return Ok(out);
+    }
+    let mut out = vec![0; 12];
+    let flags =
+        0x3003 | if b.init_locals { 16 } else { 0 } | if !b.sections.is_empty() { 8 } else { 0 };
+    put16(&mut out, 0, flags);
+    put16(&mut out, 2, b.max_stack);
+    put32(&mut out, 4, b.code.len() as u32);
+    put32(&mut out, 8, b.local_signature_token);
+    out.extend_from_slice(&b.code);
+    if !b.sections.is_empty() {
+        let n = (4 - out.len() % 4) % 4;
+        if !b.padding.is_empty() && b.padding.len() != n {
+            return malformed("alignment padding");
+        }
+        if b.padding.is_empty() {
+            out.resize(out.len() + n, 0)
+        } else {
+            out.extend_from_slice(&b.padding)
+        }
+    } else if !b.padding.is_empty() {
+        return malformed("padding without sections");
+    };
+    for (i, s) in b.sections.iter().enumerate() {
+        let width = if s.fat { 24 } else { 12 };
+        let n = s
+            .clauses
+            .len()
+            .checked_mul(width)
+            .and_then(|v| v.checked_add(4))
+            .ok_or(Error::Malformed("EH size"))?;
+        if n > 0xffffff || !s.fat && n > 255 {
+            return malformed("EH size");
+        }
+        let start = out.len();
+        out.resize(start + n, 0);
+        out[start] =
+            1 | if s.fat { 0x40 } else { 0 } | if i + 1 < b.sections.len() { 0x80 } else { 0 };
+        out[start + 1] = n as u8;
+        if s.fat {
+            out[start + 2] = (n >> 8) as u8;
+            out[start + 3] = (n >> 16) as u8;
+        }
+        for (j, e) in s.clauses.iter().enumerate() {
+            let p = &mut out[start + 4 + j * width..];
+            if s.fat {
+                put32(p, 0, e.flags);
+                put32(p, 4, e.try_offset);
+                put32(p, 8, e.try_length);
+                put32(p, 12, e.handler_offset);
+                put32(p, 16, e.handler_length);
+                put32(p, 20, e.class_token_or_filter_offset)
+            } else {
+                if e.try_offset > 65535
+                    || e.handler_offset > 65535
+                    || e.try_length > 255
+                    || e.handler_length > 255
+                {
+                    return malformed("small EH range");
+                }
+                put16(p, 0, e.flags as u16);
+                put16(p, 2, e.try_offset as u16);
+                p[4] = e.try_length as u8;
+                put16(p, 5, e.handler_offset as u16);
+                p[7] = e.handler_length as u8;
+                put32(p, 8, e.class_token_or_filter_offset)
+            }
+        }
+    }
+    Ok(out)
+}
+#[cfg(test)]
+mod negative {
+    use super::*;
+    #[test]
+    fn rejects_malformed() {
+        for b in [
+            &[0x24][..],
+            &[0xfe, 0x19],
+            &[0xff],
+            &[0xfe, 0x12, 0],
+            &[0x72, 0, 0, 0, 0x70],
+            &[0x45, 1, 0, 0, 0],
+        ] {
+            assert!(decode(b, 0).is_err())
+        }
+        for s in [
+            "br.s IL_1000",
+            "ldc.i4.s 128",
+            "ldarg.s -1",
+            "ldarg 65536",
+            "unaligned. 3",
+            "call 0x02000001",
+            "ldstr 0x70000000",
+            "nop 1",
+            "switch (IL_0,,IL_1)",
+            "ldc.r4 bits(0x100000000)",
+            "br -9223372036854775808",
+        ] {
+            assert!(assemble(s, 0).is_err(), "{}", s)
+        }
+        for b in [
+            &[0xfe, 0x13][..],
+            &[0xfe, 0x13, 0xfe, 0x13, 0x4a, 0x2a],
+            &[0xfe, 0x14, 0x2a],
+            &[0x2b, 0xff, 0x2a],
+            &[0x2b, 2, 0xfe, 0x13, 0x4a, 0x2a],
+        ] {
+            assert!(decode_method(b).is_err())
+        }
+        assert!(Template::parse("nop _", 0).is_err());
+    }
+    #[test]
+    fn labels() {
+        let code = assemble_method("start: ldc.i4.0\nswitch (start, done)\nbr.s start\ndone: ret")
+            .unwrap();
+        let ins = decode_method(&code).unwrap();
+        assert_eq!(
+            assemble_method(&format_method(&ins).unwrap()).unwrap(),
+            code
+        );
+    }
+}
+// TABLES
+
+#[cfg(test)]
+mod opcode_index_tests {
+    use super::*;
+    #[test]
+    fn definition_matches_catalog_for_every_opcode() {
+        for op in 0..=u16::MAX {
+            let expected = DEFINITIONS.iter().find(|d| d.opcode == op);
+            let actual = definition(op);
+            assert!(match (expected, actual) {
+                (Some(a), Some(b)) => std::ptr::eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }, "opcode {op:#x}");
+        }
+    }
+}

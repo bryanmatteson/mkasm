@@ -1,0 +1,32 @@
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
+using System.Text.Json;
+class Oracle {
+ static string Hex(byte[]? b) => b==null?"":Convert.ToHexString(b).ToLowerInvariant();
+ static void Main(string[] args) {
+ using var input=File.OpenRead(args[0]);
+ if(args[0].EndsWith(".pdb")) {using var provider=MetadataReaderProvider.FromPortablePdbStream(input);var pdb=provider.GetMetadataReader();Console.WriteLine(JsonSerializer.Serialize(new {rows=Enumerable.Range(0,56).Select(i=>pdb.GetTableRowCount((TableIndex)i)),documents=pdb.Documents.Select(h=>new{token=MetadataTokens.GetToken(h),name=pdb.GetString(pdb.GetDocument(h).Name)}),methods=pdb.MethodDebugInformation.Select(h=>new{token=0x06000000|MetadataTokens.GetRowNumber(h),points=pdb.GetMethodDebugInformation(h).GetSequencePoints().Select(p=>new{document=MetadataTokens.GetToken(p.Document),offset=p.Offset,start_line=p.StartLine,start_column=p.StartColumn,end_line=p.EndLine,end_column=p.EndColumn,hidden=p.IsHidden})})}));return;}
+ using var pe=new PEReader(input);var md=pe.GetMetadataReader();
+ Console.WriteLine(JsonSerializer.Serialize(new { format=pe.PEHeaders.PEHeader!.Magic.ToString(),machine=(int)pe.PEHeaders.CoffHeader.Machine,rows=Enumerable.Range(0,45).Select(i=>md.GetTableRowCount((TableIndex)i)),types=md.TypeDefinitions.Select(h=>{var t=md.GetTypeDefinition(h);return new{token=MetadataTokens.GetToken(h),name=md.GetString(t.Name),ns=md.GetString(t.Namespace),methods=t.GetMethods().Select(x=>MetadataTokens.GetToken(x)),fields=t.GetFields().Select(x=>MetadataTokens.GetToken(x))};}),methods=md.MethodDefinitions.Select(h=>{var m=md.GetMethodDefinition(h);var body=m.RelativeVirtualAddress!=0&&(m.ImplAttributes&System.Reflection.MethodImplAttributes.CodeTypeMask)==0?pe.GetMethodBody(m.RelativeVirtualAddress):null;return new{token=MetadataTokens.GetToken(h),name=md.GetString(m.Name),rva=m.RelativeVirtualAddress,flags=(int)m.Attributes,impl=(int)m.ImplAttributes,signature=Hex(md.GetBlobBytes(m.Signature)),formatted=Names.Format(m.DecodeSignature(new Names(),(object?)null)),il=body==null?null:Hex(body.GetILBytes()),raw=body==null?null:Hex(pe.GetSectionData(m.RelativeVirtualAddress).GetContent(0,body.Size).ToArray()),max_stack=body?.MaxStack,local=body==null||body.LocalSignature.IsNil?0:MetadataTokens.GetToken(body.LocalSignature),eh=body?.ExceptionRegions.Select(c=>new{flags=(int)c.Kind,try_offset=c.TryOffset,try_length=c.TryLength,handler_offset=c.HandlerOffset,handler_length=c.HandlerLength,class_token=MetadataTokens.GetToken(c.CatchType),filter_offset=c.Kind==ExceptionRegionKind.Filter?c.FilterOffset:0})};}),resources=md.ManifestResources.Select(h=>{var r=md.GetManifestResource(h);return new{token=MetadataTokens.GetToken(h),name=md.GetString(r.Name),offset=r.Offset,implementation=MetadataTokens.GetToken(r.Implementation)};}),strings=md.UserStrings().Select(h=>new{token=MetadataTokens.GetToken(h),value=md.GetUserString(h)})}));
+ }
+}
+static class Helpers {public static IEnumerable<UserStringHandle> UserStrings(this MetadataReader m){int offset=1;int size=m.GetHeapSize(HeapIndex.UserString);while(offset<size){var h=MetadataTokens.UserStringHandle(offset);string s;try{s=m.GetUserString(h);}catch{yield break;}if(s.Length==0) yield break;yield return h;var next=m.GetNextHandle(h);if(next.IsNil)yield break;offset=MetadataTokens.GetHeapOffset(next);}}}
+sealed class Names : ISignatureTypeProvider<string,object?> {
+ public static string Format(MethodSignature<string> s){var a=new List<string>();for(int i=0;i<s.ParameterTypes.Length;i++){if(i==s.RequiredParameterCount&&s.Header.CallingConvention==SignatureCallingConvention.VarArgs)a.Add("...");a.Add(s.ParameterTypes[i]);}return(s.Header.IsInstance?"instance ":"")+s.ReturnType+" "+(s.GenericParameterCount==0?"":$"generic<{s.GenericParameterCount}> ")+"("+string.Join(", ",a)+")";}
+ public string GetArrayType(string t,ArrayShape a){var dims=new List<string>();for(int i=0;i<a.Rank;i++){long lo=i<a.LowerBounds.Length?a.LowerBounds[i]:0;dims.Add(i<a.Sizes.Length?$"{lo}...{lo+a.Sizes[i]-1}":i<a.LowerBounds.Length?$"{lo}...":"");}return t+"["+string.Join(",",dims)+"]";}
+ public string GetByReferenceType(string t)=>t+"&";
+ public string GetFunctionPointerType(MethodSignature<string> s)=>"method "+Format(s)+"*";
+ public string GetGenericInstantiation(string t,System.Collections.Immutable.ImmutableArray<string> args)=>t+"<"+string.Join(", ",args)+">";
+ public string GetGenericMethodParameter(object? c,int index)=>"!!"+index;
+ public string GetGenericTypeParameter(object? c,int index)=>"!"+index;
+ public string GetModifiedType(string mod,string t,bool required)=>t+(required?" modreq(":" modopt(")+mod+")";
+ public string GetPinnedType(string t)=>t+" pinned";
+ public string GetPointerType(string t)=>t+"*";
+ public string GetPrimitiveType(PrimitiveTypeCode code)=>code switch{PrimitiveTypeCode.Void=>"void",PrimitiveTypeCode.Boolean=>"bool",PrimitiveTypeCode.Char=>"char",PrimitiveTypeCode.SByte=>"int8",PrimitiveTypeCode.Byte=>"uint8",PrimitiveTypeCode.Int16=>"int16",PrimitiveTypeCode.UInt16=>"uint16",PrimitiveTypeCode.Int32=>"int32",PrimitiveTypeCode.UInt32=>"uint32",PrimitiveTypeCode.Int64=>"int64",PrimitiveTypeCode.UInt64=>"uint64",PrimitiveTypeCode.Single=>"float32",PrimitiveTypeCode.Double=>"float64",PrimitiveTypeCode.String=>"string",PrimitiveTypeCode.TypedReference=>"typedref",PrimitiveTypeCode.IntPtr=>"native int",PrimitiveTypeCode.UIntPtr=>"native uint",PrimitiveTypeCode.Object=>"object",_=>throw new BadImageFormatException()};
+ public string GetSZArrayType(string t)=>t+"[]";
+ static string Qualify(string ns,string n)=>ns.Length==0?n:ns+"."+n;
+ public string GetTypeFromDefinition(MetadataReader m,TypeDefinitionHandle h,byte kind){var t=m.GetTypeDefinition(h);return t.GetDeclaringType().IsNil?Qualify(m.GetString(t.Namespace),m.GetString(t.Name)):GetTypeFromDefinition(m,t.GetDeclaringType(),kind)+"+"+m.GetString(t.Name);}
+ public string GetTypeFromReference(MetadataReader m,TypeReferenceHandle h,byte kind){var t=m.GetTypeReference(h);return t.ResolutionScope.Kind!=HandleKind.TypeReference?Qualify(m.GetString(t.Namespace),m.GetString(t.Name)):GetTypeFromReference(m,(TypeReferenceHandle)t.ResolutionScope,kind)+"+"+m.GetString(t.Name);}
+ public string GetTypeFromSpecification(MetadataReader m,object? c,TypeSpecificationHandle h,byte kind)=>m.GetTypeSpecification(h).DecodeSignature(this,c);
+}
