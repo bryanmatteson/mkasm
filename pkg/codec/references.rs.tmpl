@@ -1,0 +1,309 @@
+/// Encoded address purpose, independent of text formatting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddressReferenceKind {
+    Branch,
+    Data,
+    Literal,
+    Absolute,
+}
+#[derive(Clone, Debug)]
+pub struct AddressReference {
+    pub operand_index: usize,
+    pub kind: AddressReferenceKind,
+    /// Physical byte/bit slices; the integer's low bit is `value`.
+    pub bits: &'static [BitSlice],
+    pub signed: bool,
+    pub scale: i128,
+    pub bias: i128,
+    pub position: Position,
+    pub domain: Domain,
+    pub target: u64,
+}
+fn reference_kind(e: &Encoding, o: &Operand) -> AddressReferenceKind {
+    if matches!(
+        e.flow_control,
+        "branch"
+            | "call"
+            | "conditional_call"
+            | "conditional-call"
+            | "conditional_branch"
+            | "conditional-branch"
+            | "unconditional_branch"
+            | "unconditional-branch"
+            | "loop"
+    ) {
+        AddressReferenceKind::Branch
+    } else if !o.relative {
+        AddressReferenceKind::Absolute
+    } else if o.kind == "address" {
+        AddressReferenceKind::Literal
+    } else {
+        AddressReferenceKind::Data
+    }
+}
+fn reference_target(e: &Encoding, o: &Operand, value: i128, address: u64) -> u64 {
+    let target = if o.relative {
+        relative_target(o, value, address)
+    } else {
+        value as u64
+    };
+    if reference_kind(e, o) == AddressReferenceKind::Branch && e.target_mask != 0 {
+        target & e.target_mask
+    } else {
+        target
+    }
+}
+// A destination mask declares both architectural truncation and alignment.
+// Only its highest set bit bounds modular address-space membership: clearing
+// alignment bits while computing offsets would confuse adjacent bytes.
+fn reference_address_mask(e: &Encoding, position: Position, address: u64) -> u64 {
+    let mut bits = if e.target_mask == 0 {
+        64
+    } else {
+        64 - e.target_mask.leading_zeros()
+    };
+    if let Some((_, _, wrap)) = position.base(address) {
+        if wrap > 0 {
+            bits = bits.min(wrap);
+        }
+    }
+    mask(bits)
+}
+fn internal_offset(
+    target: u64,
+    old_ip: u64,
+    len: usize,
+    address_mask: u64,
+) -> Result<Option<usize>, BlockRelocateError> {
+    if (len as u128) > address_mask as u128 + 1 {
+        return Err(BlockRelocateError::Unsupported);
+    }
+    let offset = target.wrapping_sub(old_ip) & address_mask;
+    Ok((offset < len as u64).then_some(offset as usize))
+}
+impl Decoded {
+    pub fn address_references(&self, address: u64) -> Vec<AddressReference> {
+        self.encoding()
+            .operands
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.relative || o.kind == "address")
+            .map(|(i, o)| AddressReference {
+                operand_index: i,
+                kind: reference_kind(self.encoding(), o),
+                bits: o.bits,
+                signed: o.signed,
+                scale: o.scale,
+                bias: o.bias,
+                position: o.position(),
+                domain: o.domain(),
+                target: reference_target(self.encoding(), o, self.values[i], address),
+            })
+            .collect()
+    }
+    /// Full form and address validation precedes the caller's first byte write.
+    pub fn rewrite_reference(
+        &self,
+        address: u64,
+        operand_index: usize,
+        target: u64,
+        output: &mut [u8],
+    ) -> Result<usize, Error> {
+        let o = self
+            .encoding()
+            .operands
+            .get(operand_index)
+            .ok_or(Error::Operand)?;
+        if !o.relative && o.kind != "address" {
+            return Err(Error::Operand);
+        }
+        if reference_kind(self.encoding(), o) == AddressReferenceKind::Branch
+            && self.encoding().target_mask != 0
+            && target & !self.encoding().target_mask != 0
+        {
+            return Err(Error::Operand);
+        }
+        let mut next = self.clone();
+        next.values[operand_index] = if o.relative {
+            o.position()
+                .value_for_target(address, target)
+                .ok_or(Error::Operand)?
+        } else {
+            target as i128
+        };
+        if !address_constraints(next.encoding(), &next.values, address) {
+            return Err(Error::Operand);
+        }
+        let mut bytes = vec![0; next.length];
+        let length = next.encode_into(&mut bytes)?;
+        let values = decode_values(next.encoding(), &bytes).ok_or(Error::Operand)?;
+        if reference_target(next.encoding(), o, values[operand_index], address) != target {
+            return Err(Error::Operand);
+        }
+        if output.len() < length {
+            return Err(Error::BufferTooSmall);
+        }
+        output[..length].copy_from_slice(&bytes[..length]);
+        Ok(length)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockRelocateError {
+    Decode(Error),
+    Encode(Error),
+    AddressOverflow,
+    MidInstructionTarget,
+    PositionDiscovery,
+    Unsupported,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelocatedBlock {
+    pub bytes: Vec<u8>,
+    pub offsets: Vec<(usize, usize)>,
+    pub original_len: usize,
+}
+/// Fixed-form catalog block relocation. Architectures with delay slots or
+/// position-dependent opcode-only destinations require a dedicated adapter.
+/// Range errors explicitly reject transformations for which the imported
+/// catalog provides no equivalence contract; x86's dedicated API relaxes JMP/Jcc.
+pub fn relocate_block(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+) -> Result<RelocatedBlock, BlockRelocateError> {
+    old_ip
+        .checked_add(
+            u64::try_from(original.len()).map_err(|_| BlockRelocateError::AddressOverflow)?,
+        )
+        .ok_or(BlockRelocateError::AddressOverflow)?;
+    new_ip
+        .checked_add(original.len() as u64)
+        .ok_or(BlockRelocateError::AddressOverflow)?;
+    let mut items = Vec::new();
+    let mut offset = 0;
+    while offset < original.len() {
+        let d = decode(&original[offset..]).map_err(BlockRelocateError::Decode)?;
+        if d.length == 0
+            || offset
+                .checked_add(d.length)
+                .is_none_or(|n| n > original.len())
+        {
+            return Err(BlockRelocateError::Decode(Error::Truncated));
+        }
+        if d.encoding().delay_slots > 0 {
+            return Err(BlockRelocateError::Unsupported);
+        }
+        let from = old_ip + offset as u64;
+        if matches!(
+            d.encoding().flow_control,
+            "call" | "conditional_call" | "conditional-call"
+        ) {
+            let position = d
+                .encoding()
+                .operands
+                .iter()
+                .find(|o| o.relative)
+                .or_else(|| d.encoding().operands.iter().find(|o| o.kind == "address"))
+                .map_or(Position::Fixed, Operand::position);
+            let address_mask = reference_address_mask(d.encoding(), position, from);
+            if d.branch_target(from) == Some((from + d.length as u64) & address_mask) {
+                return Err(BlockRelocateError::PositionDiscovery);
+            }
+        }
+        items.push((offset, d.clone()));
+        offset += d.length;
+    }
+    let mut result = Vec::with_capacity(original.len());
+    for (offset, d) in &items {
+        let from = old_ip + *offset as u64;
+        let to = new_ip + *offset as u64;
+        let mut next = d.clone();
+        let mut expected = Vec::new();
+        for r in d.address_references(from) {
+            let mut target = r.target;
+            let address_mask = reference_address_mask(d.encoding(), r.position, from);
+            if r.kind == AddressReferenceKind::Branch {
+                if let Some(target_offset) =
+                    internal_offset(target, old_ip, original.len(), address_mask)?
+                {
+                    if !items.iter().any(|(o, _)| *o == target_offset) {
+                        return Err(BlockRelocateError::MidInstructionTarget);
+                    }
+                    let new_mask = reference_address_mask(d.encoding(), r.position, to);
+                    if original.len() as u128 > new_mask as u128 + 1 {
+                        return Err(BlockRelocateError::Unsupported);
+                    }
+                    target = (new_ip + target_offset as u64) & new_mask;
+                }
+                if d.encoding().target_mask != 0 && target & !d.encoding().target_mask != 0 {
+                    return Err(BlockRelocateError::Encode(Error::Operand));
+                }
+            }
+            expected.push((r.operand_index, target));
+            let o = &d.encoding().operands[r.operand_index];
+            if o.relative {
+                next.values[r.operand_index] = o
+                    .position()
+                    .value_for_target(to, target)
+                    .ok_or(BlockRelocateError::Encode(Error::Operand))?;
+            } else if target != r.target {
+                next.values[r.operand_index] = target as i128;
+            }
+        }
+        if let Some(target) = d
+            .branch_target(from)
+            .filter(|_| d.encoding().fixed_target.is_some())
+        {
+            let address_mask = reference_address_mask(d.encoding(), Position::Fixed, from);
+            if let Some(target_offset) =
+                internal_offset(target, old_ip, original.len(), address_mask)?
+            {
+                if !items.iter().any(|(o, _)| *o == target_offset) {
+                    return Err(BlockRelocateError::MidInstructionTarget);
+                }
+                if ((new_ip + target_offset as u64) & address_mask) != target {
+                    return Err(BlockRelocateError::Unsupported);
+                }
+            }
+        }
+        if !address_constraints(next.encoding(), &next.values, to) {
+            return Err(BlockRelocateError::Encode(Error::Operand));
+        }
+        let start = result.len();
+        result.resize(start + next.length, 0);
+        next.encode_into(&mut result[start..])
+            .map_err(BlockRelocateError::Encode)?;
+        let values = decode_values(next.encoding(), &result[start..])
+            .ok_or(BlockRelocateError::Encode(Error::Operand))?;
+        for (index, target) in expected {
+            if reference_target(
+                next.encoding(),
+                &next.encoding().operands[index],
+                values[index],
+                to,
+            ) != target
+            {
+                return Err(BlockRelocateError::Encode(Error::Operand));
+            }
+        }
+    }
+    Ok(RelocatedBlock {
+        bytes: result,
+        offsets: items.iter().map(|(o, _)| (*o, *o)).collect(),
+        original_len: original.len(),
+    })
+}
+pub fn relocate_block_into(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    output: &mut [u8],
+) -> Result<usize, BlockRelocateError> {
+    let block = relocate_block(original, old_ip, new_ip)?;
+    if output.len() < block.bytes.len() {
+        return Err(BlockRelocateError::Encode(Error::BufferTooSmall));
+    }
+    output[..block.bytes.len()].copy_from_slice(&block.bytes);
+    Ok(block.bytes.len())
+}

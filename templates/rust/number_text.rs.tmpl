@@ -1,0 +1,90 @@
+{{define "number_text"}}
+// Shared by generated formatters. Numeric text needs no Formatter state,
+// temporary String, runtime cache or heap storage.
+#[allow(dead_code)]
+mod number_text {
+    use std::fmt::{self, Write};
+    const PAIRS:&str="00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899";
+    const DIGITS:&str="0123456789";
+    const HEX:&[u8;16]=b"0123456789abcdef";
+    const SMALL_HEX:&str="0x00x10x20x30x40x50x60x70x80x90xa0xb0xc0xd0xe0xf";
+
+    #[inline]
+    pub fn unsigned(out:&mut (impl Write+?Sized),mut value:u64)->fmt::Result {
+        if value<10 {let i=value as usize;return out.write_str(&DIGITS[i..i+1])}
+        if value<100 {let i=value as usize*2;return out.write_str(&PAIRS[i..i+2])}
+        let mut buffer=[0u8;20];let mut at=buffer.len();
+        while value>=100 {
+            let pair=(value%100) as usize*2;value/=100;at-=2;
+            buffer[at..at+2].copy_from_slice(&PAIRS.as_bytes()[pair..pair+2]);
+        }
+        if value<10 {at-=1;buffer[at]=b'0'+value as u8;}
+        else {at-=2;let pair=value as usize*2;buffer[at..at+2].copy_from_slice(&PAIRS.as_bytes()[pair..pair+2]);}
+        // Every byte in the initialized suffix is an ASCII decimal digit.
+        out.write_str(std::str::from_utf8(&buffer[at..]).map_err(|_|fmt::Error)?)
+    }
+    #[inline]
+    pub fn signed(out:&mut (impl Write+?Sized),value:i64)->fmt::Result {
+        if value<0 {out.write_char('-')?;}unsigned(out,value.unsigned_abs())
+    }
+    #[inline]
+    pub fn integer(out:&mut (impl Write+?Sized),value:i128)->fmt::Result {
+        if value<0 {out.write_char('-')?;}
+        let mut value=value.unsigned_abs();
+        if value<=u64::MAX as u128 {return unsigned(out,value as u64)}
+        let mut buffer=[0u8;39];let mut at=buffer.len();
+        while value>=100 {
+            let pair=(value%100) as usize*2;value/=100;at-=2;
+            buffer[at..at+2].copy_from_slice(&PAIRS.as_bytes()[pair..pair+2]);
+        }
+        if value<10 {at-=1;buffer[at]=b'0'+value as u8;}
+        else {at-=2;let pair=value as usize*2;buffer[at..at+2].copy_from_slice(&PAIRS.as_bytes()[pair..pair+2]);}
+        // Every byte in the initialized suffix is an ASCII decimal digit.
+        out.write_str(std::str::from_utf8(&buffer[at..]).map_err(|_|fmt::Error)?)
+    }
+    #[inline]
+    pub fn hex(out:&mut (impl Write+?Sized),mut value:u64)->fmt::Result {
+        if value<16 {let i=value as usize*3;return out.write_str(&SMALL_HEX[i..i+3])}
+        let mut buffer=[0u8;18];let mut at=buffer.len();
+        loop {at-=1;buffer[at]=HEX[(value&15) as usize];value>>=4;if value==0{break}}
+        at-=2;buffer[at]=b'0';buffer[at+1]=b'x';
+        // The suffix contains the ASCII prefix and lowercase hexadecimal digits.
+        out.write_str(std::str::from_utf8(&buffer[at..]).map_err(|_|fmt::Error)?)
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        fn check(value:u64) {
+            let mut text=String::new();unsigned(&mut text,value).unwrap();assert_eq!(text,format!("{value}"));
+            text.clear();hex(&mut text,value).unwrap();assert_eq!(text,format!("0x{value:x}"));
+            let signed_value=value as i64;text.clear();signed(&mut text,signed_value).unwrap();assert_eq!(text,format!("{signed_value}"));
+        }
+        #[test]
+        fn decimal_and_hex_match_standard_formatting_at_boundaries_and_random_values() {
+            for value in 0..=1024 {check(value)}
+            for bit in 0..64 {let value=1u64<<bit;for v in [value-1,value,value.saturating_add(1)]{check(v)}}
+            let mut power=1u64;while let Some(next)=power.checked_mul(10){power=next;for v in [power-1,power,power+1]{check(v)}}
+            for value in [u64::MAX,i64::MIN as u64,i64::MAX as u64]{check(value)}
+            let mut random=0x9e3779b97f4a7c15u64;
+            for _ in 0..10000 {random=random.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);check(random)}
+        }
+        #[test]
+        fn full_width_signed_values_match_standard_formatting() {
+            let mut text=String::new();
+            for value in [0,1,-1,i64::MIN as i128,i64::MAX as i128,u64::MAX as i128,u64::MAX as i128+1,-(u64::MAX as i128)-1,i128::MIN,i128::MAX] {
+                text.clear();integer(&mut text,value).unwrap();assert_eq!(text,format!("{value}"));
+            }
+            let mut random=1u128;
+            for _ in 0..10000 {random=random.wrapping_mul(0xda942042e4dd58b5).wrapping_add(1);let value=random as i128;text.clear();integer(&mut text,value).unwrap();assert_eq!(text,format!("{value}"));}
+        }
+        #[test]
+        fn writer_failures_are_propagated() {
+            struct Reject;
+            impl Write for Reject {fn write_str(&mut self,_:&str)->fmt::Result{Err(fmt::Error)}}
+            for value in [0,9,10,99,100,u64::MAX]{assert!(unsigned(&mut Reject,value).is_err());assert!(hex(&mut Reject,value).is_err());}
+            for value in [0,-1,i64::MIN,i64::MAX]{assert!(signed(&mut Reject,value).is_err());}
+            for value in [0,-1,i128::MIN,i128::MAX]{assert!(integer(&mut Reject,value).is_err());}
+        }
+    }
+}
+{{end}}

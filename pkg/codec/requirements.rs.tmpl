@@ -1,0 +1,64 @@
+//! Architectural feature and execution-context requirements. Unknown metadata
+//! remains explicit; successful decoding does not imply executable semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Satisfaction { Unknown, Satisfied, Unsatisfied }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnknownPolicy { Reject, Allow }
+impl Satisfaction {
+    pub fn admit(self, policy: UnknownPolicy) -> bool { self == Self::Satisfied || self == Self::Unknown && policy == UnknownPolicy::Allow }
+    fn invert(self) -> Self { match self { Self::Satisfied=>Self::Unsatisfied, Self::Unsatisfied=>Self::Satisfied, Self::Unknown=>Self::Unknown } }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Expr {
+    True, Feature(&'static str), Mode(&'static str), FieldEq { name: &'static str, mask: u64, value: u64 },
+    All(&'static [Expr]), Any(&'static [Expr]), Not(&'static Expr), If(&'static Expr, &'static Expr, &'static Expr), Unknown(&'static str),
+}
+impl Expr {
+    pub fn evaluate(&self, features: &[&str], mode: &str, field: &dyn Fn(&str)->Option<u64>) -> Satisfaction {
+        self.evaluate_with(&|name| Some(features.contains(&name)), mode, field)
+    }
+    /// Evaluate with partial feature knowledge. None preserves uncertainty;
+    /// a proved false result rejects regardless of unresolved other features.
+    pub fn evaluate_with(&self, feature: &dyn Fn(&str)->Option<bool>, mode: &str, field: &dyn Fn(&str)->Option<u64>) -> Satisfaction {
+        use Satisfaction::*;
+        match self {
+            Self::True=>Satisfied,
+            Self::Feature(name)=>match feature(name) { Some(true)=>Satisfied, Some(false)=>Unsatisfied, None=>Unknown },
+            Self::Mode(name)=>if mode.is_empty() { Unknown } else if name == &mode { Satisfied } else { Unsatisfied },
+            Self::FieldEq{name,mask,value}=>match field(name) { Some(v) if v&mask == value&mask=>Satisfied, Some(_)=>Unsatisfied, None=>Unknown },
+            Self::Unknown(_)=>Unknown,
+            Self::Not(expr)=>expr.evaluate_with(feature,mode,field).invert(),
+            Self::All(exprs)|Self::Any(exprs)=>{
+                let all=matches!(self,Self::All(_)); let mut unknown=false;
+                for e in *exprs { match e.evaluate_with(feature,mode,field) { Unsatisfied if all=>return Unsatisfied, Satisfied if !all=>return Satisfied, Unknown=>unknown=true, _=>{} } }
+                if unknown { Unknown } else if all { Satisfied } else { Unsatisfied }
+            },
+            Self::If(c,a,b)=>match c.evaluate_with(feature,mode,field) { Satisfied=>a.evaluate_with(feature,mode,field), Unsatisfied=>b.evaluate_with(feature,mode,field), Unknown=>{let x=a.evaluate_with(feature,mode,field);if x==b.evaluate_with(feature,mode,field){x}else{Unknown}} },
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Requirements {
+    pub expression: Expr,
+    pub fallback: Option<Expr>,
+    pub fallback_behavior: &'static str,
+    pub source: &'static str,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Evaluation {
+    pub primary: Satisfaction,
+    pub fallback: Option<Satisfaction>,
+    pub fallback_behavior: &'static str,
+}
+impl Evaluation {
+    /// Admit the requested semantics. A hint-space fallback is not automatically
+    /// substituted for the decoded instruction's requested behavior.
+    pub fn admit(self, policy: UnknownPolicy) -> bool { self.primary.admit(policy) }
+    pub fn admit_fallback(self, policy: UnknownPolicy) -> bool { self.fallback.is_some_and(|s|s.admit(policy)) }
+}
+impl Requirements {
+    pub fn evaluate(&self, features: &[&str], mode: &str, field: &dyn Fn(&str)->Option<u64>) -> Evaluation {
+        Evaluation { primary:self.expression.evaluate(features,mode,field), fallback:self.fallback.map(|e|e.evaluate(features,mode,field)), fallback_behavior:self.fallback_behavior }
+    }
+}
+pub static UNKNOWN: Requirements = Requirements { expression:Expr::Unknown("source metadata absent"), fallback:None, fallback_behavior:"", source:"" };

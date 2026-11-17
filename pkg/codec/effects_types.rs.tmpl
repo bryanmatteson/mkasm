@@ -1,0 +1,45 @@
+/// Completeness describes represented architectural effects, not value semantics.
+/// Unknown must never be interpreted as preservation or absence of side effects.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum EffectKnowledge { Complete, Partial, Unknown }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum WriteBehavior { Unknown, PreserveUpper, Replace, ZeroUpper }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum FlagAction { Unknown, Preserve, Write, Clear, Set, Undefined }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum MemoryOrdering { Unknown, Relaxed, Acquire, Release, AcquireRelease, Sequential }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum Atomicity { Unknown, NonAtomic, Atomic }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub enum Writeback { Unknown, None, Before, After }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct RegisterSlice {
+    pub bank:&'static str, pub number:Option<u16>, pub name:&'static str,
+    pub offset:u16, pub width:Option<u16>,
+}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct RegisterEffect {
+    pub register:RegisterSlice, pub read:bool, pub write:bool, pub conditional:bool,
+    pub implicit:bool, pub address:bool, pub write_behavior:WriteBehavior,
+}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct FlagEffect { pub name:&'static str, pub read:bool, pub action:FlagAction, pub conditional:bool }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct MemoryEffect {
+    pub operand:Option<usize>, pub read:bool, pub write:bool, pub conditional:bool,
+    pub implicit:bool, pub width_bits:Option<u16>, pub ordering:MemoryOrdering,
+    pub atomicity:Atomicity, pub writeback:Writeback,
+}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct EffectSummary {
+    pub knowledge:EffectKnowledge, pub registers_knowledge:EffectKnowledge,
+    pub flags_knowledge:EffectKnowledge, pub memory_knowledge:EffectKnowledge,
+    pub registers:Vec<RegisterEffect>, pub flags:Vec<FlagEffect>, pub memory:Vec<MemoryEffect>,
+    pub other_side_effects:EffectKnowledge, pub other_side_effects_possible:Option<bool>,
+    pub memory_may_read:Option<bool>, pub memory_may_write:Option<bool>,
+}
+impl Default for EffectSummary {
+    fn default()->Self { Self { knowledge:EffectKnowledge::Unknown, registers_knowledge:EffectKnowledge::Unknown,
+        flags_knowledge:EffectKnowledge::Unknown, memory_knowledge:EffectKnowledge::Unknown,
+        registers:Vec::new(), flags:Vec::new(), memory:Vec::new(), other_side_effects:EffectKnowledge::Unknown, other_side_effects_possible:None, memory_may_read:None, memory_may_write:None } }
+}

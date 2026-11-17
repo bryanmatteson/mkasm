@@ -1,0 +1,12 @@
+// Imported encodings carry no trusted executable semantics. A shared mnemonic
+// does not establish a machine transition across architectures.
+#[path = "semantics.rs"]
+pub mod semantics;
+pub mod recipes {
+    use super::semantics::Recipe;
+    impl super::Decoded {
+        pub fn semantic_recipe(&self,address:u64)->Recipe {
+            Recipe::unsupported("this imported encoding has no audited scalar semantic recipe",address.wrapping_add(self.length as u64),64)
+        }
+    }
+}

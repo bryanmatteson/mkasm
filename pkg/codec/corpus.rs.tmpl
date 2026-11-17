@@ -1,0 +1,36 @@
+
+#[test]
+fn nonzero_and_boundary_samples_decode_through_public_api(){
+    for (index,e) in ENCODINGS.iter().enumerate().filter(|(_,e)|!e.assembly_only){
+        let active=FEATURE_SETS.iter().find(|(_,f)|e.features.iter().all(|required|f.contains(required))).map(|(_,f)|*f);
+        for seed in [1,128]{
+            let values=representative_with_seed(index,seed).unwrap();let mut all=[0;MAX_OPERANDS];all[..values.len()].copy_from_slice(&values);
+            let original=Field{encoding_index:index,values:all,length:e.value.len()};let mut bytes=[0;256];let length=original.encode_into(&mut bytes).unwrap();
+            let decoded=decode_field_api(&bytes[..length],active).unwrap_or_else(|error|panic!("{} seed {seed}: {error:?}",e.id));
+            assert_eq!(decoded.length,length,"{} seed {seed} decoded as {}",e.id,decoded.encoding().id);
+            let mut encoded=[0;256];let n=decoded.encode_into(&mut encoded).unwrap();assert_eq!(&encoded[..n],&bytes[..length],"{} seed {seed}",e.id);
+        }
+    }
+}
+
+#[test]
+fn relative_forms_preserve_targets_or_reject_atomically(){
+    let(mut relative,mut moved)=(0,0);
+    for(index,e)in ENCODINGS.iter().enumerate(){
+        if !e.operands.iter().any(|o|o.relative){continue;}relative+=1;
+        let mut step=1u64;for o in e.operands.iter().filter(|o|o.relative){let stride=u64::try_from(o.domain().step).unwrap();let(mut a,mut b)=(step,stride);while b!=0{(a,b)=(b,a%b);}step=(step/a).checked_mul(stride).expect("relative domain stride LCM");}
+        for seed in [1,128]{
+            let values=representative_with_seed(index,seed).unwrap();let mut all=[0;MAX_OPERANDS];all[..values.len()].copy_from_slice(&values);let d=Field{encoding_index:index,values:all,length:e.value.len()};
+            for to in [0x1000u64.wrapping_add(step),0x1000u64.wrapping_sub(step)]{
+                let mut output=[0xcc;256];match d.relocated(0x1000,to){
+                    Ok(next)=>{moved+=1;assert_eq!(next.encoding_index,index);for(n,o)in e.operands.iter().enumerate(){if o.relative{assert_eq!(o.position().target(to,next.values[n]),o.position().target(0x1000,d.values[n]),"{} {} seed {seed}",e.id,o.name);}else{assert_eq!(next.values[n],d.values[n],"{} {}",e.id,o.name);}}
+                        let n=d.relocate_into(0x1000,to,&mut output).unwrap();assert_eq!(n,e.value.len());let mut expected=[0;256];assert_eq!(next.encode_into(&mut expected).unwrap(),n);assert_eq!(&output[..n],&expected[..n]);assert!(output[n..].iter().all(|b|*b==0xcc));
+                    },
+                    Err(_)=>{assert!(d.relocate_into(0x1000,to,&mut output).is_err());assert!(output.iter().all(|b|*b==0xcc),"{} rejected relocation wrote bytes",e.id);}
+                }
+                assert_eq!(&d.values[..values.len()],values,"{} source mutated",e.id);
+            }
+        }
+    }
+    assert!(relative==0||moved>0,"relative corpus has no representable relocation");
+}
