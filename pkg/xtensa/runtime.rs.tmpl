@@ -1,0 +1,82 @@
+#[derive(Clone,Copy)]
+struct SlotMeta{slot:i32,format:usize,mask:&'static[u8]}
+#[derive(Clone,Copy)]
+struct FormatMeta{name:&'static str,length:usize,slots:&'static[i32],mask:&'static[u8],value:&'static[u8],scalar:bool}
+const SCALAR_FORMAT:usize=usize::MAX;
+#[derive(Clone,Debug)]
+pub struct Decoded{pub format:&'static str,pub instructions:Vec<DecodedField>,pub length:usize}
+fn format_slots(f:usize)->&'static[i32]{FORMAT_META.get(f).map(|f|f.slots).unwrap_or(&[])}
+fn packet_formats()->impl Iterator<Item=(usize,&'static FormatMeta)>{FORMAT_META.iter().enumerate().filter(|(_,f)|!f.scalar&&f.mask.len()==f.length)}
+fn format_matches(f:&FormatMeta,src:&[u8])->bool{f.mask.len()==f.length&&src.len()>=f.length&&src.iter().zip(f.mask).zip(f.value).all(|((&s,&m),&v)|s&m==v)}
+fn frame(src:&[u8])->Result<usize,Error>{
+ let first=*src.first().ok_or(Error::Truncated)?;
+ for f in FORMAT_META{if f.mask.len()!=f.length{continue;}if src.iter().zip(f.mask).zip(f.value).all(|((&s,&m),&v)|s&m==v){return if src.len()<f.length{Err(Error::Truncated)}else{Ok(f.length)};}}
+ let op=if ARCHITECTURE=="xtensaeb"{first>>4}else{first&15};let n=if op<8{3}else if op<14{2}else{8};if src.len()<n{Err(Error::Truncated)}else{Ok(n)}
+}
+pub fn decode(src:&[u8])->Result<Decoded,Error>{decode_with_features(src,None)}
+pub fn decode_with_features(src:&[u8],active:Option<&[&str]>)->Result<Decoded,Error>{
+ let n=frame(src)?;
+ let f=packet_formats().find(|(_,f)|format_matches(f,src));
+ let Some((fi,f))=f else{
+  if n>=8&&!FORMAT_META.iter().any(|f|f.scalar&&format_matches(f,src)){return Err(Error::Unknown);}
+  let d=decode_field_with_features(&src[..n],active)?;if SLOT_META[d.encoding_index].slot>=0{return Err(Error::Unknown);}return Ok(Decoded{format:"scalar",instructions:vec![d],length:n});
+ };
+ let mut instructions=Vec::new();for &slot in format_slots(fi){
+  let mut found=None;for(i,e)in ENCODINGS.iter().enumerate(){let m=&SLOT_META[i];if m.slot!=slot||m.format!=fi||!features(e,active){continue;}
+   let mut b=vec![0;n];for k in 0..n{b[k]=src[k]&m.mask[k];}
+   if b.iter().zip(e.mask).zip(e.value).any(|((&s,&m),&v)|s&m!=v){continue;}
+   if let Some(values)=decode_values(e,&b){found=Some(DecodedField{encoding_index:i,values,length:n});break;}
+  }instructions.push(found.ok_or(Error::Unknown)?);
+ }Ok(Decoded{format:f.name,instructions,length:n})
+}
+impl Decoded{
+ pub fn format(&self,address:u64)->String{let text=self.instructions.iter().map(|d|d.format(address)).collect::<Vec<_>>().join("; ");if self.format!="scalar"{format!("{{ {text} }}")}else{text}}
+ pub fn encode(&self)->Result<Vec<u8>,Error>{
+  if self.format=="scalar"{if self.instructions.len()!=1{return Err(Error::Operand);}let d=&self.instructions[0];if SLOT_META[d.encoding_index].slot>=0{return Err(Error::Operand);}return encode(d.encoding().id,&d.values[..d.encoding().operands.len()]);}
+  let(fi,f)=packet_formats().find(|(_,f)|f.name==self.format).ok_or(Error::Unknown)?;
+  if self.instructions.len()!=f.slots.len(){return Err(Error::Operand);}let mut out=f.value.to_vec();
+  for(d,&slot)in self.instructions.iter().zip(f.slots){let m=SLOT_META.get(d.encoding_index).ok_or(Error::Unknown)?;if m.format!=fi||m.slot!=slot{return Err(Error::Operand);}let b=encode(d.encoding().id,&d.values[..d.encoding().operands.len()])?;for j in 0..f.length{out[j]|=b[j]&m.mask[j];}}
+  Ok(out)
+ }
+}
+pub fn assemble(text:&str)->Result<Vec<Vec<u8>>,Error>{assemble_at(text,0)}
+pub fn assemble_at(text:&str,address:u64)->Result<Vec<Vec<u8>>,Error>{assemble_with_features(text,address,None)}
+pub fn assemble_with_features(text:&str,address:u64,active:Option<&[&str]>)->Result<Vec<Vec<u8>>,Error>{
+ let text=text.trim();if !text.starts_with('{'){
+  let prepared=syntax_input(text);let mut out=Vec::new();for(index,e)in ENCODINGS.iter().enumerate(){if SLOT_META[index].slot>=0||!features(e,active){continue;}if let Some(values)=parse_prepared_syntax(index,&prepared,address){let mut b=vec![0;e.mask.len()];if encode_into(index,&values[..e.operands.len()],&mut b).is_ok()&&!out.contains(&b){out.push(b);}}}
+  return if out.is_empty(){Err(Error::Syntax)}else{Ok(out)};
+ }assemble_bundle(text,|_|address,active)
+}
+fn assemble_bundle(text:&str,address:impl Fn(&Encoding)->u64,active:Option<&[&str]>)->Result<Vec<Vec<u8>>,Error>{
+ let inner=text.strip_prefix('{').and_then(|s|s.strip_suffix('}')).ok_or(Error::Syntax)?;let parts=inner.split(';').map(|p|syntax_input(p.trim())).collect::<Vec<_>>();let mut output=Vec::new();
+ for(fi,f)in packet_formats(){if f.slots.len()!=parts.len(){continue;}let mut partial=vec![Vec::<DecodedField>::new()];
+  for(&slot,p)in f.slots.iter().zip(&parts){let mut next=Vec::new();for(index,e)in ENCODINGS.iter().enumerate(){let m=&SLOT_META[index];if m.format!=fi||m.slot!=slot||!features(e,active){continue;}if let Some(values)=parse_prepared_syntax(index,p,address(e)){let mut bytes=vec![0;f.length];if encode_into(index,&values[..e.operands.len()],&mut bytes).is_err(){continue;}for prev in &partial{let mut v=prev.clone();v.push(DecodedField{encoding_index:index,values:{let mut out=[0;MAX_OPERANDS];out[..values.len()].copy_from_slice(&values);out},length:f.length});next.push(v);}}}partial=next;}
+  for instructions in partial{output.push(Decoded{format:f.name,instructions,length:f.length}.encode()?);}
+ }if output.is_empty(){Err(Error::Syntax)}else{Ok(output)}
+}
+#[derive(Clone,Debug)]
+pub struct Template{patterns:Vec<(usize,Vec<FieldTemplate>)>}
+impl Template{
+ pub fn parse(text:&str)->Result<Self,Error>{Self::parse_at(text,0)}
+ pub fn parse_at(text:&str,address:u64)->Result<Self,Error>{Self::parse_with_features(text,address,None)}
+ pub fn parse_with_features(text:&str,address:u64,active:Option<&[&str]>)->Result<Self,Error>{
+  let text=text.trim();if !text.starts_with('{'){let mut t=FieldTemplate::parse_with_features(text,address,active)?;t.patterns.retain(|(i,_)|SLOT_META[*i].slot<0);if t.patterns.is_empty(){return Err(Error::Syntax);}return Ok(Self{patterns:vec![(SCALAR_FORMAT,vec![t])]});}
+  let inner=text.strip_prefix('{').and_then(|s|s.strip_suffix('}')).ok_or(Error::Syntax)?;let parts=inner.split(';').map(str::trim).collect::<Vec<_>>();let mut patterns=Vec::new();
+  for(fi,f)in packet_formats(){if f.slots.len()!=parts.len(){continue;}let mut ts=Vec::new();for(&slot,p)in f.slots.iter().zip(&parts){let Ok(mut t)=FieldTemplate::parse_with_features(p,address,active)else{break;};t.patterns.retain(|(i,_)|SLOT_META[*i].slot==slot&&SLOT_META[*i].format==fi);if t.patterns.is_empty(){break;}ts.push(t);}if ts.len()==f.slots.len(){patterns.push((fi,ts));}}
+  if patterns.is_empty(){Err(Error::Syntax)}else{Ok(Self{patterns})}
+ }
+ pub fn matches(&self,src:&[u8])->Option<(usize,Vec<(String,i128)>)>{
+  let length=frame(src).ok()?;for(fi,ts)in &self.patterns{
+   if *fi==SCALAR_FORMAT{if !packet_formats().any(|(_,f)|format_matches(f,src)){if let Some(v)=ts[0].matches(src){return Some(v);}}continue;}
+   let f=&FORMAT_META[*fi];if length!=f.length||!format_matches(f,src){continue;}let mut holes=Vec::new();let mut valid=true;
+   for t in ts{let mut matched=None;for(i,bindings)in &t.patterns{let m=&SLOT_META[*i];let b:Vec<u8>=src[..length].iter().zip(m.mask).map(|(s,m)|s&m).collect();let one=FieldTemplate{patterns:vec![(*i,bindings.clone())],address:t.address};if let Some((_,v))=one.matches(&b){matched=Some(v);break;}}let Some(v)=matched else{valid=false;break;};for(name,value)in v{if let Some((_,old))=holes.iter().find(|(n,_)|*n==name){if *old!=value{valid=false;break;}}else{holes.push((name,value));}}}
+   if valid{return Some((length,holes));}
+  }None
+ }
+ pub fn encode(&self,holes:&[(&str,i128)])->Result<Vec<Vec<u8>>,Error>{let mut output=Vec::new();for(fi,ts)in &self.patterns{if *fi==SCALAR_FORMAT{if let Ok(mut v)=ts[0].encode(holes){output.append(&mut v);}continue;}let f=&FORMAT_META[*fi];let mut partial=vec![f.value.to_vec()];for t in ts{let mut next=Vec::new();for(i,bindings)in &t.patterns{let one=FieldTemplate{patterns:vec![(*i,bindings.clone())],address:t.address};if let Ok(bb)=one.encode(holes){for b in bb{for prev in &partial{let mut v=prev.clone();for j in 0..f.length{v[j]|=b[j]&SLOT_META[*i].mask[j];}next.push(v);}}}}partial=next;}output.extend(partial);}if output.is_empty(){Err(Error::Operand)}else{Ok(output)}}
+}
+#[cfg(test)]mod xtensa_tests{use super::*;
+ #[test]fn framing_and_bundle_rejection(){assert!(matches!(decode(&[]),Err(Error::Truncated)));assert!(assemble("{ add a2,a3,a4 }").is_err());}
+ #[test]fn every_real_slot(){for(i,e)in ENCODINGS.iter().enumerate(){let m=&SLOT_META[i];if m.slot<0{continue;}let f=&FORMAT_META[m.format];let mut instructions=Vec::new();for &slot in format_slots(m.format){let j=if slot==m.slot{i}else{ENCODINGS.iter().enumerate().find(|(j,e)|SLOT_META[*j].format==m.format&&SLOT_META[*j].slot==slot&&e.mnemonic=="nop").map(|(j,_)|j).unwrap_or_else(||ENCODINGS.iter().enumerate().find(|(j,_)|SLOT_META[*j].format==m.format&&SLOT_META[*j].slot==slot).unwrap().0)};let values=representative(j).unwrap();let mut vv=[0;MAX_OPERANDS];vv[..values.len()].copy_from_slice(&values);instructions.push(DecodedField{encoding_index:j,values:vv,length:f.length});}let packet=Decoded{format:f.name,instructions,length:f.length};let b=packet.encode().unwrap_or_else(|x|panic!("{} {x:?}",e.id));let d=decode(&b).unwrap_or_else(|x|panic!("{} {x:?} {b:x?}",e.id));assert_eq!(d.encode().unwrap(),b,"{}",e.id);let text=d.format(0x1000);assert!(assemble_at(&text,0x1000).unwrap_or_else(|x|panic!("{text} {x:?}")).contains(&b),"{text}");let t=Template::parse_at(&text,0x1000).unwrap();assert!(t.matches(&b).is_some(),"{text}");assert!(t.encode(&[]).unwrap().contains(&b),"{text}");}}
+}
+impl Decoded{pub fn semantic_recipe(&self,address:u64)->semantics::Recipe{semantics::Recipe::unsupported("Xtensa instruction/bundle has no audited scalar recipe",address.wrapping_add(self.length as u64),32)}}

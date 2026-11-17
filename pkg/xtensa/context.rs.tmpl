@@ -1,0 +1,17 @@
+/// Runtime literal addressing state. Bit zero enables the extended L32R base;
+/// bits 31:12 supply its address. Encoded displacements remain unchanged.
+#[derive(Clone,Copy,Debug,Default)]
+pub struct ExecutionContext{pub pc:u32,pub litbase:u32}
+impl ExecutionContext{
+    fn address(self,mnemonic:&str)->u64{if self.litbase&1!=0&&mnemonic.eq_ignore_ascii_case("l32r"){(self.litbase&0xfffff000) as u64}else{self.pc as u64}}
+}
+impl Decoded{
+    pub fn format_with_context(&self,ctx:ExecutionContext)->String{let text=self.instructions.iter().map(|d|d.format(ctx.address(d.encoding().mnemonic))).collect::<Vec<_>>().join("; ");if self.format!="scalar"{format!("{{ {text} }}")}else{text}}
+    pub fn relocated_with_context(&self,from:ExecutionContext,to:ExecutionContext)->Result<Self,Error>{let mut out=self.clone();for d in &mut out.instructions{let name=d.encoding().mnemonic;*d=d.relocated(from.address(name),to.address(name))?;}out.encode()?;Ok(out)}
+    pub fn describe_with_context(&self,ctx:ExecutionContext)->Described{let bundle=self.format!="scalar";let mut out=Described{text:if bundle{"{ ".into()}else{String::new()},operands:Vec::new()};for(index,d)in self.instructions.iter().enumerate(){if index>0{out.text.push_str("; ");}let mut part=d.describe_field(ctx.address(d.encoding().mnemonic));let offset=out.text.len();for span in &mut part.operands{span.start+=offset;span.end+=offset;span.instruction_index=index;if ctx.litbase&1!=0&&d.encoding().mnemonic.eq_ignore_ascii_case("l32r")&&span.position.is_position_dependent(){span.position=Position::Relative{bias:(ctx.litbase&0xfffff000) as i128-ctx.pc as i128,pre_align_bias:0,align_bits:0,region_bits:0,wrap_bits:32,low_wrap_bits:0,bank_bits:0};}}out.text.push_str(&part.text);out.operands.extend(part.operands);}if bundle{out.text.push_str(" }");}out}
+}
+pub fn assemble_with_context(text:&str,ctx:ExecutionContext,active:Option<&[&str]>)->Result<Vec<Vec<u8>>,Error>{
+    let text=text.trim();if !text.starts_with('{'){let name=text.split_whitespace().next().unwrap_or("");return assemble_with_features(text,ctx.address(name),active);}
+    assemble_bundle(text,|e|ctx.address(e.mnemonic),active)
+}
+#[cfg(test)]mod literal_context_tests{use super::*;#[test]fn extended_literals(){for pc in 0x1000..0x1004{let ctx=ExecutionContext{pc,litbase:0x40001};for b in assemble_with_context("l32r a2,0x3fffc",ctx,None).unwrap(){let d=decode(&b).unwrap();assert_eq!(d.format_with_context(ctx),"l32r a2, 0x3fffc");let described=d.describe_with_context(ctx);for span in described.operands{if span.position.is_position_dependent(){assert_eq!(span.position.target(pc as u64,span.value),Some(0x3fffc));}}let moved=d.relocated_with_context(ctx,ExecutionContext{pc:0x2000,..ctx}).unwrap();assert_eq!(moved.encode().unwrap(),b);assert!(d.relocated_with_context(ctx,ExecutionContext{pc:0x1000,litbase:0}).is_err());}}}}
