@@ -1,0 +1,136 @@
+//! Full-stream relocation, including ignored DD/FD prefix framing.
+use super::*;
+
+/// Relocate complete framed instructions while retaining every physical prefix.
+/// Internal branch/call destinations must name instruction starts, including
+/// the first byte of any ignored-prefix train. End-of-block targets remain
+/// external. PC arithmetic wraps at 16 bits; blocks larger than one address
+/// space are rejected because an encoded target cannot identify its occurrence.
+/// This fixed-form adapter reports range errors instead of rewriting JR/DJNZ
+/// into a different instruction sequence.
+pub fn relocate_block(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+) -> Result<RelocatedBlock, BlockRelocateError> {
+    relocate_block_with_features(original, old_ip, new_ip, None)
+}
+
+pub fn relocate_block_with_features(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    active: Option<&[&str]>,
+) -> Result<RelocatedBlock, BlockRelocateError> {
+    let length = u64::try_from(original.len()).map_err(|_| BlockRelocateError::AddressOverflow)?;
+    old_ip
+        .checked_add(length)
+        .ok_or(BlockRelocateError::AddressOverflow)?;
+    new_ip
+        .checked_add(length)
+        .ok_or(BlockRelocateError::AddressOverflow)?;
+    if original.len() > 65536 {
+        return Err(BlockRelocateError::Unsupported);
+    }
+    let old_base = old_ip & 65535;
+    let new_base = new_ip & 65535;
+    let mut items = Vec::new();
+    let mut offset = 0usize;
+    while offset < original.len() {
+        let d = decode_with_features(&original[offset..], active)
+            .map_err(BlockRelocateError::Decode)?;
+        if d.length == 0
+            || offset
+                .checked_add(d.length)
+                .is_none_or(|end| end > original.len())
+        {
+            return Err(BlockRelocateError::Decode(Error::Truncated));
+        }
+        let from = (old_base + offset as u64) & 65535;
+        if d.encoding().flow_control.contains("call")
+            && d.branch_target(from) == Some((from + d.length as u64) & 65535)
+        {
+            return Err(BlockRelocateError::PositionDiscovery);
+        }
+        let next = offset
+            .checked_add(d.length)
+            .ok_or(BlockRelocateError::AddressOverflow)?;
+        items.push((offset, d));
+        offset = next;
+    }
+    let boundaries: Vec<usize> = items.iter().map(|(offset, _)| *offset).collect();
+    let mut bytes = Vec::with_capacity(original.len());
+    for (offset, d) in &items {
+        let from = (old_base + *offset as u64 + d.prefixes.len() as u64) & 65535;
+        let to = (new_base + *offset as u64 + d.prefixes.len() as u64) & 65535;
+        let mut body = d.core();
+        for r in body.address_references(from) {
+            let o = &d.encoding().operands[r.operand_index];
+            let is_branch = r.kind == core::AddressReferenceKind::Branch
+                || (d.encoding().flow_control.contains("call")
+                    && matches!(o.name, "target" | "vector"));
+            let mut target = r.target;
+            if is_branch {
+                let target_offset = (target.wrapping_sub(old_base) & 65535) as usize;
+                if target_offset < original.len() {
+                    if boundaries.binary_search(&target_offset).is_err() {
+                        return Err(BlockRelocateError::MidInstructionTarget);
+                    }
+                    target = (new_base + target_offset as u64) & 65535;
+                }
+            }
+            if o.relative {
+                body.values[r.operand_index] = o
+                    .position()
+                    .value_for_target(to, target)
+                    .ok_or(BlockRelocateError::Encode(Error::Operand))?;
+            } else if target != r.target {
+                body.values[r.operand_index] = target as i128;
+            }
+        }
+        // Validate complete address constraints after all related fields have
+        // changed together. No intermediate edit is published or re-decoded.
+        let body = body.relocated(to, to).map_err(BlockRelocateError::Encode)?;
+        let mut next = d.clone();
+        next.values = body.values;
+        next.body = core::encode(
+            body.encoding().id,
+            &body.values[..body.encoding().operands.len()],
+        )
+        .map_err(BlockRelocateError::Encode)?;
+        let encoded = next.reencode().map_err(BlockRelocateError::Encode)?;
+        if encoded.len() != d.length {
+            return Err(BlockRelocateError::Unsupported);
+        }
+        bytes.extend_from_slice(&encoded);
+    }
+    Ok(RelocatedBlock {
+        bytes,
+        offsets: boundaries.iter().map(|&offset| (offset, offset)).collect(),
+        original_len: original.len(),
+    })
+}
+
+/// Transactional full-stream output API. Errors leave the entire buffer intact.
+pub fn relocate_block_into(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    output: &mut [u8],
+) -> Result<usize, BlockRelocateError> {
+    relocate_block_into_with_features(original, old_ip, new_ip, None, output)
+}
+pub fn relocate_block_into_with_features(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    active: Option<&[&str]>,
+    output: &mut [u8],
+) -> Result<usize, BlockRelocateError> {
+    let block = relocate_block_with_features(original, old_ip, new_ip, active)?;
+    if output.len() < block.bytes.len() {
+        return Err(BlockRelocateError::Encode(Error::BufferTooSmall));
+    }
+    output[..block.bytes.len()].copy_from_slice(&block.bytes);
+    Ok(block.bytes.len())
+}

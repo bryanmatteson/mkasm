@@ -1,0 +1,31 @@
+
+fn prefix_position(position:Position,prefixes:usize)->Position{match position{Position::Fixed=>Position::Fixed,Position::Relative{bias,pre_align_bias,align_bits,region_bits,wrap_bits,low_wrap_bits,bank_bits}=>Position::Relative{bias,pre_align_bias:pre_align_bias+prefixes as i128,align_bits,region_bits,wrap_bits,low_wrap_bits,bank_bits}}}
+pub fn describe(src:&[u8],address:u64)->Result<Described,Error>{describe_with_features(src,address,None)}
+pub fn describe_with_features(src:&[u8],address:u64,active:Option<&[&str]>)->Result<Described,Error>{Ok(decode_with_features(src,active)?.describe(address))}
+impl Decoded {
+    pub fn describe(&self,address:u64)->Described{
+        let mut a=self.core().describe(address.wrapping_add(self.prefixes.len() as u64)&65535);let final_text=self.format(address);
+        let removed=a.text.as_bytes().windows(2).enumerate().filter(|(_,b)|*b==b"+-").map(|(i,_)|i).collect::<Vec<_>>();
+        let canonical=a.text.replace("+-","-");let offset=final_text.len()-canonical.len();
+        for s in &mut a.operands{s.start=s.start-removed.iter().filter(|&&i|i<s.start).count()+offset;s.end=s.end-removed.iter().filter(|&&i|i<s.end).count()+offset;s.position=prefix_position(s.position,self.prefixes.len());}
+        a.text=final_text;a
+    }
+    pub fn encode_into(&self,output:&mut[u8])->Result<usize,Error>{self.reencode_into(output)}
+    pub fn set_operand(&mut self,name:&str,value:i128)->Result<(),Error>{let mut next=self.clone();let mut body=next.core();body.set_operand(name,value)?;next.values=body.values;next.body=core::encode(body.encoding().id,&body.values[..body.encoding().operands.len()])?;next.reencode()?;*self=next;Ok(())}
+    pub fn relocated(&self,from:u64,to:u64)->Result<Self,Error>{let mut next=self.clone();let n=self.prefixes.len() as u64;let body=self.core().relocated(from.wrapping_add(n)&65535,to.wrapping_add(n)&65535)?;next.values=body.values;next.body=core::encode(body.encoding().id,&body.values[..body.encoding().operands.len()])?;next.reencode()?;Ok(next)}
+    pub fn relocate_into(&self,from:u64,to:u64,output:&mut[u8])->Result<usize,Error>{self.relocated(from,to)?.reencode_into(output)}
+}
+impl Template {
+    pub fn encodings(&self)->Vec<&'static str>{self.inner.encodings().into_iter().filter(|id|self.id.is_empty()||*id==self.id).collect()}
+    pub fn holes(&self)->Vec<Hole>{let mut holes=self.inner.holes();for h in &mut holes{h.domains.retain(|d|self.id.is_empty()||d.encoding==self.id);for d in &mut h.domains{d.position=prefix_position(d.position,self.prefixes.len());}}holes.retain(|h|!h.domains.is_empty());holes}
+    pub fn hole_position(&self,index:usize)->Option<Position>{self.holes().get(index)?.position()}
+    pub fn could_match(&self,src:&[u8])->bool{src.starts_with(&self.prefixes)&&self.inner.byte_filters().any(|f|(self.id.is_empty()||f.encoding==self.id)&&f.matches(&src[self.prefixes.len()..]))}
+}
+#[cfg(test)]mod prefix_analysis_tests{
+    use super::*;
+    #[test]fn full_stream_spans_templates_and_relocation(){
+        for(i,e)in ENCODINGS.iter().enumerate(){let b=encode(e.id,&representative_with_seed(i,1).unwrap()).unwrap();let d=decode(&b).unwrap();let a=d.describe(0x1000);assert_eq!(a.text,d.format(0x1000));for s in &a.operands{assert!(s.domain.contains(s.value));assert!(!a.text[s.start..s.end].is_empty());}let t=Template::parse_at(&a.text,0x1000).unwrap();assert!(t.could_match(&b));assert_eq!(d.relocated(0x1000,0x1000).unwrap().reencode().unwrap(),b);}
+        let t=Template::parse("ld $Upper:register,$lower:integer").unwrap();assert!(t.holes().iter().any(|h|h.name=="Upper"));assert!(t.encode(&[("Upper",7),("lower",17)]).is_ok());
+        if ARCHITECTURE=="z80"{let b=[0xdd,0xfd,0x18,0xfd];let d=decode(&b).unwrap();let a=d.describe(0xffff);assert_eq!(a.text,d.format(0xffff));let s=a.operands.iter().find(|s|s.position_dependent()).unwrap();assert_eq!(s.position.target(0xffff,s.value),d.branch_target(0xffff));let m=d.relocated(0xffff,1).unwrap();assert_eq!(m.prefixes,d.prefixes);assert_eq!(m.branch_target(1),d.branch_target(0xffff));let mut output=[0xcc;4];assert!(d.relocate_into(0,0x1000,&mut output).is_err());assert_eq!(output,[0xcc;4]);}
+    }
+}

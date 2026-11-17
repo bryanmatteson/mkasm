@@ -1,0 +1,417 @@
+//! Z80/Z180 codec with exact unbounded index-prefix framing.
+mod core;
+mod block_relocation;
+pub use block_relocation::*;
+pub use core::{BlockRelocateError, RelocatedBlock};
+/// Canonical-body relocation only: addresses and boundaries exclude ignored prefixes.
+pub use core::relocate_block as relocate_body_block;
+/// Transactional canonical-body relocation; use relocate_block_into for full streams.
+pub use core::relocate_block_into as relocate_body_block_into;
+pub use core::effects;
+pub use core::object;
+pub use core::{EffectKnowledge, WriteBehavior, FlagAction, MemoryOrdering, Atomicity, Writeback, RegisterSlice, RegisterEffect, FlagEffect, MemoryEffect, EffectSummary};
+pub use core::{semantics, recipes};
+pub use core::{requirements, requirements_for};
+pub use core::{
+    catalog_entry, encoding_count, profile, representative, BitSlice, Constraint, Encoding, Error,
+    representative_with_seed, ByteFilter, Described, Domain, Hole, HoleDomain, OperandSpan, Position,
+    Decoded as DecodedBody, Assembler as BodyAssembler, Template as BodyTemplate, describe as describe_body, describe_with_features as describe_body_with_features,
+    decode_with_features as decode_body_with_features,
+    Operand, ARCHITECTURE, ENCODINGS, FEATURE_SETS, MAX_OPERANDS, UNSUPPORTED,
+};
+#[derive(Clone, Debug)]
+pub struct Decoded {
+    pub encoding_index: usize,
+    pub values: [i128; MAX_OPERANDS],
+    pub length: usize,
+    pub prefixes: Vec<u8>,
+    pub body: Vec<u8>,
+}
+impl Decoded {
+    /// Source-backed body effects. Redundant index prefixes have no architectural data effects.
+    pub fn effects(&self) -> EffectSummary { self.core().effects() }
+    pub fn requirements(&self) -> &'static requirements::Requirements { requirements_for(self.encoding().id) }
+    pub fn evaluate_requirements(&self, features:&[&str], mode:&str) -> requirements::Evaluation { self.requirements().evaluate(features,mode,&|name| self.operand(name).and_then(|v|u64::try_from(v).ok())) }
+    pub fn encoding(&self) -> &'static Encoding {
+        &ENCODINGS[self.encoding_index]
+    }
+    fn core(&self) -> core::Decoded {
+        core::Decoded {
+            encoding_index: self.encoding_index,
+            values: self.values,
+            length: self.body.len(),
+        }
+    }
+    pub fn operands(&self) -> impl Iterator<Item = (&'static Operand, i128)> + '_ {
+        self.encoding()
+            .operands
+            .iter()
+            .zip(self.values.iter().copied())
+    }
+    pub fn operand(&self, name: &str) -> Option<i128> {
+        self.core().operand(name)
+    }
+    pub fn canonical_format(&self, address: u64) -> String {
+        self.core()
+            .format((address.wrapping_add(self.prefixes.len() as u64)) & 65535)
+            .replace("+-", "-")
+    }
+    pub fn format(&self, address: u64) -> String {
+        let mut text = self.canonical_format(address);
+        if match assemble_core(
+            &text,
+            (address.wrapping_add(self.prefixes.len() as u64)) & 65535,
+            "",
+            None,
+        ) {
+            Ok(v) => v.first() != Some(&self.body),
+            Err(_) => true,
+        } {
+            text = format!("enc[{}] {}", self.encoding().id, text);
+        }
+        if !self.prefixes.is_empty() {
+            let hex = self
+                .prefixes
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            text = format!("prefix[{hex}] {text}");
+        }
+        text
+    }
+    pub fn branch_target(&self, address: u64) -> Option<u64> {
+        let at = (address.wrapping_add(self.prefixes.len() as u64)) & 65535;
+        if let Some(target) = self.core().branch_target(at) {
+            return Some(target);
+        }
+        if self.encoding().flow_control.contains("branch")
+            || self.encoding().flow_control.contains("call")
+        {
+            if let Some((_, v)) = self
+                .operands()
+                .find(|(o, _)| o.name == "target" || o.name == "vector")
+            {
+                return Some(v as u64 & 65535);
+            }
+        }
+        match self.encoding().mnemonic {
+            "ldir" | "lddr" | "cpir" | "cpdr" | "inir" | "indr" | "otir" | "otdr" | "otimr"
+            | "otdmr" => Some(at),
+            _ => None,
+        }
+    }
+    pub fn reencode(&self) -> Result<Vec<u8>, Error> {
+        encode_with_prefixes(
+            self.encoding().id,
+            &self.values[..self.encoding().operands.len()],
+            &self.prefixes,
+        )
+    }
+    pub fn reencode_into(&self, output: &mut [u8]) -> Result<usize, Error> {
+        let b = self.reencode()?;
+        if output.len() < b.len() {
+            return Err(Error::BufferTooSmall);
+        }
+        output[..b.len()].copy_from_slice(&b);
+        Ok(b.len())
+    }
+}
+pub fn decode(src: &[u8]) -> Result<Decoded, Error> {
+    decode_with_features(src, None)
+}
+pub fn decode_with_features(src: &[u8], active: Option<&[&str]>) -> Result<Decoded, Error> {
+    let mut p = 0;
+    while p < src.len() && (src[p] == 0xdd || src[p] == 0xfd) {
+        p += 1;
+    }
+    if p == src.len() {
+        return Err(Error::Truncated);
+    }
+    let mut ignored = p;
+    let mut start = p;
+    if p > 0 && src[p] != 0xed {
+        if src[p] == 0xcb {
+            if src.len() < p + 3 {
+                return Err(Error::Truncated);
+            }
+            ignored = p - 1;
+            start = p - 1;
+        } else {
+            let id = format!("{:02x}{:02x}", src[p - 1], src[p]);
+            if catalog_entry(&id).is_some() {
+                ignored = p - 1;
+                start = p - 1;
+            }
+        }
+    }
+    if ARCHITECTURE == "z180" && ignored != 0 {
+        return Err(Error::Unknown);
+    }
+    let body = &src[start..];
+    let id = match body[0] {
+        0xcb | 0xed => {
+            if body.len() < 2 {
+                return Err(Error::Truncated);
+            }
+            format!("{:02x}{:02x}", body[0], body[1])
+        }
+        0xdd | 0xfd => {
+            if body.len() < 2 {
+                return Err(Error::Truncated);
+            }
+            if body[1] == 0xcb {
+                if body.len() < 4 {
+                    return Err(Error::Truncated);
+                }
+                format!("{:02x}cb{:02x}", body[0], body[3])
+            } else {
+                format!("{:02x}{:02x}", body[0], body[1])
+            }
+        }
+        _ => format!("00{:02x}", body[0]),
+    };
+    if catalog_entry(&id).is_none() {
+        return Err(Error::Unknown);
+    }
+    let d = core::decode_with_features(body, active)?;
+    Ok(Decoded {
+        encoding_index: d.encoding_index,
+        values: d.values,
+        length: ignored + d.length,
+        prefixes: src[..ignored].to_vec(),
+        body: src[start..start + d.length].to_vec(),
+    })
+}
+pub fn encode_into(index: usize, values: &[i128], output: &mut [u8]) -> Result<usize, Error> {
+    core::encode_into(index, values, output)
+}
+pub fn encode(id: &str, values: &[i128]) -> Result<Vec<u8>, Error> {
+    encode_with_prefixes(id, values, &[])
+}
+pub fn encode_with_prefixes(id: &str, values: &[i128], prefixes: &[u8]) -> Result<Vec<u8>, Error> {
+    if prefixes.iter().any(|p| *p != 0xdd && *p != 0xfd) {
+        return Err(Error::Operand);
+    }
+    let b = core::encode(id, values)?;
+    let mut all = prefixes.to_vec();
+    all.extend(&b);
+    let d = decode(&all)?;
+    if d.length != all.len() || d.prefixes.len() != prefixes.len() || d.body != b {
+        return Err(Error::Operand);
+    }
+    Ok(all)
+}
+fn qualifiers(text: &str) -> Result<(Vec<u8>, String, String), Error> {
+    let mut text = text.trim();
+    let mut prefix = Vec::new();
+    let mut id = String::new();
+    if text.to_ascii_lowercase().starts_with("prefix[") {
+        let p = text.find(']').ok_or(Error::Syntax)?;
+        let hex = text[7..p]
+            .to_ascii_lowercase()
+            .replace("0x", "")
+            .replace([' ', ','], "");
+        if !hex.is_ascii() || hex.len() % 2 != 0 {
+            return Err(Error::Syntax);
+        }
+        for i in (0..hex.len()).step_by(2) {
+            let b = u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| Error::Syntax)?;
+            if b != 0xdd && b != 0xfd {
+                return Err(Error::Operand);
+            }
+            prefix.push(b);
+        }
+        text = text[p + 1..].trim();
+    }
+    if text.to_ascii_lowercase().starts_with("enc[") {
+        let p = text.find(']').ok_or(Error::Syntax)?;
+        id = text[4..p].to_ascii_lowercase();
+        text = text[p + 1..].trim();
+    }
+    Ok((prefix, id, text.to_owned()))
+}
+fn assembly_text(s: &str) -> String {
+    fn literal(s: &str) -> String {s.to_ascii_lowercase().replace("sli ", "sll ").replace("af_", "af'").replace("ix-", "ix+-").replace("iy-", "iy+-")}
+    let mut out=String::new();let mut rest=s;
+    while let Some(i)=rest.find('$'){
+        out.push_str(&literal(&rest[..i]));rest=&rest[i..];
+        let end=if rest.starts_with("${"){rest.find('}').map(|j|j+1).unwrap_or(rest.len())}else{1+rest[1..].bytes().take_while(|b|b.is_ascii_alphanumeric()||*b==b'_'||*b==b':').count()};
+        out.push_str(&rest[..end]);rest=&rest[end..];
+    }
+    out.push_str(&literal(rest));out
+}
+fn ordered(mut out: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+    fn rank(b: &[u8]) -> u8 {
+        if b.len() == 4
+            && (b[0] == 0xdd || b[0] == 0xfd)
+            && b[1] == 0xcb
+            && b[3] & 0xc0 == 0x40
+            && b[3] & 7 != 6
+        {
+            1
+        } else {
+            0
+        }
+    }
+    out.sort_by(|a, b| {
+        a.len()
+            .cmp(&b.len())
+            .then(rank(a).cmp(&rank(b)))
+            .then(a.cmp(b))
+    });
+    out.dedup();
+    out
+}
+fn assemble_core(
+    text: &str,
+    address: u64,
+    id: &str,
+    active: Option<&[&str]>,
+) -> Result<Vec<Vec<u8>>, Error> {
+    let text = assembly_text(text);
+    let all = if address == 0 && active.is_none() {
+        core::assemble(&text)?
+    } else {
+        core::assemble_with_features(&text, address, active)?
+    };
+    let out = ordered(
+        all.into_iter()
+            .filter(|b| id.is_empty() || core::decode(b).is_ok_and(|d| d.encoding().id == id))
+            .collect(),
+    );
+    if out.is_empty() {
+        Err(Error::Syntax)
+    } else {
+        Ok(out)
+    }
+}
+pub fn assemble(text: &str) -> Result<Vec<Vec<u8>>, Error> {
+    assemble_at(text, 0)
+}
+pub fn assemble_at(text: &str, address: u64) -> Result<Vec<Vec<u8>>, Error> {
+    assemble_with_features(text, address, None)
+}
+pub fn assemble_with_features(
+    text: &str,
+    address: u64,
+    active: Option<&[&str]>,
+) -> Result<Vec<Vec<u8>>, Error> {
+    let (prefix, id, body) = qualifiers(text)?;
+    let all = assemble_core(
+        &body,
+        (address.wrapping_add(prefix.len() as u64)) & 65535,
+        &id,
+        active,
+    )?;
+    let mut out = Vec::new();
+    for b in all {
+        let mut raw = prefix.clone();
+        raw.extend(&b);
+        if decode_with_features(&raw, active)
+            .is_ok_and(|d| d.length == raw.len() && d.prefixes.len() == prefix.len() && d.body == b)
+        {
+            out.push(raw);
+        }
+    }
+    if out.is_empty() {
+        Err(Error::Operand)
+    } else {
+        Ok(out)
+    }
+}
+#[derive(Clone, Debug)]
+pub struct Template {
+    inner: core::Template,
+    prefixes: Vec<u8>,
+    id: String,
+}
+impl Template {
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        Self::parse_at(text, 0)
+    }
+    pub fn parse_at(text: &str, address: u64) -> Result<Self, Error> {
+        Self::parse_with_features(text, address, None)
+    }
+    pub fn parse_with_features(text: &str, address: u64, active: Option<&[&str]>) -> Result<Self, Error> {
+        let (prefixes, id, body) = qualifiers(text)?;
+        let body = assembly_text(&body);
+        let address = (address.wrapping_add(prefixes.len() as u64)) & 65535;
+        let inner = core::Template::parse_with_features(&body, address, active)?;
+        if !id.is_empty() && catalog_entry(&id).is_none() {
+            return Err(Error::Unknown);
+        }
+        Ok(Self {
+            inner,
+            prefixes,
+            id,
+        })
+    }
+    pub fn matches(&self, src: &[u8]) -> Option<(usize, Vec<(String, i128)>)> {
+        let d = decode(src).ok()?;
+        if d.prefixes != self.prefixes || !self.id.is_empty() && d.encoding().id != self.id {
+            return None;
+        }
+        let (_, holes) = self.inner.matches(&d.body)?;
+        Some((d.length, holes))
+    }
+    pub fn encode(&self, holes: &[(&str, i128)]) -> Result<Vec<Vec<u8>>, Error> {
+        let all = self.inner.encode(holes)?;
+        let mut out = Vec::new();
+        for b in all {
+            if !self.id.is_empty() && core::decode(&b).is_ok_and(|d| d.encoding().id != self.id) {
+                continue;
+            }
+            let mut raw = self.prefixes.clone();
+            raw.extend(&b);
+            if decode(&raw)
+                .is_ok_and(|d| d.length == raw.len() && d.prefixes == self.prefixes && d.body == b)
+            {
+                out.push(raw);
+            }
+        }
+        let out = ordered(out);
+        if out.is_empty() {
+            Err(Error::Operand)
+        } else {
+            Ok(out)
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn all_framed_encodings_round_trip() {
+        for (i, e) in ENCODINGS.iter().enumerate() {
+            let v = representative(i).unwrap();
+            let b = encode(e.id, &v).unwrap();
+            let d = decode(&b).unwrap();
+            assert_eq!(d.reencode().unwrap(), b, "{}", e.id);
+            assert_eq!(
+                assemble_at(&d.format(0x1000), 0x1000).unwrap()[0],
+                b,
+                "{}",
+                e.id
+            );
+        }
+    }
+    #[test]
+    fn arbitrary_prefix_train() {
+        if ARCHITECTURE != "z80" {
+            return;
+        }
+        let mut raw = vec![0xdd; 65537];
+        raw.extend([0xfd, 0x21, 0x34, 0x12]);
+        let d = decode(&raw).unwrap();
+        assert_eq!(d.length, raw.len());
+        assert_eq!(d.reencode().unwrap(), raw);
+        assert_eq!(assemble_at(&d.format(0x1000), 0x1000).unwrap()[0], raw);
+    }
+}
+
+// Framing alone does not establish executable Z80 semantics.
+impl Decoded {
+    pub fn semantic_recipe(&self,address:u64)->semantics::Recipe {
+        semantics::Recipe::unsupported("Z80 prefix-framed instruction has no audited scalar recipe",address.wrapping_add(self.length as u64),16)
+    }
+}
