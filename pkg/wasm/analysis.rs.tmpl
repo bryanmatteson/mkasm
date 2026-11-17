@@ -1,0 +1,29 @@
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct OperandSpan {pub start:usize,pub end:usize,pub name:&'static str,pub kind:&'static str,pub value:Value}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Described {pub text:String,pub operands:Vec<OperandSpan>}
+impl Instruction {
+    pub fn describe(&self)->Described{
+        let mut text=if self.opcode.nullable.is_some(){self.opcode.id}else{self.opcode.mnemonic}.to_string();let mut operands=Vec::new();if !self.operands.is_empty(){text.push_str(" [");for(n,(field,value))in self.opcode.fields.iter().zip(&self.operands).enumerate(){if n>0{text.push(',');}let start=text.len();text.push_str(&value.to_string());operands.push(OperandSpan{start,end:text.len(),name:field.name,kind:field.kind,value:value.clone()});}text.push(']');}Described{text,operands}
+    }
+    pub fn set_operand(&mut self,name:&str,value:Value)->Result<(),String>{let i=self.opcode.fields.iter().position(|f|f.name==name).ok_or("unknown operand")?;let mut values=self.operands.clone();*values.get_mut(i).ok_or("missing operand")?=value;let b=encode(self.opcode.id,&values)?;*self=decode(&b)?;Ok(())}
+    pub fn encode_into(&self,output:&mut[u8])->Result<usize,String>{let b=encode(self.opcode.id,&self.operands)?;if output.len()<b.len(){return Err("output buffer too small".into());}output[..b.len()].copy_from_slice(&b);Ok(b.len())}
+}
+#[cfg(test)]mod analysis_tests{use super::*;
+    #[test]fn opcode_filters_accept_bounded_overlong_lebs(){
+        for op in OPCODES.iter().filter(|op|op.prefix!=0){
+            let mut bytes=vec![op.prefix as u8];put_u(&mut bytes,op.code as u64);let end=bytes.len()-1;bytes[end]|=128;bytes.push(0);
+            let t=InstructionTemplate::new(op.id).unwrap();assert!(t.could_match(&bytes),"{} padded opcode filter",op.id);
+        }
+        let bytes=[0xfc,0x80,0x00];let t=InstructionTemplate::new("I32TruncSatF32S").unwrap();assert!(t.match_instruction(&bytes).is_some());assert!(t.could_match(&bytes));
+        assert!(!t.could_match(&[0xfc,0x80]));assert!(!t.could_match(&[0xfc,0x80,0x80,0x80,0x80,0x10]));
+    }
+}
+impl InstructionTemplate {
+    pub fn definition(&self)->&'static Opcode{self.opcode}
+    /// Structured labels and indices are address independent. Field.kind names
+    /// the actual scalar, heap/reference, memory or list grammar.
+    pub fn holes(&self)->Vec<&'static Field>{self.opcode.fields.iter().zip(&self.values).filter_map(|(f,v)|v.is_none().then_some(f)).collect()}
+    pub fn could_match(&self,src:&[u8])->bool{if self.opcode.prefix==0{src.first()==Some(&(self.opcode.code as u8))}else{src.first()==Some(&(self.opcode.prefix as u8))&&Reader{bytes:src,pos:1}.uleb(32).is_ok_and(|code|code==self.opcode.code as u64)}}
+}

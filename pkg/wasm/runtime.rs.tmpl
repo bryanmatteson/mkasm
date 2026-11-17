@@ -1,0 +1,847 @@
+use std::fmt;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Value {
+    U(u64),
+    I(i64),
+    Text(String),
+    List(Vec<Value>),
+}
+impl Value {
+    fn u(&self, bits: u32) -> Result<u64, String> {
+        let n = match self {
+            Self::U(n) => *n,
+            Self::I(n) if *n >= 0 => *n as u64,
+            _ => return Err("expected unsigned integer".into()),
+        };
+        if bits < 64 && n >= 1u64 << bits {
+            return Err("unsigned integer overflow".into());
+        };
+        Ok(n)
+    }
+    fn i(&self, bits: u32) -> Result<i64, String> {
+        let n = match self {
+            Self::I(n) => *n,
+            Self::U(n) if *n <= i64::MAX as u64 => *n as i64,
+            _ => return Err("expected signed integer".into()),
+        };
+        if bits < 64 && (n < -(1i64 << (bits - 1)) || n >= 1i64 << (bits - 1)) {
+            return Err("signed integer overflow".into());
+        };
+        Ok(n)
+    }
+    fn list(&self, n: Option<usize>) -> Result<&[Value], String> {
+        match self {
+            Self::List(v) if n.map(|n| n == v.len()).unwrap_or(true) => Ok(v),
+            _ => Err("invalid operand array".into()),
+        }
+    }
+    fn text(&self) -> Option<&str> {
+        if let Self::Text(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::U(n) => write!(f, "{n}"),
+            Self::I(n) => write!(f, "{n}"),
+            Self::Text(s) => write!(f, "\"{}\"", s),
+            Self::List(items) => {
+                write!(f, "[")?;
+                for (i, v) in items.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ",")?
+                    };
+                    write!(f, "{v}")?
+                }
+                write!(f, "]")
+            }
+        }
+    }
+}
+#[derive(Debug)]
+pub struct Field {
+    pub name: &'static str,
+    pub kind: &'static str,
+}
+#[derive(Debug)]
+pub struct Opcode {
+    pub id: &'static str,
+    pub mnemonic: &'static str,
+    pub prefix: u32,
+    pub code: u32,
+    pub feature: &'static str,
+    pub nullable: Option<bool>,
+    pub fields: &'static [Field],
+}
+#[derive(Debug)]
+pub struct Instruction {
+    pub opcode: &'static Opcode,
+    pub operands: Vec<Value>,
+    pub length: usize,
+}
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = if self.opcode.nullable.is_some() {
+            self.opcode.id
+        } else {
+            self.opcode.mnemonic
+        };
+        write!(f, "{name}")?;
+        if !self.operands.is_empty() {
+            write!(f, " {}", Value::List(self.operands.clone()))?
+        };
+        Ok(())
+    }
+}
+struct Reader<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+impl Reader<'_> {
+    fn byte(&mut self) -> Result<u8, String> {
+        let n = *self.bytes.get(self.pos).ok_or("truncated instruction")?;
+        self.pos += 1;
+        Ok(n)
+    }
+    fn uleb(&mut self, bits: u32) -> Result<u64, String> {
+        let mut n = 0;
+        for i in 0..(bits + 6) / 7 {
+            let b = self.byte()?;
+            let remain = bits - i * 7;
+            if remain < 7 && u64::from(b & 127) >= 1u64 << remain {
+                return Err("unsigned LEB overflow".into());
+            };
+            n |= u64::from(b & 127) << (i * 7);
+            if b & 128 == 0 {
+                return Ok(n);
+            }
+        }
+        Err("unsigned LEB too long".into())
+    }
+    fn sleb(&mut self, bits: u32) -> Result<i64, String> {
+        let mut n = 0u64;
+        for i in 0..(bits + 6) / 7 {
+            let b = self.byte()?;
+            let shift = i * 7;
+            let remain = bits - shift;
+            if remain < 7 {
+                let mask = ((127u16 << remain) & 127) as u8;
+                let sign = 1u8 << (remain - 1);
+                if (b & sign == 0 && b & mask != 0) || (b & sign != 0 && b & mask != mask) {
+                    return Err("signed LEB overflow".into());
+                }
+            };
+            n |= u64::from(b & 127) << shift;
+            if b & 128 == 0 {
+                let end = shift + 7;
+                if end < 64 && b & 64 != 0 {
+                    n |= u64::MAX << end
+                };
+                return Ok(n as i64);
+            }
+        }
+        Err("signed LEB too long".into())
+    }
+    fn count(&mut self) -> Result<usize, String> {
+        let n = self.uleb(32)?;
+        if n > (self.bytes.len() - self.pos) as u64 {
+            return Err("truncated vector".into());
+        };
+        Ok(n as usize)
+    }
+}
+fn put_u(b: &mut Vec<u8>, mut n: u64) {
+    loop {
+        let mut v = (n & 127) as u8;
+        n >>= 7;
+        if n != 0 {
+            v |= 128
+        };
+        b.push(v);
+        if n == 0 {
+            return;
+        }
+    }
+}
+fn put_s(b: &mut Vec<u8>, mut n: i64) {
+    loop {
+        let mut v = (n & 127) as u8;
+        n >>= 7;
+        let done = (n == 0 && v & 64 == 0) || (n == -1 && v & 64 != 0);
+        if !done {
+            v |= 128
+        };
+        b.push(v);
+        if done {
+            return;
+        }
+    }
+}
+fn types() -> &'static [(&'static str, u8)] {
+    &[
+        ("i32", 127),
+        ("i64", 126),
+        ("f32", 125),
+        ("f64", 124),
+        ("v128", 123),
+    ]
+}
+fn heaps() -> &'static [(&'static str, u8)] {
+    &[
+        ("func", 112),
+        ("extern", 111),
+        ("any", 110),
+        ("none", 113),
+        ("noextern", 114),
+        ("nofunc", 115),
+        ("eq", 109),
+        ("struct", 107),
+        ("array", 106),
+        ("i31", 108),
+        ("exn", 105),
+        ("noexn", 116),
+        ("cont", 104),
+        ("nocont", 117),
+    ]
+}
+fn lane_limit(o: &Opcode) -> u64 {
+    for (s, n) in [
+        ("i8x16", 16),
+        ("i16x8", 8),
+        ("i32x4", 4),
+        ("f32x4", 4),
+        ("i64x2", 2),
+        ("f64x2", 2),
+    ] {
+        if o.mnemonic.starts_with(s) {
+            return n;
+        }
+    }
+    for (s, n) in [
+        ("8_lane", 16),
+        ("16_lane", 8),
+        ("32_lane", 4),
+        ("64_lane", 2),
+    ] {
+        if o.mnemonic.contains(s) {
+            return n;
+        }
+    }
+    256
+}
+fn read_value(r: &mut Reader<'_>, kind: &str, o: &Opcode) -> Result<Value, String> {
+    Ok(match kind {
+        "u32" | "ordering" => {
+            let n = r.uleb(32)?;
+            if kind == "ordering" && n > 1 {
+                return Err("invalid atomic ordering".into());
+            };
+            Value::U(n)
+        }
+        "s32" | "s64" => Value::I(r.sleb(if kind == "s32" { 32 } else { 64 })?),
+        "f32" | "f64" => {
+            let n = if kind == "f32" { 4 } else { 8 };
+            let mut x = 0u64;
+            for i in 0..n {
+                x |= u64::from(r.byte()?) << (8 * i)
+            }
+            Value::U(x)
+        }
+        "v128" | "shuffle" => {
+            let mut items = Vec::new();
+            for _ in 0..16 {
+                let b = r.byte()?;
+                if kind == "shuffle" && b >= 32 {
+                    return Err("invalid shuffle lane".into());
+                };
+                items.push(Value::U(b.into()))
+            }
+            Value::List(items)
+        }
+        "zero" | "lane" => {
+            let n = r.byte()? as u64;
+            if (kind == "zero" && n != 0) || (kind == "lane" && n >= lane_limit(o)) {
+                return Err("invalid reserved byte or SIMD lane".into());
+            };
+            Value::U(n)
+        }
+        "memarg" => {
+            let mut flags = r.uleb(32)?;
+            let mut memory = 0;
+            if flags & 64 != 0 {
+                flags ^= 64;
+                memory = r.uleb(32)?
+            };
+            if flags >= 64 {
+                return Err("invalid memory alignment flags".into());
+            };
+            let offset = r.uleb(ADDRESS_BITS)?;
+            Value::List(vec![Value::U(flags), Value::U(offset), Value::U(memory)])
+        }
+        "heaptype" => {
+            let b = *r.bytes.get(r.pos).ok_or("truncated heap type")?;
+            if b == 0x65 || b == 0x62 {
+                r.pos += 1;
+                if b == 0x62 {
+                    Value::List(vec![Value::Text("exact".into()), Value::U(r.uleb(32)?)])
+                } else {
+                    let code = r.byte()?;
+                    let name = heaps()
+                        .iter()
+                        .find(|(_, b)| *b == code)
+                        .ok_or("shared heap type must be abstract")?
+                        .0;
+                    Value::List(vec![Value::Text("shared".into()), Value::Text(name.into())])
+                }
+            } else {
+                let n = r.sleb(33)?;
+                if n >= 0 {
+                    Value::U(n as u64)
+                } else {
+                    let s = heaps()
+                        .iter()
+                        .find(|(_, b)| n == i64::from(*b) - 128)
+                        .ok_or("invalid abstract heap type")?
+                        .0;
+                    Value::Text(s.into())
+                }
+            }
+        }
+        "valtype" | "reftype" | "block" => {
+            let b = *r.bytes.get(r.pos).ok_or("truncated value type")?;
+            if kind == "block" && b == 0x40 {
+                r.pos += 1;
+                Value::Text("empty".into())
+            } else if kind != "reftype" && types().iter().any(|(_, v)| *v == b) {
+                r.pos += 1;
+                Value::Text(types().iter().find(|(_, v)| *v == b).unwrap().0.into())
+            } else if b == 0x63 || b == 0x64 {
+                r.pos += 1;
+                Value::List(vec![
+                    Value::Text(if b == 0x63 { "refnull" } else { "ref" }.into()),
+                    read_value(r, "heaptype", o)?,
+                ])
+            } else if heaps().iter().any(|(_, v)| *v == b) || b == 0x65 {
+                Value::List(vec![
+                    Value::Text("refnull".into()),
+                    read_value(r, "heaptype", o)?,
+                ])
+            } else if kind == "block" {
+                let n = r.sleb(33)?;
+                if n < 0 {
+                    return Err("invalid block type".into());
+                };
+                Value::U(n as u64)
+            } else {
+                return Err("invalid value type".into());
+            }
+        }
+        "br_table" | "valtypes" | "resume_table" => {
+            let mut n = r.count()?;
+            if kind == "br_table" {
+                n += 1
+            };
+            let mut items = Vec::new();
+            for _ in 0..n {
+                items.push(if kind == "resume_table" {
+                    let tag = r.byte()?;
+                    if tag > 1 {
+                        return Err("invalid resume handle".into());
+                    };
+                    let mut entry = vec![Value::U(tag.into()), Value::U(r.uleb(32)?)];
+                    if tag == 0 {
+                        entry.push(Value::U(r.uleb(32)?))
+                    };
+                    Value::List(entry)
+                } else {
+                    read_value(r, if kind == "valtypes" { "valtype" } else { "u32" }, o)?
+                })
+            }
+            Value::List(items)
+        }
+        "try_table" => {
+            let bt = read_value(r, "block", o)?;
+            let n = r.count()?;
+            let mut catches = Vec::new();
+            for _ in 0..n {
+                let tag = r.byte()?;
+                if tag > 3 {
+                    return Err("invalid catch tag".into());
+                };
+                let mut entry = vec![Value::U(tag.into())];
+                if tag < 2 {
+                    entry.push(Value::U(r.uleb(32)?))
+                };
+                entry.push(Value::U(r.uleb(32)?));
+                catches.push(Value::List(entry))
+            }
+            Value::List(vec![bt, Value::List(catches)])
+        }
+        "cast" => {
+            let flags = r.byte()?;
+            if flags > 3 {
+                return Err("invalid cast flags".into());
+            };
+            Value::List(vec![
+                Value::U(flags.into()),
+                Value::U(r.uleb(32)?),
+                read_value(r, "heaptype", o)?,
+                read_value(r, "heaptype", o)?,
+            ])
+        }
+        _ => return Err(format!("unknown operand kind {kind}")),
+    })
+}
+fn write_value(b: &mut Vec<u8>, v: &Value, kind: &str, o: &Opcode) -> Result<(), String> {
+    match kind {
+        "u32" | "ordering" => {
+            let n = v.u(32)?;
+            if kind == "ordering" && n > 1 {
+                return Err("invalid atomic ordering".into());
+            };
+            put_u(b, n)
+        }
+        "s32" | "s64" => put_s(b, v.i(if kind == "s32" { 32 } else { 64 })?),
+        "zero" | "lane" => {
+            let n = v.u(8)?;
+            if (kind == "zero" && n != 0) || (kind == "lane" && n >= lane_limit(o)) {
+                return Err("invalid reserved byte or SIMD lane".into());
+            };
+            b.push(n as u8)
+        }
+        "f32" | "f64" => {
+            let count = if kind == "f32" { 4 } else { 8 };
+            let n = v.u(count * 8)?;
+            for i in 0..count {
+                b.push((n >> (8 * i)) as u8)
+            }
+        }
+        "v128" | "shuffle" => {
+            for v in v.list(Some(16))? {
+                let n = v.u(8)?;
+                if kind == "shuffle" && n >= 32 {
+                    return Err("invalid shuffle lane".into());
+                };
+                b.push(n as u8)
+            }
+        }
+        "memarg" => {
+            let a = v.list(Some(3))?;
+            let mut align = a[0].u(6)?;
+            let offset = a[1].u(ADDRESS_BITS)?;
+            let memory = a[2].u(32)?;
+            if memory != 0 {
+                align |= 64
+            };
+            put_u(b, align);
+            if memory != 0 {
+                put_u(b, memory)
+            };
+            put_u(b, offset)
+        }
+        "heaptype" => {
+            if let Some(s) = v.text() {
+                b.push(
+                    heaps()
+                        .iter()
+                        .find(|(n, _)| *n == s)
+                        .ok_or("unknown heap type")?
+                        .1,
+                )
+            } else if matches!(v, Value::U(_) | Value::I(_)) {
+                put_s(b, v.u(32)? as i64)
+            } else {
+                let a = v.list(Some(2))?;
+                match a[0].text() {
+                    Some("shared") => {
+                        if a[1].text().is_none() {
+                            return Err("shared heap type must be abstract".into());
+                        };
+                        b.push(0x65);
+                        write_value(b, &a[1], "heaptype", o)?
+                    }
+                    Some("exact") => {
+                        b.push(0x62);
+                        put_u(b, a[1].u(32)?)
+                    }
+                    _ => return Err("invalid heap type".into()),
+                }
+            }
+        }
+        "valtype" | "reftype" | "block" => {
+            if let Some(s) = v.text() {
+                if kind == "block" && s == "empty" {
+                    b.push(0x40)
+                } else {
+                    if kind == "reftype" {
+                        return Err("invalid reference type".into());
+                    };
+                    b.push(
+                        types()
+                            .iter()
+                            .find(|(n, _)| *n == s)
+                            .ok_or("invalid value type")?
+                            .1,
+                    )
+                }
+            } else if kind == "block" && matches!(v, Value::U(_) | Value::I(_)) {
+                put_s(b, v.u(32)? as i64)
+            } else {
+                let a = v.list(Some(2))?;
+                match a[0].text() {
+                    Some("refnull") => {
+                        let shorthand = a[1].text().is_some()
+                            || a[1]
+                                .list(Some(2))
+                                .map(|a| a[0].text() == Some("shared"))
+                                .unwrap_or(false);
+                        if !shorthand {
+                            b.push(0x63)
+                        };
+                        write_value(b, &a[1], "heaptype", o)?
+                    }
+                    Some("ref") => {
+                        b.push(0x64);
+                        write_value(b, &a[1], "heaptype", o)?
+                    }
+                    _ => return Err("invalid reference type".into()),
+                }
+            }
+        }
+        "br_table" | "valtypes" | "resume_table" => {
+            let a = v.list(None)?;
+            let mut n = a.len();
+            if kind == "br_table" {
+                if n == 0 {
+                    return Err("br_table requires default target".into());
+                };
+                n -= 1
+            };
+            put_u(b, n as u64);
+            for v in a {
+                if kind == "resume_table" {
+                    let a = v.list(None)?;
+                    let tag = a.first().ok_or("invalid resume handle")?.u(1)?;
+                    if a.len() != if tag == 0 { 3 } else { 2 } {
+                        return Err("invalid resume handle length".into());
+                    };
+                    b.push(tag as u8);
+                    for v in &a[1..] {
+                        write_value(b, v, "u32", o)?
+                    }
+                } else {
+                    write_value(b, v, if kind == "valtypes" { "valtype" } else { "u32" }, o)?
+                }
+            }
+        }
+        "try_table" => {
+            let a = v.list(Some(2))?;
+            write_value(b, &a[0], "block", o)?;
+            let catches = a[1].list(None)?;
+            put_u(b, catches.len() as u64);
+            for v in catches {
+                let a = v.list(None)?;
+                let tag = a.first().ok_or("invalid catch")?.u(2)?;
+                if a.len() != if tag < 2 { 3 } else { 2 } {
+                    return Err("invalid catch length".into());
+                };
+                b.push(tag as u8);
+                for v in &a[1..] {
+                    write_value(b, v, "u32", o)?
+                }
+            }
+        }
+        "cast" => {
+            let a = v.list(Some(4))?;
+            b.push(a[0].u(2)? as u8);
+            for (i, k) in ["u32", "heaptype", "heaptype"].iter().enumerate() {
+                write_value(b, &a[i + 1], k, o)?
+            }
+        }
+        _ => return Err(format!("unknown operand kind {kind}")),
+    };
+    Ok(())
+}
+/// Decode one instruction without validating surrounding module/control context.
+static BASE_OPCODE_INDEX: [u16; 256] = {
+    let mut index = [u16::MAX; 256];
+    let mut i = 0;
+    while i < OPCODES.len() {
+        if OPCODES[i].prefix == 0 && OPCODES[i].code < 256 {
+            index[OPCODES[i].code as usize] = i as u16;
+        }
+        i += 1;
+    }
+    index
+};
+pub fn decode(src: &[u8]) -> Result<Instruction, String> {
+    let mut r = Reader { bytes: src, pos: 0 };
+    let first = r.byte()?;
+    let (prefix, code) = if first >= 0xfb && first <= 0xfe {
+        (first as u32, r.uleb(32)? as u32)
+    } else {
+        (0, first as u32)
+    };
+    let opcode = if prefix == 0 {
+        OPCODES.get(BASE_OPCODE_INDEX[code as usize] as usize).ok_or("unknown opcode")?
+    } else {
+        let index = OPCODE_INDEX.binary_search_by_key(&(prefix, code), |&index| {
+            let o = &OPCODES[index as usize]; (o.prefix, o.code)
+        }).map_err(|_| "unknown opcode")?;
+        &OPCODES[OPCODE_INDEX[index] as usize]
+    };
+    let mut operands = Vec::with_capacity(opcode.fields.len());
+    for f in opcode.fields {
+        operands.push(
+            read_value(&mut r, f.kind, opcode)
+                .map_err(|e| format!("{} {}: {e}", opcode.id, f.name))?,
+        )
+    }
+    Ok(Instruction {
+        opcode,
+        operands,
+        length: r.pos,
+    })
+}
+pub fn encode(id: &str, values: &[Value]) -> Result<Vec<u8>, String> {
+    let mut error = format!("unknown instruction {id}");
+    for o in OPCODES.iter().filter(|o| o.id == id || o.mnemonic == id) {
+        if values.len() != o.fields.len() {
+            error = "incorrect operand count".into();
+            continue;
+        };
+        let mut b = Vec::new();
+        if o.prefix != 0 {
+            b.push(o.prefix as u8);
+            put_u(&mut b, o.code as u64)
+        } else {
+            b.push(o.code as u8)
+        };
+        let mut valid = true;
+        for (v, f) in values.iter().zip(o.fields) {
+            if let Err(e) = write_value(&mut b, v, f.kind, o) {
+                error = e;
+                valid = false;
+                break;
+            }
+        }
+        if valid {
+            return Ok(b);
+        }
+    }
+    Err(error)
+}
+pub fn decode_all(mut src: &[u8]) -> Result<Vec<Instruction>, String> {
+    let mut result = Vec::new();
+    while !src.is_empty() {
+        let i = decode(src)?;
+        src = &src[i.length..];
+        result.push(i)
+    }
+    Ok(result)
+}
+struct Text<'a> {
+    s: &'a [u8],
+    p: usize,
+}
+impl Text<'_> {
+    fn space(&mut self) {
+        while self
+            .s
+            .get(self.p)
+            .map(|b| b.is_ascii_whitespace())
+            .unwrap_or(false)
+        {
+            self.p += 1
+        }
+    }
+    fn value(&mut self, depth: usize) -> Result<Value, String> {
+        if depth > 32 {
+            return Err("operand nesting too deep".into());
+        };
+        self.space();
+        match *self.s.get(self.p).ok_or("missing value")? {
+            b'[' => {
+                self.p += 1;
+                let mut a = Vec::new();
+                loop {
+                    self.space();
+                    if self.s.get(self.p) == Some(&b']') {
+                        self.p += 1;
+                        return Ok(Value::List(a));
+                    };
+                    if !a.is_empty() {
+                        if self.s.get(self.p) != Some(&b',') {
+                            return Err("expected comma".into());
+                        };
+                        self.p += 1
+                    };
+                    a.push(self.value(depth + 1)?)
+                }
+            }
+            b'"' => {
+                self.p += 1;
+                let start = self.p;
+                while self.s.get(self.p).map(|b| *b != b'"').unwrap_or(false) {
+                    if self.s[self.p] == b'\\' {
+                        return Err("escaped type names are unsupported".into());
+                    };
+                    self.p += 1
+                }
+                if self.s.get(self.p) != Some(&b'"') {
+                    return Err("unterminated type name".into());
+                };
+                let s = std::str::from_utf8(&self.s[start..self.p])
+                    .map_err(|_| "invalid utf8")?
+                    .to_string();
+                self.p += 1;
+                Ok(Value::Text(s))
+            }
+            _ => {
+                let start = self.p;
+                while self
+                    .s
+                    .get(self.p)
+                    .map(|b| !b.is_ascii_whitespace() && *b != b',' && *b != b']')
+                    .unwrap_or(false)
+                {
+                    self.p += 1
+                }
+                let s = std::str::from_utf8(&self.s[start..self.p]).map_err(|_| "invalid utf8")?;
+                let digits = s.strip_prefix('-').unwrap_or(s);
+                if digits.is_empty()
+                    || !digits.bytes().all(|b| b.is_ascii_digit())
+                    || (digits.len() > 1 && digits.starts_with('0'))
+                {
+                    return Err("invalid JSON integer".into());
+                }
+                if s.starts_with('-') {
+                    Ok(Value::I(s.parse().map_err(|_| "invalid signed number")?))
+                } else {
+                    Ok(Value::U(s.parse().map_err(|_| "invalid unsigned number")?))
+                }
+            }
+        }
+    }
+}
+fn scalar(s: &str) -> Value {
+    let negative = s.starts_with('-');
+    let raw = s
+        .strip_prefix('-')
+        .or_else(|| s.strip_prefix('+'))
+        .unwrap_or(s);
+    let (radix, digits) = if let Some(s) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X"))
+    {
+        (16, s)
+    } else if let Some(s) = raw.strip_prefix("0b").or_else(|| raw.strip_prefix("0B")) {
+        (2, s)
+    } else if let Some(s) = raw.strip_prefix("0o").or_else(|| raw.strip_prefix("0O")) {
+        (8, s)
+    } else if raw.len() > 1 && raw.starts_with('0') {
+        (8, &raw[1..])
+    } else {
+        (10, raw)
+    };
+    if let Ok(n) = u64::from_str_radix(digits, radix) {
+        if negative {
+            if n <= 1u64 << 63 {
+                return Value::I((n as i64).wrapping_neg());
+            }
+        } else {
+            return Value::U(n);
+        }
+    };
+    Value::Text(s.to_string())
+}
+/// Assemble canonical `mnemonic [structured, operands]` syntax.
+pub fn assemble(text: &str) -> Result<Vec<u8>, String> {
+    let text = text.trim();
+    let (name, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    let rest = rest.trim();
+    let values = if rest.starts_with('[') {
+        let mut p = Text {
+            s: rest.as_bytes(),
+            p: 0,
+        };
+        let v = p.value(0)?;
+        p.space();
+        if p.p != p.s.len() {
+            return Err("trailing operand text".into());
+        };
+        v.list(None)?.to_vec()
+    } else {
+        rest.split_whitespace().map(scalar).collect()
+    };
+    encode(name, &values)
+}
+/// Named, validated operand construction without source-text parsing.
+pub struct InstructionTemplate {
+    opcode: &'static Opcode,
+    values: Vec<Option<Value>>,
+}
+impl InstructionTemplate {
+    pub fn new(id: &str) -> Result<Self, String> {
+        let a: Vec<_> = OPCODES
+            .iter()
+            .filter(|o| o.id == id || o.mnemonic == id)
+            .collect();
+        if a.len() != 1 {
+            return Err("template requires unique instruction ID".into());
+        };
+        Ok(Self {
+            opcode: a[0],
+            values: vec![None; a[0].fields.len()],
+        })
+    }
+    pub fn set(&mut self, name: &str, value: Value) -> Result<&mut Self, String> {
+        let i = self
+            .opcode
+            .fields
+            .iter()
+            .position(|f| f.name == name)
+            .ok_or("unknown operand")?;
+        write_value(
+            &mut Vec::new(),
+            &value,
+            self.opcode.fields[i].kind,
+            self.opcode,
+        )?;
+        self.values[i] = Some(value);
+        Ok(self)
+    }
+    pub fn encode(&self) -> Result<Vec<u8>, String> {
+        let mut v = Vec::new();
+        for x in &self.values {
+            v.push(x.clone().ok_or("missing operand")?)
+        }
+        encode(self.opcode.id, &v)
+    }
+    pub fn match_instruction(&self, src: &[u8]) -> Option<Instruction> {
+        let instruction = decode(src).ok()?;
+        if instruction.opcode.id != self.opcode.id {
+            return None;
+        }
+        for (n, fixed) in self.values.iter().enumerate() {
+            if let Some(fixed) = fixed {
+                let mut want = Vec::new();
+                let mut got = Vec::new();
+                write_value(&mut want, fixed, self.opcode.fields[n].kind, self.opcode).ok()?;
+                write_value(
+                    &mut got,
+                    &instruction.operands[n],
+                    self.opcode.fields[n].kind,
+                    self.opcode,
+                )
+                .ok()?;
+                if want != got {
+                    return None;
+                }
+            }
+        }
+        Some(instruction)
+    }
+}

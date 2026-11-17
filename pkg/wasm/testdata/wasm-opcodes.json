@@ -1,0 +1,6577 @@
+{
+  "schema": "mkasm.wasm-opcodes.v1",
+  "source": "wasm-tools 0.262.0",
+  "source_commit": "e22db44da4eaf17a0e46ec55b911c7539589a3cc",
+  "source_sha256": {
+    "lib.rs": "1a79a9e372eab1c27417b47458725edabcaacfe9e92a5b718e663e6ca5ab5fdb",
+    "instructions.rs": "d44d9d7af3c3a72f15d40023e15c1ef3ee416a8018f126ff5c0ecf4cb4dd5ac2",
+    "expr.rs": "a4313fa536bde765320fe17a30822aacb342658069cf024abe690ebf4697cb01"
+  },
+  "opcodes": [
+    {
+      "id": "Unreachable",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 0,
+      "mnemonic": "unreachable"
+    },
+    {
+      "id": "Nop",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 1,
+      "mnemonic": "nop"
+    },
+    {
+      "id": "Block",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "blockty",
+          "kind": "block"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 2,
+      "mnemonic": "block"
+    },
+    {
+      "id": "Loop",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "blockty",
+          "kind": "block"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 3,
+      "mnemonic": "loop"
+    },
+    {
+      "id": "If",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "blockty",
+          "kind": "block"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 4,
+      "mnemonic": "if"
+    },
+    {
+      "id": "Else",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 5,
+      "mnemonic": "else"
+    },
+    {
+      "id": "Try",
+      "feature": "legacy_exceptions",
+      "fields": [
+        {
+          "name": "blockty",
+          "kind": "block"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 6,
+      "mnemonic": "try"
+    },
+    {
+      "id": "Catch",
+      "feature": "legacy_exceptions",
+      "fields": [
+        {
+          "name": "tag_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 7,
+      "mnemonic": "catch"
+    },
+    {
+      "id": "Throw",
+      "feature": "exceptions",
+      "fields": [
+        {
+          "name": "tag_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 8,
+      "mnemonic": "throw"
+    },
+    {
+      "id": "Rethrow",
+      "feature": "legacy_exceptions",
+      "fields": [
+        {
+          "name": "relative_depth",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 9,
+      "mnemonic": "rethrow"
+    },
+    {
+      "id": "ThrowRef",
+      "feature": "exceptions",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 10,
+      "mnemonic": "throw_ref"
+    },
+    {
+      "id": "End",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 11,
+      "mnemonic": "end"
+    },
+    {
+      "id": "Br",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "relative_depth",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 12,
+      "mnemonic": "br"
+    },
+    {
+      "id": "BrIf",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "relative_depth",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 13,
+      "mnemonic": "br_if"
+    },
+    {
+      "id": "BrTable",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "targets",
+          "kind": "br_table"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 14,
+      "mnemonic": "br_table"
+    },
+    {
+      "id": "Return",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 15,
+      "mnemonic": "return"
+    },
+    {
+      "id": "Call",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "function_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 16,
+      "mnemonic": "call"
+    },
+    {
+      "id": "CallIndirect",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "table_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 17,
+      "mnemonic": "call_indirect"
+    },
+    {
+      "id": "ReturnCall",
+      "feature": "tail_call",
+      "fields": [
+        {
+          "name": "function_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 18,
+      "mnemonic": "return_call"
+    },
+    {
+      "id": "ReturnCallIndirect",
+      "feature": "tail_call",
+      "fields": [
+        {
+          "name": "type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "table_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 19,
+      "mnemonic": "return_call_indirect"
+    },
+    {
+      "id": "CallRef",
+      "feature": "function_references",
+      "fields": [
+        {
+          "name": "type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 20,
+      "mnemonic": "call_ref"
+    },
+    {
+      "id": "ReturnCallRef",
+      "feature": "function_references",
+      "fields": [
+        {
+          "name": "type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 21,
+      "mnemonic": "return_call_ref"
+    },
+    {
+      "id": "Delegate",
+      "feature": "legacy_exceptions",
+      "fields": [
+        {
+          "name": "relative_depth",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 24,
+      "mnemonic": "delegate"
+    },
+    {
+      "id": "CatchAll",
+      "feature": "legacy_exceptions",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 25,
+      "mnemonic": "catch_all"
+    },
+    {
+      "id": "Drop",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 26,
+      "mnemonic": "drop"
+    },
+    {
+      "id": "Select",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 27,
+      "mnemonic": "select"
+    },
+    {
+      "id": "TypedSelect",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "types",
+          "kind": "valtypes"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 28,
+      "mnemonic": "select"
+    },
+    {
+      "id": "TryTable",
+      "feature": "exceptions",
+      "fields": [
+        {
+          "name": "try_table",
+          "kind": "try_table"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 31,
+      "mnemonic": "try_table"
+    },
+    {
+      "id": "LocalGet",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "local_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 32,
+      "mnemonic": "local.get"
+    },
+    {
+      "id": "LocalSet",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "local_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 33,
+      "mnemonic": "local.set"
+    },
+    {
+      "id": "LocalTee",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "local_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 34,
+      "mnemonic": "local.tee"
+    },
+    {
+      "id": "GlobalGet",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 35,
+      "mnemonic": "global.get"
+    },
+    {
+      "id": "GlobalSet",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 36,
+      "mnemonic": "global.set"
+    },
+    {
+      "id": "TableGet",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "table",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 37,
+      "mnemonic": "table.get"
+    },
+    {
+      "id": "TableSet",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "table",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 38,
+      "mnemonic": "table.set"
+    },
+    {
+      "id": "I32Load",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 40,
+      "mnemonic": "i32.load"
+    },
+    {
+      "id": "I64Load",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 41,
+      "mnemonic": "i64.load"
+    },
+    {
+      "id": "F32Load",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 42,
+      "mnemonic": "f32.load"
+    },
+    {
+      "id": "F64Load",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 43,
+      "mnemonic": "f64.load"
+    },
+    {
+      "id": "I32Load8S",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 44,
+      "mnemonic": "i32.load8_s"
+    },
+    {
+      "id": "I32Load8U",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 45,
+      "mnemonic": "i32.load8_u"
+    },
+    {
+      "id": "I32Load16S",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 46,
+      "mnemonic": "i32.load16_s"
+    },
+    {
+      "id": "I32Load16U",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 47,
+      "mnemonic": "i32.load16_u"
+    },
+    {
+      "id": "I64Load8S",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 48,
+      "mnemonic": "i64.load8_s"
+    },
+    {
+      "id": "I64Load8U",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 49,
+      "mnemonic": "i64.load8_u"
+    },
+    {
+      "id": "I64Load16S",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 50,
+      "mnemonic": "i64.load16_s"
+    },
+    {
+      "id": "I64Load16U",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 51,
+      "mnemonic": "i64.load16_u"
+    },
+    {
+      "id": "I64Load32S",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 52,
+      "mnemonic": "i64.load32_s"
+    },
+    {
+      "id": "I64Load32U",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 53,
+      "mnemonic": "i64.load32_u"
+    },
+    {
+      "id": "I32Store",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 54,
+      "mnemonic": "i32.store"
+    },
+    {
+      "id": "I64Store",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 55,
+      "mnemonic": "i64.store"
+    },
+    {
+      "id": "F32Store",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 56,
+      "mnemonic": "f32.store"
+    },
+    {
+      "id": "F64Store",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 57,
+      "mnemonic": "f64.store"
+    },
+    {
+      "id": "I32Store8",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 58,
+      "mnemonic": "i32.store8"
+    },
+    {
+      "id": "I32Store16",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 59,
+      "mnemonic": "i32.store16"
+    },
+    {
+      "id": "I64Store8",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 60,
+      "mnemonic": "i64.store8"
+    },
+    {
+      "id": "I64Store16",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 61,
+      "mnemonic": "i64.store16"
+    },
+    {
+      "id": "I64Store32",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 62,
+      "mnemonic": "i64.store32"
+    },
+    {
+      "id": "MemorySize",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "mem",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 63,
+      "mnemonic": "memory.size"
+    },
+    {
+      "id": "MemoryGrow",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "mem",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 64,
+      "mnemonic": "memory.grow"
+    },
+    {
+      "id": "I32Const",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "value",
+          "kind": "s32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 65,
+      "mnemonic": "i32.const"
+    },
+    {
+      "id": "I64Const",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "value",
+          "kind": "s64"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 66,
+      "mnemonic": "i64.const"
+    },
+    {
+      "id": "F32Const",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "value",
+          "kind": "f32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 67,
+      "mnemonic": "f32.const"
+    },
+    {
+      "id": "F64Const",
+      "feature": "mvp",
+      "fields": [
+        {
+          "name": "value",
+          "kind": "f64"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 68,
+      "mnemonic": "f64.const"
+    },
+    {
+      "id": "I32Eqz",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 69,
+      "mnemonic": "i32.eqz"
+    },
+    {
+      "id": "I32Eq",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 70,
+      "mnemonic": "i32.eq"
+    },
+    {
+      "id": "I32Ne",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 71,
+      "mnemonic": "i32.ne"
+    },
+    {
+      "id": "I32LtS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 72,
+      "mnemonic": "i32.lt_s"
+    },
+    {
+      "id": "I32LtU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 73,
+      "mnemonic": "i32.lt_u"
+    },
+    {
+      "id": "I32GtS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 74,
+      "mnemonic": "i32.gt_s"
+    },
+    {
+      "id": "I32GtU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 75,
+      "mnemonic": "i32.gt_u"
+    },
+    {
+      "id": "I32LeS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 76,
+      "mnemonic": "i32.le_s"
+    },
+    {
+      "id": "I32LeU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 77,
+      "mnemonic": "i32.le_u"
+    },
+    {
+      "id": "I32GeS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 78,
+      "mnemonic": "i32.ge_s"
+    },
+    {
+      "id": "I32GeU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 79,
+      "mnemonic": "i32.ge_u"
+    },
+    {
+      "id": "I64Eqz",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 80,
+      "mnemonic": "i64.eqz"
+    },
+    {
+      "id": "I64Eq",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 81,
+      "mnemonic": "i64.eq"
+    },
+    {
+      "id": "I64Ne",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 82,
+      "mnemonic": "i64.ne"
+    },
+    {
+      "id": "I64LtS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 83,
+      "mnemonic": "i64.lt_s"
+    },
+    {
+      "id": "I64LtU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 84,
+      "mnemonic": "i64.lt_u"
+    },
+    {
+      "id": "I64GtS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 85,
+      "mnemonic": "i64.gt_s"
+    },
+    {
+      "id": "I64GtU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 86,
+      "mnemonic": "i64.gt_u"
+    },
+    {
+      "id": "I64LeS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 87,
+      "mnemonic": "i64.le_s"
+    },
+    {
+      "id": "I64LeU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 88,
+      "mnemonic": "i64.le_u"
+    },
+    {
+      "id": "I64GeS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 89,
+      "mnemonic": "i64.ge_s"
+    },
+    {
+      "id": "I64GeU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 90,
+      "mnemonic": "i64.ge_u"
+    },
+    {
+      "id": "F32Eq",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 91,
+      "mnemonic": "f32.eq"
+    },
+    {
+      "id": "F32Ne",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 92,
+      "mnemonic": "f32.ne"
+    },
+    {
+      "id": "F32Lt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 93,
+      "mnemonic": "f32.lt"
+    },
+    {
+      "id": "F32Gt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 94,
+      "mnemonic": "f32.gt"
+    },
+    {
+      "id": "F32Le",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 95,
+      "mnemonic": "f32.le"
+    },
+    {
+      "id": "F32Ge",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 96,
+      "mnemonic": "f32.ge"
+    },
+    {
+      "id": "F64Eq",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 97,
+      "mnemonic": "f64.eq"
+    },
+    {
+      "id": "F64Ne",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 98,
+      "mnemonic": "f64.ne"
+    },
+    {
+      "id": "F64Lt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 99,
+      "mnemonic": "f64.lt"
+    },
+    {
+      "id": "F64Gt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 100,
+      "mnemonic": "f64.gt"
+    },
+    {
+      "id": "F64Le",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 101,
+      "mnemonic": "f64.le"
+    },
+    {
+      "id": "F64Ge",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 102,
+      "mnemonic": "f64.ge"
+    },
+    {
+      "id": "I32Clz",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 103,
+      "mnemonic": "i32.clz"
+    },
+    {
+      "id": "I32Ctz",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 104,
+      "mnemonic": "i32.ctz"
+    },
+    {
+      "id": "I32Popcnt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 105,
+      "mnemonic": "i32.popcnt"
+    },
+    {
+      "id": "I32Add",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 106,
+      "mnemonic": "i32.add"
+    },
+    {
+      "id": "I32Sub",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 107,
+      "mnemonic": "i32.sub"
+    },
+    {
+      "id": "I32Mul",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 108,
+      "mnemonic": "i32.mul"
+    },
+    {
+      "id": "I32DivS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 109,
+      "mnemonic": "i32.div_s"
+    },
+    {
+      "id": "I32DivU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 110,
+      "mnemonic": "i32.div_u"
+    },
+    {
+      "id": "I32RemS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 111,
+      "mnemonic": "i32.rem_s"
+    },
+    {
+      "id": "I32RemU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 112,
+      "mnemonic": "i32.rem_u"
+    },
+    {
+      "id": "I32And",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 113,
+      "mnemonic": "i32.and"
+    },
+    {
+      "id": "I32Or",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 114,
+      "mnemonic": "i32.or"
+    },
+    {
+      "id": "I32Xor",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 115,
+      "mnemonic": "i32.xor"
+    },
+    {
+      "id": "I32Shl",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 116,
+      "mnemonic": "i32.shl"
+    },
+    {
+      "id": "I32ShrS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 117,
+      "mnemonic": "i32.shr_s"
+    },
+    {
+      "id": "I32ShrU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 118,
+      "mnemonic": "i32.shr_u"
+    },
+    {
+      "id": "I32Rotl",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 119,
+      "mnemonic": "i32.rotl"
+    },
+    {
+      "id": "I32Rotr",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 120,
+      "mnemonic": "i32.rotr"
+    },
+    {
+      "id": "I64Clz",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 121,
+      "mnemonic": "i64.clz"
+    },
+    {
+      "id": "I64Ctz",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 122,
+      "mnemonic": "i64.ctz"
+    },
+    {
+      "id": "I64Popcnt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 123,
+      "mnemonic": "i64.popcnt"
+    },
+    {
+      "id": "I64Add",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 124,
+      "mnemonic": "i64.add"
+    },
+    {
+      "id": "I64Sub",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 125,
+      "mnemonic": "i64.sub"
+    },
+    {
+      "id": "I64Mul",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 126,
+      "mnemonic": "i64.mul"
+    },
+    {
+      "id": "I64DivS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 127,
+      "mnemonic": "i64.div_s"
+    },
+    {
+      "id": "I64DivU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 128,
+      "mnemonic": "i64.div_u"
+    },
+    {
+      "id": "I64RemS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 129,
+      "mnemonic": "i64.rem_s"
+    },
+    {
+      "id": "I64RemU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 130,
+      "mnemonic": "i64.rem_u"
+    },
+    {
+      "id": "I64And",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 131,
+      "mnemonic": "i64.and"
+    },
+    {
+      "id": "I64Or",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 132,
+      "mnemonic": "i64.or"
+    },
+    {
+      "id": "I64Xor",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 133,
+      "mnemonic": "i64.xor"
+    },
+    {
+      "id": "I64Shl",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 134,
+      "mnemonic": "i64.shl"
+    },
+    {
+      "id": "I64ShrS",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 135,
+      "mnemonic": "i64.shr_s"
+    },
+    {
+      "id": "I64ShrU",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 136,
+      "mnemonic": "i64.shr_u"
+    },
+    {
+      "id": "I64Rotl",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 137,
+      "mnemonic": "i64.rotl"
+    },
+    {
+      "id": "I64Rotr",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 138,
+      "mnemonic": "i64.rotr"
+    },
+    {
+      "id": "F32Abs",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 139,
+      "mnemonic": "f32.abs"
+    },
+    {
+      "id": "F32Neg",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 140,
+      "mnemonic": "f32.neg"
+    },
+    {
+      "id": "F32Ceil",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 141,
+      "mnemonic": "f32.ceil"
+    },
+    {
+      "id": "F32Floor",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 142,
+      "mnemonic": "f32.floor"
+    },
+    {
+      "id": "F32Trunc",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 143,
+      "mnemonic": "f32.trunc"
+    },
+    {
+      "id": "F32Nearest",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 144,
+      "mnemonic": "f32.nearest"
+    },
+    {
+      "id": "F32Sqrt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 145,
+      "mnemonic": "f32.sqrt"
+    },
+    {
+      "id": "F32Add",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 146,
+      "mnemonic": "f32.add"
+    },
+    {
+      "id": "F32Sub",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 147,
+      "mnemonic": "f32.sub"
+    },
+    {
+      "id": "F32Mul",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 148,
+      "mnemonic": "f32.mul"
+    },
+    {
+      "id": "F32Div",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 149,
+      "mnemonic": "f32.div"
+    },
+    {
+      "id": "F32Min",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 150,
+      "mnemonic": "f32.min"
+    },
+    {
+      "id": "F32Max",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 151,
+      "mnemonic": "f32.max"
+    },
+    {
+      "id": "F32Copysign",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 152,
+      "mnemonic": "f32.copysign"
+    },
+    {
+      "id": "F64Abs",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 153,
+      "mnemonic": "f64.abs"
+    },
+    {
+      "id": "F64Neg",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 154,
+      "mnemonic": "f64.neg"
+    },
+    {
+      "id": "F64Ceil",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 155,
+      "mnemonic": "f64.ceil"
+    },
+    {
+      "id": "F64Floor",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 156,
+      "mnemonic": "f64.floor"
+    },
+    {
+      "id": "F64Trunc",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 157,
+      "mnemonic": "f64.trunc"
+    },
+    {
+      "id": "F64Nearest",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 158,
+      "mnemonic": "f64.nearest"
+    },
+    {
+      "id": "F64Sqrt",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 159,
+      "mnemonic": "f64.sqrt"
+    },
+    {
+      "id": "F64Add",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 160,
+      "mnemonic": "f64.add"
+    },
+    {
+      "id": "F64Sub",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 161,
+      "mnemonic": "f64.sub"
+    },
+    {
+      "id": "F64Mul",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 162,
+      "mnemonic": "f64.mul"
+    },
+    {
+      "id": "F64Div",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 163,
+      "mnemonic": "f64.div"
+    },
+    {
+      "id": "F64Min",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 164,
+      "mnemonic": "f64.min"
+    },
+    {
+      "id": "F64Max",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 165,
+      "mnemonic": "f64.max"
+    },
+    {
+      "id": "F64Copysign",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 166,
+      "mnemonic": "f64.copysign"
+    },
+    {
+      "id": "I32WrapI64",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 167,
+      "mnemonic": "i32.wrap_i64"
+    },
+    {
+      "id": "I32TruncF32S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 168,
+      "mnemonic": "i32.trunc_f32_s"
+    },
+    {
+      "id": "I32TruncF32U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 169,
+      "mnemonic": "i32.trunc_f32_u"
+    },
+    {
+      "id": "I32TruncF64S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 170,
+      "mnemonic": "i32.trunc_f64_s"
+    },
+    {
+      "id": "I32TruncF64U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 171,
+      "mnemonic": "i32.trunc_f64_u"
+    },
+    {
+      "id": "I64ExtendI32S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 172,
+      "mnemonic": "i64.extend_i32_s"
+    },
+    {
+      "id": "I64ExtendI32U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 173,
+      "mnemonic": "i64.extend_i32_u"
+    },
+    {
+      "id": "I64TruncF32S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 174,
+      "mnemonic": "i64.trunc_f32_s"
+    },
+    {
+      "id": "I64TruncF32U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 175,
+      "mnemonic": "i64.trunc_f32_u"
+    },
+    {
+      "id": "I64TruncF64S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 176,
+      "mnemonic": "i64.trunc_f64_s"
+    },
+    {
+      "id": "I64TruncF64U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 177,
+      "mnemonic": "i64.trunc_f64_u"
+    },
+    {
+      "id": "F32ConvertI32S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 178,
+      "mnemonic": "f32.convert_i32_s"
+    },
+    {
+      "id": "F32ConvertI32U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 179,
+      "mnemonic": "f32.convert_i32_u"
+    },
+    {
+      "id": "F32ConvertI64S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 180,
+      "mnemonic": "f32.convert_i64_s"
+    },
+    {
+      "id": "F32ConvertI64U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 181,
+      "mnemonic": "f32.convert_i64_u"
+    },
+    {
+      "id": "F32DemoteF64",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 182,
+      "mnemonic": "f32.demote_f64"
+    },
+    {
+      "id": "F64ConvertI32S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 183,
+      "mnemonic": "f64.convert_i32_s"
+    },
+    {
+      "id": "F64ConvertI32U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 184,
+      "mnemonic": "f64.convert_i32_u"
+    },
+    {
+      "id": "F64ConvertI64S",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 185,
+      "mnemonic": "f64.convert_i64_s"
+    },
+    {
+      "id": "F64ConvertI64U",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 186,
+      "mnemonic": "f64.convert_i64_u"
+    },
+    {
+      "id": "F64PromoteF32",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 187,
+      "mnemonic": "f64.promote_f32"
+    },
+    {
+      "id": "I32ReinterpretF32",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 188,
+      "mnemonic": "i32.reinterpret_f32"
+    },
+    {
+      "id": "I64ReinterpretF64",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 189,
+      "mnemonic": "i64.reinterpret_f64"
+    },
+    {
+      "id": "F32ReinterpretI32",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 190,
+      "mnemonic": "f32.reinterpret_i32"
+    },
+    {
+      "id": "F64ReinterpretI64",
+      "feature": "mvp",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 191,
+      "mnemonic": "f64.reinterpret_i64"
+    },
+    {
+      "id": "I32Extend8S",
+      "feature": "sign_extension",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 192,
+      "mnemonic": "i32.extend8_s"
+    },
+    {
+      "id": "I32Extend16S",
+      "feature": "sign_extension",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 193,
+      "mnemonic": "i32.extend16_s"
+    },
+    {
+      "id": "I64Extend8S",
+      "feature": "sign_extension",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 194,
+      "mnemonic": "i64.extend8_s"
+    },
+    {
+      "id": "I64Extend16S",
+      "feature": "sign_extension",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 195,
+      "mnemonic": "i64.extend16_s"
+    },
+    {
+      "id": "I64Extend32S",
+      "feature": "sign_extension",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 196,
+      "mnemonic": "i64.extend32_s"
+    },
+    {
+      "id": "RefNull",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "hty",
+          "kind": "heaptype"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 208,
+      "mnemonic": "ref.null"
+    },
+    {
+      "id": "RefIsNull",
+      "feature": "reference_types",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 209,
+      "mnemonic": "ref.is_null"
+    },
+    {
+      "id": "RefFunc",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "function_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 210,
+      "mnemonic": "ref.func"
+    },
+    {
+      "id": "RefEq",
+      "feature": "gc",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 211,
+      "mnemonic": "ref.eq"
+    },
+    {
+      "id": "RefAsNonNull",
+      "feature": "function_references",
+      "fields": [],
+      "prefix": 0,
+      "opcode": 212,
+      "mnemonic": "ref.as_non_null",
+      "nullable": false
+    },
+    {
+      "id": "BrOnNull",
+      "feature": "function_references",
+      "fields": [
+        {
+          "name": "relative_depth",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 213,
+      "mnemonic": "br_on_null"
+    },
+    {
+      "id": "BrOnNonNull",
+      "feature": "function_references",
+      "fields": [
+        {
+          "name": "relative_depth",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 214,
+      "mnemonic": "br_on_non_null",
+      "nullable": false
+    },
+    {
+      "id": "ContNew",
+      "feature": "stack_switching",
+      "fields": [
+        {
+          "name": "cont_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 224,
+      "mnemonic": "cont.new"
+    },
+    {
+      "id": "ContBind",
+      "feature": "stack_switching",
+      "fields": [
+        {
+          "name": "argument_index",
+          "kind": "u32"
+        },
+        {
+          "name": "result_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 225,
+      "mnemonic": "cont.bind"
+    },
+    {
+      "id": "Suspend",
+      "feature": "stack_switching",
+      "fields": [
+        {
+          "name": "tag_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 226,
+      "mnemonic": "suspend"
+    },
+    {
+      "id": "Resume",
+      "feature": "stack_switching",
+      "fields": [
+        {
+          "name": "cont_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "resume_table",
+          "kind": "resume_table"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 227,
+      "mnemonic": "resume"
+    },
+    {
+      "id": "ResumeThrow",
+      "feature": "stack_switching",
+      "fields": [
+        {
+          "name": "cont_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "tag_index",
+          "kind": "u32"
+        },
+        {
+          "name": "resume_table",
+          "kind": "resume_table"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 228,
+      "mnemonic": "resume_throw"
+    },
+    {
+      "id": "ResumeThrowRef",
+      "feature": "stack_switching",
+      "fields": [
+        {
+          "name": "cont_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "resume_table",
+          "kind": "resume_table"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 229,
+      "mnemonic": "resume_throw_ref"
+    },
+    {
+      "id": "Switch",
+      "feature": "stack_switching",
+      "fields": [
+        {
+          "name": "cont_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "tag_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 0,
+      "opcode": 230,
+      "mnemonic": "switch"
+    },
+    {
+      "id": "StructNew",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 0,
+      "mnemonic": "struct.new"
+    },
+    {
+      "id": "StructNewDefault",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 1,
+      "mnemonic": "struct.new_default"
+    },
+    {
+      "id": "StructGet",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 2,
+      "mnemonic": "struct.get"
+    },
+    {
+      "id": "StructGetS",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 3,
+      "mnemonic": "struct.get_s"
+    },
+    {
+      "id": "StructGetU",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 4,
+      "mnemonic": "struct.get_u"
+    },
+    {
+      "id": "StructSet",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 5,
+      "mnemonic": "struct.set"
+    },
+    {
+      "id": "ArrayNew",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 6,
+      "mnemonic": "array.new"
+    },
+    {
+      "id": "ArrayNewDefault",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 7,
+      "mnemonic": "array.new_default"
+    },
+    {
+      "id": "ArrayNewFixed",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "array_size",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 8,
+      "mnemonic": "array.new_fixed"
+    },
+    {
+      "id": "ArrayNewData",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "array_data_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 9,
+      "mnemonic": "array.new_data"
+    },
+    {
+      "id": "ArrayNewElem",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "array_elem_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 10,
+      "mnemonic": "array.new_elem"
+    },
+    {
+      "id": "ArrayGet",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 11,
+      "mnemonic": "array.get"
+    },
+    {
+      "id": "ArrayGetS",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 12,
+      "mnemonic": "array.get_s"
+    },
+    {
+      "id": "ArrayGetU",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 13,
+      "mnemonic": "array.get_u"
+    },
+    {
+      "id": "ArraySet",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 14,
+      "mnemonic": "array.set"
+    },
+    {
+      "id": "ArrayLen",
+      "feature": "gc",
+      "fields": [],
+      "prefix": 251,
+      "opcode": 15,
+      "mnemonic": "array.len"
+    },
+    {
+      "id": "ArrayFill",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 16,
+      "mnemonic": "array.fill"
+    },
+    {
+      "id": "ArrayCopy",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index_dst",
+          "kind": "u32"
+        },
+        {
+          "name": "array_type_index_src",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 17,
+      "mnemonic": "array.copy"
+    },
+    {
+      "id": "ArrayInitData",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "array_data_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 18,
+      "mnemonic": "array.init_data"
+    },
+    {
+      "id": "ArrayInitElem",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "array_elem_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 19,
+      "mnemonic": "array.init_elem"
+    },
+    {
+      "id": "RefTestNonNull",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "hty",
+          "kind": "heaptype"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 20,
+      "mnemonic": "ref.test",
+      "nullable": false
+    },
+    {
+      "id": "RefTestNullable",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "hty",
+          "kind": "heaptype"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 21,
+      "mnemonic": "ref.test",
+      "nullable": true
+    },
+    {
+      "id": "RefCastNonNull",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "hty",
+          "kind": "heaptype"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 22,
+      "mnemonic": "ref.cast",
+      "nullable": false
+    },
+    {
+      "id": "RefCastNullable",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "hty",
+          "kind": "heaptype"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 23,
+      "mnemonic": "ref.cast",
+      "nullable": true
+    },
+    {
+      "id": "BrOnCast",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "cast",
+          "kind": "cast"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 24,
+      "mnemonic": "br_on_cast"
+    },
+    {
+      "id": "BrOnCastFail",
+      "feature": "gc",
+      "fields": [
+        {
+          "name": "cast",
+          "kind": "cast"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 25,
+      "mnemonic": "br_on_cast_fail"
+    },
+    {
+      "id": "AnyConvertExtern",
+      "feature": "gc",
+      "fields": [],
+      "prefix": 251,
+      "opcode": 26,
+      "mnemonic": "any.convert_extern"
+    },
+    {
+      "id": "ExternConvertAny",
+      "feature": "gc",
+      "fields": [],
+      "prefix": 251,
+      "opcode": 27,
+      "mnemonic": "extern.convert_any"
+    },
+    {
+      "id": "RefI31",
+      "feature": "gc",
+      "fields": [],
+      "prefix": 251,
+      "opcode": 28,
+      "mnemonic": "ref.i31"
+    },
+    {
+      "id": "I31GetS",
+      "feature": "gc",
+      "fields": [],
+      "prefix": 251,
+      "opcode": 29,
+      "mnemonic": "i31.get_s"
+    },
+    {
+      "id": "I31GetU",
+      "feature": "gc",
+      "fields": [],
+      "prefix": 251,
+      "opcode": 30,
+      "mnemonic": "i31.get_u"
+    },
+    {
+      "id": "StructNewDesc",
+      "feature": "custom_descriptors",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 32,
+      "mnemonic": "struct.new_desc"
+    },
+    {
+      "id": "StructNewDefaultDesc",
+      "feature": "custom_descriptors",
+      "fields": [
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 33,
+      "mnemonic": "struct.new_default_desc"
+    },
+    {
+      "id": "RefGetDesc",
+      "feature": "custom_descriptors",
+      "fields": [
+        {
+          "name": "type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 34,
+      "mnemonic": "ref.get_desc"
+    },
+    {
+      "id": "RefCastDescEqNonNull",
+      "feature": "custom_descriptors",
+      "fields": [
+        {
+          "name": "hty",
+          "kind": "heaptype"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 35,
+      "mnemonic": "ref.cast_desc_eq",
+      "nullable": false
+    },
+    {
+      "id": "RefCastDescEqNullable",
+      "feature": "custom_descriptors",
+      "fields": [
+        {
+          "name": "hty",
+          "kind": "heaptype"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 36,
+      "mnemonic": "ref.cast_desc_eq",
+      "nullable": true
+    },
+    {
+      "id": "BrOnCastDescEq",
+      "feature": "custom_descriptors",
+      "fields": [
+        {
+          "name": "cast",
+          "kind": "cast"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 37,
+      "mnemonic": "br_on_cast_desc_eq"
+    },
+    {
+      "id": "BrOnCastDescEqFail",
+      "feature": "custom_descriptors",
+      "fields": [
+        {
+          "name": "cast",
+          "kind": "cast"
+        }
+      ],
+      "prefix": 251,
+      "opcode": 38,
+      "mnemonic": "br_on_cast_desc_eq_fail"
+    },
+    {
+      "id": "I32TruncSatF32S",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 0,
+      "mnemonic": "i32.trunc_sat_f32_s"
+    },
+    {
+      "id": "I32TruncSatF32U",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 1,
+      "mnemonic": "i32.trunc_sat_f32_u"
+    },
+    {
+      "id": "I32TruncSatF64S",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 2,
+      "mnemonic": "i32.trunc_sat_f64_s"
+    },
+    {
+      "id": "I32TruncSatF64U",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 3,
+      "mnemonic": "i32.trunc_sat_f64_u"
+    },
+    {
+      "id": "I64TruncSatF32S",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 4,
+      "mnemonic": "i64.trunc_sat_f32_s"
+    },
+    {
+      "id": "I64TruncSatF32U",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 5,
+      "mnemonic": "i64.trunc_sat_f32_u"
+    },
+    {
+      "id": "I64TruncSatF64S",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 6,
+      "mnemonic": "i64.trunc_sat_f64_s"
+    },
+    {
+      "id": "I64TruncSatF64U",
+      "feature": "saturating_float_to_int",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 7,
+      "mnemonic": "i64.trunc_sat_f64_u"
+    },
+    {
+      "id": "MemoryInit",
+      "feature": "bulk_memory",
+      "fields": [
+        {
+          "name": "data_index",
+          "kind": "u32"
+        },
+        {
+          "name": "mem",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 8,
+      "mnemonic": "memory.init"
+    },
+    {
+      "id": "DataDrop",
+      "feature": "bulk_memory",
+      "fields": [
+        {
+          "name": "data_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 9,
+      "mnemonic": "data.drop"
+    },
+    {
+      "id": "MemoryCopy",
+      "feature": "bulk_memory",
+      "fields": [
+        {
+          "name": "dst_mem",
+          "kind": "u32"
+        },
+        {
+          "name": "src_mem",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 10,
+      "mnemonic": "memory.copy"
+    },
+    {
+      "id": "MemoryFill",
+      "feature": "bulk_memory",
+      "fields": [
+        {
+          "name": "mem",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 11,
+      "mnemonic": "memory.fill"
+    },
+    {
+      "id": "TableInit",
+      "feature": "bulk_memory",
+      "fields": [
+        {
+          "name": "elem_index",
+          "kind": "u32"
+        },
+        {
+          "name": "table",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 12,
+      "mnemonic": "table.init"
+    },
+    {
+      "id": "ElemDrop",
+      "feature": "bulk_memory",
+      "fields": [
+        {
+          "name": "elem_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 13,
+      "mnemonic": "elem.drop"
+    },
+    {
+      "id": "TableCopy",
+      "feature": "bulk_memory",
+      "fields": [
+        {
+          "name": "dst_table",
+          "kind": "u32"
+        },
+        {
+          "name": "src_table",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 14,
+      "mnemonic": "table.copy"
+    },
+    {
+      "id": "TableGrow",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "table",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 15,
+      "mnemonic": "table.grow"
+    },
+    {
+      "id": "TableSize",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "table",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 16,
+      "mnemonic": "table.size"
+    },
+    {
+      "id": "TableFill",
+      "feature": "reference_types",
+      "fields": [
+        {
+          "name": "table",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 17,
+      "mnemonic": "table.fill"
+    },
+    {
+      "id": "MemoryDiscard",
+      "feature": "memory_control",
+      "fields": [
+        {
+          "name": "mem",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 252,
+      "opcode": 18,
+      "mnemonic": "memory.discard"
+    },
+    {
+      "id": "I64Add128",
+      "feature": "wide_arithmetic",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 19,
+      "mnemonic": "i64.add128"
+    },
+    {
+      "id": "I64Sub128",
+      "feature": "wide_arithmetic",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 20,
+      "mnemonic": "i64.sub128"
+    },
+    {
+      "id": "I64MulWideS",
+      "feature": "wide_arithmetic",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 21,
+      "mnemonic": "i64.mul_wide_s"
+    },
+    {
+      "id": "I64MulWideU",
+      "feature": "wide_arithmetic",
+      "fields": [],
+      "prefix": 252,
+      "opcode": 22,
+      "mnemonic": "i64.mul_wide_u"
+    },
+    {
+      "id": "V128Load",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 0,
+      "mnemonic": "v128.load"
+    },
+    {
+      "id": "V128Load8x8S",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 1,
+      "mnemonic": "v128.load8x8_s"
+    },
+    {
+      "id": "V128Load8x8U",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 2,
+      "mnemonic": "v128.load8x8_u"
+    },
+    {
+      "id": "V128Load16x4S",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 3,
+      "mnemonic": "v128.load16x4_s"
+    },
+    {
+      "id": "V128Load16x4U",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 4,
+      "mnemonic": "v128.load16x4_u"
+    },
+    {
+      "id": "V128Load32x2S",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 5,
+      "mnemonic": "v128.load32x2_s"
+    },
+    {
+      "id": "V128Load32x2U",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 6,
+      "mnemonic": "v128.load32x2_u"
+    },
+    {
+      "id": "V128Load8Splat",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 7,
+      "mnemonic": "v128.load8_splat"
+    },
+    {
+      "id": "V128Load16Splat",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 8,
+      "mnemonic": "v128.load16_splat"
+    },
+    {
+      "id": "V128Load32Splat",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 9,
+      "mnemonic": "v128.load32_splat"
+    },
+    {
+      "id": "V128Load64Splat",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 10,
+      "mnemonic": "v128.load64_splat"
+    },
+    {
+      "id": "V128Store",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 11,
+      "mnemonic": "v128.store"
+    },
+    {
+      "id": "V128Const",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "value",
+          "kind": "v128"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 12,
+      "mnemonic": "v128.const"
+    },
+    {
+      "id": "I8x16Shuffle",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lanes",
+          "kind": "shuffle"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 13,
+      "mnemonic": "i8x16.shuffle"
+    },
+    {
+      "id": "I8x16Swizzle",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 14,
+      "mnemonic": "i8x16.swizzle"
+    },
+    {
+      "id": "I8x16Splat",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 15,
+      "mnemonic": "i8x16.splat"
+    },
+    {
+      "id": "I16x8Splat",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 16,
+      "mnemonic": "i16x8.splat"
+    },
+    {
+      "id": "I32x4Splat",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 17,
+      "mnemonic": "i32x4.splat"
+    },
+    {
+      "id": "I64x2Splat",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 18,
+      "mnemonic": "i64x2.splat"
+    },
+    {
+      "id": "F32x4Splat",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 19,
+      "mnemonic": "f32x4.splat"
+    },
+    {
+      "id": "F64x2Splat",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 20,
+      "mnemonic": "f64x2.splat"
+    },
+    {
+      "id": "I8x16ExtractLaneS",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 21,
+      "mnemonic": "i8x16.extract_lane_s"
+    },
+    {
+      "id": "I8x16ExtractLaneU",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 22,
+      "mnemonic": "i8x16.extract_lane_u"
+    },
+    {
+      "id": "I8x16ReplaceLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 23,
+      "mnemonic": "i8x16.replace_lane"
+    },
+    {
+      "id": "I16x8ExtractLaneS",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 24,
+      "mnemonic": "i16x8.extract_lane_s"
+    },
+    {
+      "id": "I16x8ExtractLaneU",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 25,
+      "mnemonic": "i16x8.extract_lane_u"
+    },
+    {
+      "id": "I16x8ReplaceLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 26,
+      "mnemonic": "i16x8.replace_lane"
+    },
+    {
+      "id": "I32x4ExtractLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 27,
+      "mnemonic": "i32x4.extract_lane"
+    },
+    {
+      "id": "I32x4ReplaceLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 28,
+      "mnemonic": "i32x4.replace_lane"
+    },
+    {
+      "id": "I64x2ExtractLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 29,
+      "mnemonic": "i64x2.extract_lane"
+    },
+    {
+      "id": "I64x2ReplaceLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 30,
+      "mnemonic": "i64x2.replace_lane"
+    },
+    {
+      "id": "F32x4ExtractLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 31,
+      "mnemonic": "f32x4.extract_lane"
+    },
+    {
+      "id": "F32x4ReplaceLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 32,
+      "mnemonic": "f32x4.replace_lane"
+    },
+    {
+      "id": "F64x2ExtractLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 33,
+      "mnemonic": "f64x2.extract_lane"
+    },
+    {
+      "id": "F64x2ReplaceLane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 34,
+      "mnemonic": "f64x2.replace_lane"
+    },
+    {
+      "id": "I8x16Eq",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 35,
+      "mnemonic": "i8x16.eq"
+    },
+    {
+      "id": "I8x16Ne",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 36,
+      "mnemonic": "i8x16.ne"
+    },
+    {
+      "id": "I8x16LtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 37,
+      "mnemonic": "i8x16.lt_s"
+    },
+    {
+      "id": "I8x16LtU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 38,
+      "mnemonic": "i8x16.lt_u"
+    },
+    {
+      "id": "I8x16GtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 39,
+      "mnemonic": "i8x16.gt_s"
+    },
+    {
+      "id": "I8x16GtU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 40,
+      "mnemonic": "i8x16.gt_u"
+    },
+    {
+      "id": "I8x16LeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 41,
+      "mnemonic": "i8x16.le_s"
+    },
+    {
+      "id": "I8x16LeU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 42,
+      "mnemonic": "i8x16.le_u"
+    },
+    {
+      "id": "I8x16GeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 43,
+      "mnemonic": "i8x16.ge_s"
+    },
+    {
+      "id": "I8x16GeU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 44,
+      "mnemonic": "i8x16.ge_u"
+    },
+    {
+      "id": "I16x8Eq",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 45,
+      "mnemonic": "i16x8.eq"
+    },
+    {
+      "id": "I16x8Ne",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 46,
+      "mnemonic": "i16x8.ne"
+    },
+    {
+      "id": "I16x8LtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 47,
+      "mnemonic": "i16x8.lt_s"
+    },
+    {
+      "id": "I16x8LtU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 48,
+      "mnemonic": "i16x8.lt_u"
+    },
+    {
+      "id": "I16x8GtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 49,
+      "mnemonic": "i16x8.gt_s"
+    },
+    {
+      "id": "I16x8GtU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 50,
+      "mnemonic": "i16x8.gt_u"
+    },
+    {
+      "id": "I16x8LeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 51,
+      "mnemonic": "i16x8.le_s"
+    },
+    {
+      "id": "I16x8LeU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 52,
+      "mnemonic": "i16x8.le_u"
+    },
+    {
+      "id": "I16x8GeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 53,
+      "mnemonic": "i16x8.ge_s"
+    },
+    {
+      "id": "I16x8GeU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 54,
+      "mnemonic": "i16x8.ge_u"
+    },
+    {
+      "id": "I32x4Eq",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 55,
+      "mnemonic": "i32x4.eq"
+    },
+    {
+      "id": "I32x4Ne",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 56,
+      "mnemonic": "i32x4.ne"
+    },
+    {
+      "id": "I32x4LtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 57,
+      "mnemonic": "i32x4.lt_s"
+    },
+    {
+      "id": "I32x4LtU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 58,
+      "mnemonic": "i32x4.lt_u"
+    },
+    {
+      "id": "I32x4GtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 59,
+      "mnemonic": "i32x4.gt_s"
+    },
+    {
+      "id": "I32x4GtU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 60,
+      "mnemonic": "i32x4.gt_u"
+    },
+    {
+      "id": "I32x4LeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 61,
+      "mnemonic": "i32x4.le_s"
+    },
+    {
+      "id": "I32x4LeU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 62,
+      "mnemonic": "i32x4.le_u"
+    },
+    {
+      "id": "I32x4GeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 63,
+      "mnemonic": "i32x4.ge_s"
+    },
+    {
+      "id": "I32x4GeU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 64,
+      "mnemonic": "i32x4.ge_u"
+    },
+    {
+      "id": "F32x4Eq",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 65,
+      "mnemonic": "f32x4.eq"
+    },
+    {
+      "id": "F32x4Ne",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 66,
+      "mnemonic": "f32x4.ne"
+    },
+    {
+      "id": "F32x4Lt",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 67,
+      "mnemonic": "f32x4.lt"
+    },
+    {
+      "id": "F32x4Gt",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 68,
+      "mnemonic": "f32x4.gt"
+    },
+    {
+      "id": "F32x4Le",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 69,
+      "mnemonic": "f32x4.le"
+    },
+    {
+      "id": "F32x4Ge",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 70,
+      "mnemonic": "f32x4.ge"
+    },
+    {
+      "id": "F64x2Eq",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 71,
+      "mnemonic": "f64x2.eq"
+    },
+    {
+      "id": "F64x2Ne",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 72,
+      "mnemonic": "f64x2.ne"
+    },
+    {
+      "id": "F64x2Lt",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 73,
+      "mnemonic": "f64x2.lt"
+    },
+    {
+      "id": "F64x2Gt",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 74,
+      "mnemonic": "f64x2.gt"
+    },
+    {
+      "id": "F64x2Le",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 75,
+      "mnemonic": "f64x2.le"
+    },
+    {
+      "id": "F64x2Ge",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 76,
+      "mnemonic": "f64x2.ge"
+    },
+    {
+      "id": "V128Not",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 77,
+      "mnemonic": "v128.not"
+    },
+    {
+      "id": "V128And",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 78,
+      "mnemonic": "v128.and"
+    },
+    {
+      "id": "V128AndNot",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 79,
+      "mnemonic": "v128.andnot"
+    },
+    {
+      "id": "V128Or",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 80,
+      "mnemonic": "v128.or"
+    },
+    {
+      "id": "V128Xor",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 81,
+      "mnemonic": "v128.xor"
+    },
+    {
+      "id": "V128Bitselect",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 82,
+      "mnemonic": "v128.bitselect"
+    },
+    {
+      "id": "V128AnyTrue",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 83,
+      "mnemonic": "v128.any_true"
+    },
+    {
+      "id": "V128Load8Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 84,
+      "mnemonic": "v128.load8_lane"
+    },
+    {
+      "id": "V128Load16Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 85,
+      "mnemonic": "v128.load16_lane"
+    },
+    {
+      "id": "V128Load32Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 86,
+      "mnemonic": "v128.load32_lane"
+    },
+    {
+      "id": "V128Load64Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 87,
+      "mnemonic": "v128.load64_lane"
+    },
+    {
+      "id": "V128Store8Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 88,
+      "mnemonic": "v128.store8_lane"
+    },
+    {
+      "id": "V128Store16Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 89,
+      "mnemonic": "v128.store16_lane"
+    },
+    {
+      "id": "V128Store32Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 90,
+      "mnemonic": "v128.store32_lane"
+    },
+    {
+      "id": "V128Store64Lane",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        },
+        {
+          "name": "lane",
+          "kind": "lane"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 91,
+      "mnemonic": "v128.store64_lane"
+    },
+    {
+      "id": "V128Load32Zero",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 92,
+      "mnemonic": "v128.load32_zero"
+    },
+    {
+      "id": "V128Load64Zero",
+      "feature": "simd",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 253,
+      "opcode": 93,
+      "mnemonic": "v128.load64_zero"
+    },
+    {
+      "id": "F32x4DemoteF64x2Zero",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 94,
+      "mnemonic": "f32x4.demote_f64x2_zero"
+    },
+    {
+      "id": "F64x2PromoteLowF32x4",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 95,
+      "mnemonic": "f64x2.promote_low_f32x4"
+    },
+    {
+      "id": "I8x16Abs",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 96,
+      "mnemonic": "i8x16.abs"
+    },
+    {
+      "id": "I8x16Neg",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 97,
+      "mnemonic": "i8x16.neg"
+    },
+    {
+      "id": "I8x16Popcnt",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 98,
+      "mnemonic": "i8x16.popcnt"
+    },
+    {
+      "id": "I8x16AllTrue",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 99,
+      "mnemonic": "i8x16.all_true"
+    },
+    {
+      "id": "I8x16Bitmask",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 100,
+      "mnemonic": "i8x16.bitmask"
+    },
+    {
+      "id": "I8x16NarrowI16x8S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 101,
+      "mnemonic": "i8x16.narrow_i16x8_s"
+    },
+    {
+      "id": "I8x16NarrowI16x8U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 102,
+      "mnemonic": "i8x16.narrow_i16x8_u"
+    },
+    {
+      "id": "F32x4Ceil",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 103,
+      "mnemonic": "f32x4.ceil"
+    },
+    {
+      "id": "F32x4Floor",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 104,
+      "mnemonic": "f32x4.floor"
+    },
+    {
+      "id": "F32x4Trunc",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 105,
+      "mnemonic": "f32x4.trunc"
+    },
+    {
+      "id": "F32x4Nearest",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 106,
+      "mnemonic": "f32x4.nearest"
+    },
+    {
+      "id": "I8x16Shl",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 107,
+      "mnemonic": "i8x16.shl"
+    },
+    {
+      "id": "I8x16ShrS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 108,
+      "mnemonic": "i8x16.shr_s"
+    },
+    {
+      "id": "I8x16ShrU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 109,
+      "mnemonic": "i8x16.shr_u"
+    },
+    {
+      "id": "I8x16Add",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 110,
+      "mnemonic": "i8x16.add"
+    },
+    {
+      "id": "I8x16AddSatS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 111,
+      "mnemonic": "i8x16.add_sat_s"
+    },
+    {
+      "id": "I8x16AddSatU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 112,
+      "mnemonic": "i8x16.add_sat_u"
+    },
+    {
+      "id": "I8x16Sub",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 113,
+      "mnemonic": "i8x16.sub"
+    },
+    {
+      "id": "I8x16SubSatS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 114,
+      "mnemonic": "i8x16.sub_sat_s"
+    },
+    {
+      "id": "I8x16SubSatU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 115,
+      "mnemonic": "i8x16.sub_sat_u"
+    },
+    {
+      "id": "F64x2Ceil",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 116,
+      "mnemonic": "f64x2.ceil"
+    },
+    {
+      "id": "F64x2Floor",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 117,
+      "mnemonic": "f64x2.floor"
+    },
+    {
+      "id": "I8x16MinS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 118,
+      "mnemonic": "i8x16.min_s"
+    },
+    {
+      "id": "I8x16MinU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 119,
+      "mnemonic": "i8x16.min_u"
+    },
+    {
+      "id": "I8x16MaxS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 120,
+      "mnemonic": "i8x16.max_s"
+    },
+    {
+      "id": "I8x16MaxU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 121,
+      "mnemonic": "i8x16.max_u"
+    },
+    {
+      "id": "F64x2Trunc",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 122,
+      "mnemonic": "f64x2.trunc"
+    },
+    {
+      "id": "I8x16AvgrU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 123,
+      "mnemonic": "i8x16.avgr_u"
+    },
+    {
+      "id": "I16x8ExtAddPairwiseI8x16S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 124,
+      "mnemonic": "i16x8.extadd_pairwise_i8x16_s"
+    },
+    {
+      "id": "I16x8ExtAddPairwiseI8x16U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 125,
+      "mnemonic": "i16x8.extadd_pairwise_i8x16_u"
+    },
+    {
+      "id": "I32x4ExtAddPairwiseI16x8S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 126,
+      "mnemonic": "i32x4.extadd_pairwise_i16x8_s"
+    },
+    {
+      "id": "I32x4ExtAddPairwiseI16x8U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 127,
+      "mnemonic": "i32x4.extadd_pairwise_i16x8_u"
+    },
+    {
+      "id": "I16x8Abs",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 128,
+      "mnemonic": "i16x8.abs"
+    },
+    {
+      "id": "I16x8Neg",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 129,
+      "mnemonic": "i16x8.neg"
+    },
+    {
+      "id": "I16x8Q15MulrSatS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 130,
+      "mnemonic": "i16x8.q15mulr_sat_s"
+    },
+    {
+      "id": "I16x8AllTrue",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 131,
+      "mnemonic": "i16x8.all_true"
+    },
+    {
+      "id": "I16x8Bitmask",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 132,
+      "mnemonic": "i16x8.bitmask"
+    },
+    {
+      "id": "I16x8NarrowI32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 133,
+      "mnemonic": "i16x8.narrow_i32x4_s"
+    },
+    {
+      "id": "I16x8NarrowI32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 134,
+      "mnemonic": "i16x8.narrow_i32x4_u"
+    },
+    {
+      "id": "I16x8ExtendLowI8x16S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 135,
+      "mnemonic": "i16x8.extend_low_i8x16_s"
+    },
+    {
+      "id": "I16x8ExtendHighI8x16S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 136,
+      "mnemonic": "i16x8.extend_high_i8x16_s"
+    },
+    {
+      "id": "I16x8ExtendLowI8x16U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 137,
+      "mnemonic": "i16x8.extend_low_i8x16_u"
+    },
+    {
+      "id": "I16x8ExtendHighI8x16U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 138,
+      "mnemonic": "i16x8.extend_high_i8x16_u"
+    },
+    {
+      "id": "I16x8Shl",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 139,
+      "mnemonic": "i16x8.shl"
+    },
+    {
+      "id": "I16x8ShrS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 140,
+      "mnemonic": "i16x8.shr_s"
+    },
+    {
+      "id": "I16x8ShrU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 141,
+      "mnemonic": "i16x8.shr_u"
+    },
+    {
+      "id": "I16x8Add",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 142,
+      "mnemonic": "i16x8.add"
+    },
+    {
+      "id": "I16x8AddSatS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 143,
+      "mnemonic": "i16x8.add_sat_s"
+    },
+    {
+      "id": "I16x8AddSatU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 144,
+      "mnemonic": "i16x8.add_sat_u"
+    },
+    {
+      "id": "I16x8Sub",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 145,
+      "mnemonic": "i16x8.sub"
+    },
+    {
+      "id": "I16x8SubSatS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 146,
+      "mnemonic": "i16x8.sub_sat_s"
+    },
+    {
+      "id": "I16x8SubSatU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 147,
+      "mnemonic": "i16x8.sub_sat_u"
+    },
+    {
+      "id": "F64x2Nearest",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 148,
+      "mnemonic": "f64x2.nearest"
+    },
+    {
+      "id": "I16x8Mul",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 149,
+      "mnemonic": "i16x8.mul"
+    },
+    {
+      "id": "I16x8MinS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 150,
+      "mnemonic": "i16x8.min_s"
+    },
+    {
+      "id": "I16x8MinU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 151,
+      "mnemonic": "i16x8.min_u"
+    },
+    {
+      "id": "I16x8MaxS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 152,
+      "mnemonic": "i16x8.max_s"
+    },
+    {
+      "id": "I16x8MaxU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 153,
+      "mnemonic": "i16x8.max_u"
+    },
+    {
+      "id": "I16x8AvgrU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 155,
+      "mnemonic": "i16x8.avgr_u"
+    },
+    {
+      "id": "I16x8ExtMulLowI8x16S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 156,
+      "mnemonic": "i16x8.extmul_low_i8x16_s"
+    },
+    {
+      "id": "I16x8ExtMulHighI8x16S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 157,
+      "mnemonic": "i16x8.extmul_high_i8x16_s"
+    },
+    {
+      "id": "I16x8ExtMulLowI8x16U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 158,
+      "mnemonic": "i16x8.extmul_low_i8x16_u"
+    },
+    {
+      "id": "I16x8ExtMulHighI8x16U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 159,
+      "mnemonic": "i16x8.extmul_high_i8x16_u"
+    },
+    {
+      "id": "I32x4Abs",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 160,
+      "mnemonic": "i32x4.abs"
+    },
+    {
+      "id": "I32x4Neg",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 161,
+      "mnemonic": "i32x4.neg"
+    },
+    {
+      "id": "I32x4AllTrue",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 163,
+      "mnemonic": "i32x4.all_true"
+    },
+    {
+      "id": "I32x4Bitmask",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 164,
+      "mnemonic": "i32x4.bitmask"
+    },
+    {
+      "id": "I32x4ExtendLowI16x8S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 167,
+      "mnemonic": "i32x4.extend_low_i16x8_s"
+    },
+    {
+      "id": "I32x4ExtendHighI16x8S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 168,
+      "mnemonic": "i32x4.extend_high_i16x8_s"
+    },
+    {
+      "id": "I32x4ExtendLowI16x8U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 169,
+      "mnemonic": "i32x4.extend_low_i16x8_u"
+    },
+    {
+      "id": "I32x4ExtendHighI16x8U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 170,
+      "mnemonic": "i32x4.extend_high_i16x8_u"
+    },
+    {
+      "id": "I32x4Shl",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 171,
+      "mnemonic": "i32x4.shl"
+    },
+    {
+      "id": "I32x4ShrS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 172,
+      "mnemonic": "i32x4.shr_s"
+    },
+    {
+      "id": "I32x4ShrU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 173,
+      "mnemonic": "i32x4.shr_u"
+    },
+    {
+      "id": "I32x4Add",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 174,
+      "mnemonic": "i32x4.add"
+    },
+    {
+      "id": "I32x4Sub",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 177,
+      "mnemonic": "i32x4.sub"
+    },
+    {
+      "id": "I32x4Mul",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 181,
+      "mnemonic": "i32x4.mul"
+    },
+    {
+      "id": "I32x4MinS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 182,
+      "mnemonic": "i32x4.min_s"
+    },
+    {
+      "id": "I32x4MinU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 183,
+      "mnemonic": "i32x4.min_u"
+    },
+    {
+      "id": "I32x4MaxS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 184,
+      "mnemonic": "i32x4.max_s"
+    },
+    {
+      "id": "I32x4MaxU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 185,
+      "mnemonic": "i32x4.max_u"
+    },
+    {
+      "id": "I32x4DotI16x8S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 186,
+      "mnemonic": "i32x4.dot_i16x8_s"
+    },
+    {
+      "id": "I32x4ExtMulLowI16x8S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 188,
+      "mnemonic": "i32x4.extmul_low_i16x8_s"
+    },
+    {
+      "id": "I32x4ExtMulHighI16x8S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 189,
+      "mnemonic": "i32x4.extmul_high_i16x8_s"
+    },
+    {
+      "id": "I32x4ExtMulLowI16x8U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 190,
+      "mnemonic": "i32x4.extmul_low_i16x8_u"
+    },
+    {
+      "id": "I32x4ExtMulHighI16x8U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 191,
+      "mnemonic": "i32x4.extmul_high_i16x8_u"
+    },
+    {
+      "id": "I64x2Abs",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 192,
+      "mnemonic": "i64x2.abs"
+    },
+    {
+      "id": "I64x2Neg",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 193,
+      "mnemonic": "i64x2.neg"
+    },
+    {
+      "id": "I64x2AllTrue",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 195,
+      "mnemonic": "i64x2.all_true"
+    },
+    {
+      "id": "I64x2Bitmask",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 196,
+      "mnemonic": "i64x2.bitmask"
+    },
+    {
+      "id": "I64x2ExtendLowI32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 199,
+      "mnemonic": "i64x2.extend_low_i32x4_s"
+    },
+    {
+      "id": "I64x2ExtendHighI32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 200,
+      "mnemonic": "i64x2.extend_high_i32x4_s"
+    },
+    {
+      "id": "I64x2ExtendLowI32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 201,
+      "mnemonic": "i64x2.extend_low_i32x4_u"
+    },
+    {
+      "id": "I64x2ExtendHighI32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 202,
+      "mnemonic": "i64x2.extend_high_i32x4_u"
+    },
+    {
+      "id": "I64x2Shl",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 203,
+      "mnemonic": "i64x2.shl"
+    },
+    {
+      "id": "I64x2ShrS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 204,
+      "mnemonic": "i64x2.shr_s"
+    },
+    {
+      "id": "I64x2ShrU",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 205,
+      "mnemonic": "i64x2.shr_u"
+    },
+    {
+      "id": "I64x2Add",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 206,
+      "mnemonic": "i64x2.add"
+    },
+    {
+      "id": "I64x2Sub",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 209,
+      "mnemonic": "i64x2.sub"
+    },
+    {
+      "id": "I64x2Mul",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 213,
+      "mnemonic": "i64x2.mul"
+    },
+    {
+      "id": "I64x2Eq",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 214,
+      "mnemonic": "i64x2.eq"
+    },
+    {
+      "id": "I64x2Ne",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 215,
+      "mnemonic": "i64x2.ne"
+    },
+    {
+      "id": "I64x2LtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 216,
+      "mnemonic": "i64x2.lt_s"
+    },
+    {
+      "id": "I64x2GtS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 217,
+      "mnemonic": "i64x2.gt_s"
+    },
+    {
+      "id": "I64x2LeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 218,
+      "mnemonic": "i64x2.le_s"
+    },
+    {
+      "id": "I64x2GeS",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 219,
+      "mnemonic": "i64x2.ge_s"
+    },
+    {
+      "id": "I64x2ExtMulLowI32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 220,
+      "mnemonic": "i64x2.extmul_low_i32x4_s"
+    },
+    {
+      "id": "I64x2ExtMulHighI32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 221,
+      "mnemonic": "i64x2.extmul_high_i32x4_s"
+    },
+    {
+      "id": "I64x2ExtMulLowI32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 222,
+      "mnemonic": "i64x2.extmul_low_i32x4_u"
+    },
+    {
+      "id": "I64x2ExtMulHighI32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 223,
+      "mnemonic": "i64x2.extmul_high_i32x4_u"
+    },
+    {
+      "id": "F32x4Abs",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 224,
+      "mnemonic": "f32x4.abs"
+    },
+    {
+      "id": "F32x4Neg",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 225,
+      "mnemonic": "f32x4.neg"
+    },
+    {
+      "id": "F32x4Sqrt",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 227,
+      "mnemonic": "f32x4.sqrt"
+    },
+    {
+      "id": "F32x4Add",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 228,
+      "mnemonic": "f32x4.add"
+    },
+    {
+      "id": "F32x4Sub",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 229,
+      "mnemonic": "f32x4.sub"
+    },
+    {
+      "id": "F32x4Mul",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 230,
+      "mnemonic": "f32x4.mul"
+    },
+    {
+      "id": "F32x4Div",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 231,
+      "mnemonic": "f32x4.div"
+    },
+    {
+      "id": "F32x4Min",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 232,
+      "mnemonic": "f32x4.min"
+    },
+    {
+      "id": "F32x4Max",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 233,
+      "mnemonic": "f32x4.max"
+    },
+    {
+      "id": "F32x4PMin",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 234,
+      "mnemonic": "f32x4.pmin"
+    },
+    {
+      "id": "F32x4PMax",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 235,
+      "mnemonic": "f32x4.pmax"
+    },
+    {
+      "id": "F64x2Abs",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 236,
+      "mnemonic": "f64x2.abs"
+    },
+    {
+      "id": "F64x2Neg",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 237,
+      "mnemonic": "f64x2.neg"
+    },
+    {
+      "id": "F64x2Sqrt",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 239,
+      "mnemonic": "f64x2.sqrt"
+    },
+    {
+      "id": "F64x2Add",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 240,
+      "mnemonic": "f64x2.add"
+    },
+    {
+      "id": "F64x2Sub",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 241,
+      "mnemonic": "f64x2.sub"
+    },
+    {
+      "id": "F64x2Mul",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 242,
+      "mnemonic": "f64x2.mul"
+    },
+    {
+      "id": "F64x2Div",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 243,
+      "mnemonic": "f64x2.div"
+    },
+    {
+      "id": "F64x2Min",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 244,
+      "mnemonic": "f64x2.min"
+    },
+    {
+      "id": "F64x2Max",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 245,
+      "mnemonic": "f64x2.max"
+    },
+    {
+      "id": "F64x2PMin",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 246,
+      "mnemonic": "f64x2.pmin"
+    },
+    {
+      "id": "F64x2PMax",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 247,
+      "mnemonic": "f64x2.pmax"
+    },
+    {
+      "id": "I32x4TruncSatF32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 248,
+      "mnemonic": "i32x4.trunc_sat_f32x4_s"
+    },
+    {
+      "id": "I32x4TruncSatF32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 249,
+      "mnemonic": "i32x4.trunc_sat_f32x4_u"
+    },
+    {
+      "id": "F32x4ConvertI32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 250,
+      "mnemonic": "f32x4.convert_i32x4_s"
+    },
+    {
+      "id": "F32x4ConvertI32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 251,
+      "mnemonic": "f32x4.convert_i32x4_u"
+    },
+    {
+      "id": "I32x4TruncSatF64x2SZero",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 252,
+      "mnemonic": "i32x4.trunc_sat_f64x2_s_zero"
+    },
+    {
+      "id": "I32x4TruncSatF64x2UZero",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 253,
+      "mnemonic": "i32x4.trunc_sat_f64x2_u_zero"
+    },
+    {
+      "id": "F64x2ConvertLowI32x4S",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 254,
+      "mnemonic": "f64x2.convert_low_i32x4_s"
+    },
+    {
+      "id": "F64x2ConvertLowI32x4U",
+      "feature": "simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 255,
+      "mnemonic": "f64x2.convert_low_i32x4_u"
+    },
+    {
+      "id": "I8x16RelaxedSwizzle",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 256,
+      "mnemonic": "i8x16.relaxed_swizzle"
+    },
+    {
+      "id": "I32x4RelaxedTruncF32x4S",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 257,
+      "mnemonic": "i32x4.relaxed_trunc_f32x4_s"
+    },
+    {
+      "id": "I32x4RelaxedTruncF32x4U",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 258,
+      "mnemonic": "i32x4.relaxed_trunc_f32x4_u"
+    },
+    {
+      "id": "I32x4RelaxedTruncF64x2SZero",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 259,
+      "mnemonic": "i32x4.relaxed_trunc_f64x2_s_zero"
+    },
+    {
+      "id": "I32x4RelaxedTruncF64x2UZero",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 260,
+      "mnemonic": "i32x4.relaxed_trunc_f64x2_u_zero"
+    },
+    {
+      "id": "F32x4RelaxedMadd",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 261,
+      "mnemonic": "f32x4.relaxed_madd"
+    },
+    {
+      "id": "F32x4RelaxedNmadd",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 262,
+      "mnemonic": "f32x4.relaxed_nmadd"
+    },
+    {
+      "id": "F64x2RelaxedMadd",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 263,
+      "mnemonic": "f64x2.relaxed_madd"
+    },
+    {
+      "id": "F64x2RelaxedNmadd",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 264,
+      "mnemonic": "f64x2.relaxed_nmadd"
+    },
+    {
+      "id": "I8x16RelaxedLaneselect",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 265,
+      "mnemonic": "i8x16.relaxed_laneselect"
+    },
+    {
+      "id": "I16x8RelaxedLaneselect",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 266,
+      "mnemonic": "i16x8.relaxed_laneselect"
+    },
+    {
+      "id": "I32x4RelaxedLaneselect",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 267,
+      "mnemonic": "i32x4.relaxed_laneselect"
+    },
+    {
+      "id": "I64x2RelaxedLaneselect",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 268,
+      "mnemonic": "i64x2.relaxed_laneselect"
+    },
+    {
+      "id": "F32x4RelaxedMin",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 269,
+      "mnemonic": "f32x4.relaxed_min"
+    },
+    {
+      "id": "F32x4RelaxedMax",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 270,
+      "mnemonic": "f32x4.relaxed_max"
+    },
+    {
+      "id": "F64x2RelaxedMin",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 271,
+      "mnemonic": "f64x2.relaxed_min"
+    },
+    {
+      "id": "F64x2RelaxedMax",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 272,
+      "mnemonic": "f64x2.relaxed_max"
+    },
+    {
+      "id": "I16x8RelaxedQ15mulrS",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 273,
+      "mnemonic": "i16x8.relaxed_q15mulr_s"
+    },
+    {
+      "id": "I16x8RelaxedDotI8x16I7x16S",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 274,
+      "mnemonic": "i16x8.relaxed_dot_i8x16_i7x16_s"
+    },
+    {
+      "id": "I32x4RelaxedDotI8x16I7x16AddS",
+      "feature": "relaxed_simd",
+      "fields": [],
+      "prefix": 253,
+      "opcode": 275,
+      "mnemonic": "i32x4.relaxed_dot_i8x16_i7x16_add_s"
+    },
+    {
+      "id": "MemoryAtomicNotify",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 0,
+      "mnemonic": "memory.atomic.notify"
+    },
+    {
+      "id": "MemoryAtomicWait32",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 1,
+      "mnemonic": "memory.atomic.wait32"
+    },
+    {
+      "id": "MemoryAtomicWait64",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 2,
+      "mnemonic": "memory.atomic.wait64"
+    },
+    {
+      "id": "AtomicFence",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "reserved",
+          "kind": "zero"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 3,
+      "mnemonic": "atomic.fence"
+    },
+    {
+      "id": "I32AtomicLoad",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 16,
+      "mnemonic": "i32.atomic.load"
+    },
+    {
+      "id": "I64AtomicLoad",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 17,
+      "mnemonic": "i64.atomic.load"
+    },
+    {
+      "id": "I32AtomicLoad8U",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 18,
+      "mnemonic": "i32.atomic.load8_u"
+    },
+    {
+      "id": "I32AtomicLoad16U",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 19,
+      "mnemonic": "i32.atomic.load16_u"
+    },
+    {
+      "id": "I64AtomicLoad8U",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 20,
+      "mnemonic": "i64.atomic.load8_u"
+    },
+    {
+      "id": "I64AtomicLoad16U",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 21,
+      "mnemonic": "i64.atomic.load16_u"
+    },
+    {
+      "id": "I64AtomicLoad32U",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 22,
+      "mnemonic": "i64.atomic.load32_u"
+    },
+    {
+      "id": "I32AtomicStore",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 23,
+      "mnemonic": "i32.atomic.store"
+    },
+    {
+      "id": "I64AtomicStore",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 24,
+      "mnemonic": "i64.atomic.store"
+    },
+    {
+      "id": "I32AtomicStore8",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 25,
+      "mnemonic": "i32.atomic.store8"
+    },
+    {
+      "id": "I32AtomicStore16",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 26,
+      "mnemonic": "i32.atomic.store16"
+    },
+    {
+      "id": "I64AtomicStore8",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 27,
+      "mnemonic": "i64.atomic.store8"
+    },
+    {
+      "id": "I64AtomicStore16",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 28,
+      "mnemonic": "i64.atomic.store16"
+    },
+    {
+      "id": "I64AtomicStore32",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 29,
+      "mnemonic": "i64.atomic.store32"
+    },
+    {
+      "id": "I32AtomicRmwAdd",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 30,
+      "mnemonic": "i32.atomic.rmw.add"
+    },
+    {
+      "id": "I64AtomicRmwAdd",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 31,
+      "mnemonic": "i64.atomic.rmw.add"
+    },
+    {
+      "id": "I32AtomicRmw8AddU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 32,
+      "mnemonic": "i32.atomic.rmw8.add_u"
+    },
+    {
+      "id": "I32AtomicRmw16AddU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 33,
+      "mnemonic": "i32.atomic.rmw16.add_u"
+    },
+    {
+      "id": "I64AtomicRmw8AddU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 34,
+      "mnemonic": "i64.atomic.rmw8.add_u"
+    },
+    {
+      "id": "I64AtomicRmw16AddU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 35,
+      "mnemonic": "i64.atomic.rmw16.add_u"
+    },
+    {
+      "id": "I64AtomicRmw32AddU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 36,
+      "mnemonic": "i64.atomic.rmw32.add_u"
+    },
+    {
+      "id": "I32AtomicRmwSub",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 37,
+      "mnemonic": "i32.atomic.rmw.sub"
+    },
+    {
+      "id": "I64AtomicRmwSub",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 38,
+      "mnemonic": "i64.atomic.rmw.sub"
+    },
+    {
+      "id": "I32AtomicRmw8SubU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 39,
+      "mnemonic": "i32.atomic.rmw8.sub_u"
+    },
+    {
+      "id": "I32AtomicRmw16SubU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 40,
+      "mnemonic": "i32.atomic.rmw16.sub_u"
+    },
+    {
+      "id": "I64AtomicRmw8SubU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 41,
+      "mnemonic": "i64.atomic.rmw8.sub_u"
+    },
+    {
+      "id": "I64AtomicRmw16SubU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 42,
+      "mnemonic": "i64.atomic.rmw16.sub_u"
+    },
+    {
+      "id": "I64AtomicRmw32SubU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 43,
+      "mnemonic": "i64.atomic.rmw32.sub_u"
+    },
+    {
+      "id": "I32AtomicRmwAnd",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 44,
+      "mnemonic": "i32.atomic.rmw.and"
+    },
+    {
+      "id": "I64AtomicRmwAnd",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 45,
+      "mnemonic": "i64.atomic.rmw.and"
+    },
+    {
+      "id": "I32AtomicRmw8AndU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 46,
+      "mnemonic": "i32.atomic.rmw8.and_u"
+    },
+    {
+      "id": "I32AtomicRmw16AndU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 47,
+      "mnemonic": "i32.atomic.rmw16.and_u"
+    },
+    {
+      "id": "I64AtomicRmw8AndU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 48,
+      "mnemonic": "i64.atomic.rmw8.and_u"
+    },
+    {
+      "id": "I64AtomicRmw16AndU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 49,
+      "mnemonic": "i64.atomic.rmw16.and_u"
+    },
+    {
+      "id": "I64AtomicRmw32AndU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 50,
+      "mnemonic": "i64.atomic.rmw32.and_u"
+    },
+    {
+      "id": "I32AtomicRmwOr",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 51,
+      "mnemonic": "i32.atomic.rmw.or"
+    },
+    {
+      "id": "I64AtomicRmwOr",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 52,
+      "mnemonic": "i64.atomic.rmw.or"
+    },
+    {
+      "id": "I32AtomicRmw8OrU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 53,
+      "mnemonic": "i32.atomic.rmw8.or_u"
+    },
+    {
+      "id": "I32AtomicRmw16OrU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 54,
+      "mnemonic": "i32.atomic.rmw16.or_u"
+    },
+    {
+      "id": "I64AtomicRmw8OrU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 55,
+      "mnemonic": "i64.atomic.rmw8.or_u"
+    },
+    {
+      "id": "I64AtomicRmw16OrU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 56,
+      "mnemonic": "i64.atomic.rmw16.or_u"
+    },
+    {
+      "id": "I64AtomicRmw32OrU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 57,
+      "mnemonic": "i64.atomic.rmw32.or_u"
+    },
+    {
+      "id": "I32AtomicRmwXor",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 58,
+      "mnemonic": "i32.atomic.rmw.xor"
+    },
+    {
+      "id": "I64AtomicRmwXor",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 59,
+      "mnemonic": "i64.atomic.rmw.xor"
+    },
+    {
+      "id": "I32AtomicRmw8XorU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 60,
+      "mnemonic": "i32.atomic.rmw8.xor_u"
+    },
+    {
+      "id": "I32AtomicRmw16XorU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 61,
+      "mnemonic": "i32.atomic.rmw16.xor_u"
+    },
+    {
+      "id": "I64AtomicRmw8XorU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 62,
+      "mnemonic": "i64.atomic.rmw8.xor_u"
+    },
+    {
+      "id": "I64AtomicRmw16XorU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 63,
+      "mnemonic": "i64.atomic.rmw16.xor_u"
+    },
+    {
+      "id": "I64AtomicRmw32XorU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 64,
+      "mnemonic": "i64.atomic.rmw32.xor_u"
+    },
+    {
+      "id": "I32AtomicRmwXchg",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 65,
+      "mnemonic": "i32.atomic.rmw.xchg"
+    },
+    {
+      "id": "I64AtomicRmwXchg",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 66,
+      "mnemonic": "i64.atomic.rmw.xchg"
+    },
+    {
+      "id": "I32AtomicRmw8XchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 67,
+      "mnemonic": "i32.atomic.rmw8.xchg_u"
+    },
+    {
+      "id": "I32AtomicRmw16XchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 68,
+      "mnemonic": "i32.atomic.rmw16.xchg_u"
+    },
+    {
+      "id": "I64AtomicRmw8XchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 69,
+      "mnemonic": "i64.atomic.rmw8.xchg_u"
+    },
+    {
+      "id": "I64AtomicRmw16XchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 70,
+      "mnemonic": "i64.atomic.rmw16.xchg_u"
+    },
+    {
+      "id": "I64AtomicRmw32XchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 71,
+      "mnemonic": "i64.atomic.rmw32.xchg_u"
+    },
+    {
+      "id": "I32AtomicRmwCmpxchg",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 72,
+      "mnemonic": "i32.atomic.rmw.cmpxchg"
+    },
+    {
+      "id": "I64AtomicRmwCmpxchg",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 73,
+      "mnemonic": "i64.atomic.rmw.cmpxchg"
+    },
+    {
+      "id": "I32AtomicRmw8CmpxchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 74,
+      "mnemonic": "i32.atomic.rmw8.cmpxchg_u"
+    },
+    {
+      "id": "I32AtomicRmw16CmpxchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 75,
+      "mnemonic": "i32.atomic.rmw16.cmpxchg_u"
+    },
+    {
+      "id": "I64AtomicRmw8CmpxchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 76,
+      "mnemonic": "i64.atomic.rmw8.cmpxchg_u"
+    },
+    {
+      "id": "I64AtomicRmw16CmpxchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 77,
+      "mnemonic": "i64.atomic.rmw16.cmpxchg_u"
+    },
+    {
+      "id": "I64AtomicRmw32CmpxchgU",
+      "feature": "threads",
+      "fields": [
+        {
+          "name": "memarg",
+          "kind": "memarg"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 78,
+      "mnemonic": "i64.atomic.rmw32.cmpxchg_u"
+    },
+    {
+      "id": "GlobalAtomicGet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 79,
+      "mnemonic": "global.atomic.get"
+    },
+    {
+      "id": "GlobalAtomicSet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 80,
+      "mnemonic": "global.atomic.set"
+    },
+    {
+      "id": "GlobalAtomicRmwAdd",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 81,
+      "mnemonic": "global.atomic.rmw.add"
+    },
+    {
+      "id": "GlobalAtomicRmwSub",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 82,
+      "mnemonic": "global.atomic.rmw.sub"
+    },
+    {
+      "id": "GlobalAtomicRmwAnd",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 83,
+      "mnemonic": "global.atomic.rmw.and"
+    },
+    {
+      "id": "GlobalAtomicRmwOr",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 84,
+      "mnemonic": "global.atomic.rmw.or"
+    },
+    {
+      "id": "GlobalAtomicRmwXor",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 85,
+      "mnemonic": "global.atomic.rmw.xor"
+    },
+    {
+      "id": "GlobalAtomicRmwXchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 86,
+      "mnemonic": "global.atomic.rmw.xchg"
+    },
+    {
+      "id": "GlobalAtomicRmwCmpxchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "global_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 87,
+      "mnemonic": "global.atomic.rmw.cmpxchg"
+    },
+    {
+      "id": "TableAtomicGet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "table_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 88,
+      "mnemonic": "table.atomic.get"
+    },
+    {
+      "id": "TableAtomicSet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "table_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 89,
+      "mnemonic": "table.atomic.set"
+    },
+    {
+      "id": "TableAtomicRmwXchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "table_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 90,
+      "mnemonic": "table.atomic.rmw.xchg"
+    },
+    {
+      "id": "TableAtomicRmwCmpxchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "table_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 91,
+      "mnemonic": "table.atomic.rmw.cmpxchg"
+    },
+    {
+      "id": "StructAtomicGet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 92,
+      "mnemonic": "struct.atomic.get"
+    },
+    {
+      "id": "StructAtomicGetS",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 93,
+      "mnemonic": "struct.atomic.get_s"
+    },
+    {
+      "id": "StructAtomicGetU",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 94,
+      "mnemonic": "struct.atomic.get_u"
+    },
+    {
+      "id": "StructAtomicSet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 95,
+      "mnemonic": "struct.atomic.set"
+    },
+    {
+      "id": "StructAtomicRmwAdd",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 96,
+      "mnemonic": "struct.atomic.rmw.add"
+    },
+    {
+      "id": "StructAtomicRmwSub",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 97,
+      "mnemonic": "struct.atomic.rmw.sub"
+    },
+    {
+      "id": "StructAtomicRmwAnd",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 98,
+      "mnemonic": "struct.atomic.rmw.and"
+    },
+    {
+      "id": "StructAtomicRmwOr",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 99,
+      "mnemonic": "struct.atomic.rmw.or"
+    },
+    {
+      "id": "StructAtomicRmwXor",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 100,
+      "mnemonic": "struct.atomic.rmw.xor"
+    },
+    {
+      "id": "StructAtomicRmwXchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 101,
+      "mnemonic": "struct.atomic.rmw.xchg"
+    },
+    {
+      "id": "StructAtomicRmwCmpxchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "struct_type_index",
+          "kind": "u32"
+        },
+        {
+          "name": "field_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 102,
+      "mnemonic": "struct.atomic.rmw.cmpxchg"
+    },
+    {
+      "id": "ArrayAtomicGet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 103,
+      "mnemonic": "array.atomic.get"
+    },
+    {
+      "id": "ArrayAtomicGetS",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 104,
+      "mnemonic": "array.atomic.get_s"
+    },
+    {
+      "id": "ArrayAtomicGetU",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 105,
+      "mnemonic": "array.atomic.get_u"
+    },
+    {
+      "id": "ArrayAtomicSet",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 106,
+      "mnemonic": "array.atomic.set"
+    },
+    {
+      "id": "ArrayAtomicRmwAdd",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 107,
+      "mnemonic": "array.atomic.rmw.add"
+    },
+    {
+      "id": "ArrayAtomicRmwSub",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 108,
+      "mnemonic": "array.atomic.rmw.sub"
+    },
+    {
+      "id": "ArrayAtomicRmwAnd",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 109,
+      "mnemonic": "array.atomic.rmw.and"
+    },
+    {
+      "id": "ArrayAtomicRmwOr",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 110,
+      "mnemonic": "array.atomic.rmw.or"
+    },
+    {
+      "id": "ArrayAtomicRmwXor",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 111,
+      "mnemonic": "array.atomic.rmw.xor"
+    },
+    {
+      "id": "ArrayAtomicRmwXchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 112,
+      "mnemonic": "array.atomic.rmw.xchg"
+    },
+    {
+      "id": "ArrayAtomicRmwCmpxchg",
+      "feature": "shared_everything_threads",
+      "fields": [
+        {
+          "name": "ordering",
+          "kind": "ordering"
+        },
+        {
+          "name": "array_type_index",
+          "kind": "u32"
+        }
+      ],
+      "prefix": 254,
+      "opcode": 113,
+      "mnemonic": "array.atomic.rmw.cmpxchg"
+    },
+    {
+      "id": "RefI31Shared",
+      "feature": "shared_everything_threads",
+      "fields": [],
+      "prefix": 254,
+      "opcode": 114,
+      "mnemonic": "ref.i31_shared"
+    }
+  ]
+}

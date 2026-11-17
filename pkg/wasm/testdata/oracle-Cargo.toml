@@ -1,0 +1,8 @@
+[package]
+name = "mkasm_wasm_oracle"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+wasmparser = "=0.262.0"
+wasm-encoder = { version = "=0.262.0", features = ["wasmparser"] }
+wat = "=1.262.0"
