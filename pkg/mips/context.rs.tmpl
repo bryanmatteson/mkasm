@@ -1,0 +1,73 @@
+//! Explicit execution-PC context for MIPS16 PC-relative data instructions.
+use super::{AddressReference, Decoded, Described, Encoding, Error, Operand, Position};
+
+/// Physical byte addresses, without the MIPS ISA marker bit. For a data
+/// instruction in a JAL/JALX/JR/JALR delay slot, pc_base is that transfer's
+/// instruction address. Otherwise pc_base equals instruction_address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExecutionContext {
+    pub instruction_address: u64,
+    pub pc_base: u64,
+}
+
+fn data_pc(e: &Encoding, o: &Operand) -> bool {
+    e.features.contains(&"InMips16Mode") && o.relative && o.pc_align_bits > 0 && o.pc_region_bits == 0
+}
+fn address(e: &Encoding, context: ExecutionContext) -> u64 {
+    if e.operands.iter().any(|o| data_pc(e, o)) { context.pc_base } else { context.instruction_address }
+}
+fn bind_position(position: &mut Position, context: ExecutionContext) {
+    if let Position::Relative { pre_align_bias, .. } = position {
+        *pre_align_bias += context.pc_base.wrapping_sub(context.instruction_address) as i64 as i128;
+    }
+}
+
+impl Decoded {
+    pub fn format_with_context(&self, context: ExecutionContext) -> String {
+        self.format(address(self.encoding(), context))
+    }
+    pub fn describe_with_context(&self, context: ExecutionContext) -> Described {
+        let mut out = self.describe(address(self.encoding(), context));
+        for span in &mut out.operands {
+            if data_pc(self.encoding(), &self.encoding().operands[span.operand_index]) {
+                bind_position(&mut span.position, context);
+            }
+        }
+        out
+    }
+    pub fn address_references_with_context(&self, context: ExecutionContext) -> Vec<AddressReference> {
+        let mut out = self.address_references(address(self.encoding(), context));
+        for reference in &mut out {
+            if data_pc(self.encoding(), &self.encoding().operands[reference.operand_index]) {
+                bind_position(&mut reference.position, context);
+            }
+        }
+        out
+    }
+    pub fn rewrite_reference_with_context(
+        &self, context: ExecutionContext, operand_index: usize, target: u64, output: &mut [u8],
+    ) -> Result<usize, Error> {
+        self.rewrite_reference(address(self.encoding(), context), operand_index, target, output)
+    }
+}
+
+pub fn assemble_with_context(
+    text: &str, context: ExecutionContext, active: Option<&[&str]>,
+) -> Result<Vec<Vec<u8>>, Error> {
+    let prepared = super::syntax_input(text);
+    let mut out = Vec::new();
+    let mut bytes = [0; super::MAX_INSTRUCTION_BYTES];
+    for &index in super::mnemonic_candidates(text, false).iter().chain(super::DYNAMIC_MNEMONICS) {
+        let index = index as usize;
+        let e = &super::ENCODINGS[index];
+        if !super::features(e, active) { continue; }
+        if let Some(values) = super::parse_prepared_syntax(index, &prepared, address(e, context)) {
+            if let Ok(n) = super::encode_into(index, &values[..e.operands.len()], &mut bytes) {
+                if !out.iter().any(|b: &Vec<u8>|b.as_slice() == &bytes[..n]) { out.push(bytes[..n].to_vec()); }
+            }
+        }
+    }
+    if out.is_empty() { return Err(Error::Syntax); }
+    out.sort_by_key(Vec::len);
+    Ok(out)
+}
