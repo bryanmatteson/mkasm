@@ -31,20 +31,21 @@ type CatalogClass struct {
 
 // CatalogEntry is one encoding ready for encode/decode/registry emission.
 type CatalogEntry struct {
-	EncodingID  string
-	Mnemonic    string
-	AsmMnemonic string
-	Class       string
-	Pattern     string
-	AliasOf     string
-	Asm         string
-	IFormFile   string
-	Mask        uint32
-	Value       uint32
-	FixedWord   uint32
-	HasFixed    bool
-	Fields      []CatalogField
-	BitDiffs    *ir.BitDiffNode
+	EncodingID   string
+	Mnemonic     string
+	AsmMnemonic  string
+	Class        string
+	Pattern      string
+	AliasOf      string
+	Asm          string
+	IFormFile    string
+	Mask         uint32
+	Value        uint32
+	FixedWord    uint32
+	HasFixed     bool
+	Fields       []CatalogField
+	BitDiffs     *ir.BitDiffNode
+	Requirements ir.Requirements
 }
 
 // CatalogField is a named bitfield layout.
@@ -98,20 +99,21 @@ func BuildCatalog(instructions []*ir.InstructionIR) *Catalog {
 			asm = instr.Asm.Raw
 		}
 		e := CatalogEntry{
-			EncodingID:  instr.EncodingID,
-			Mnemonic:    instr.Mnemonic,
-			AsmMnemonic: instr.AsmMnemonic,
-			Class:       instr.IClass,
-			Pattern:     pat,
-			AliasOf:     instr.AliasOf,
-			Asm:         asm,
-			IFormFile:   instr.IFormFile,
-			Mask:        mask,
-			Value:       value,
-			FixedWord:   fw,
-			HasFixed:    hasFW,
-			Fields:      fields,
-			BitDiffs:    instr.BitDiffsTree,
+			EncodingID:   instr.EncodingID,
+			Mnemonic:     instr.Mnemonic,
+			AsmMnemonic:  instr.AsmMnemonic,
+			Class:        instr.IClass,
+			Pattern:      pat,
+			AliasOf:      instr.AliasOf,
+			Asm:          asm,
+			IFormFile:    instr.IFormFile,
+			Mask:         mask,
+			Value:        value,
+			FixedWord:    fw,
+			HasFixed:     hasFW,
+			Fields:       fields,
+			BitDiffs:     instr.BitDiffsTree,
+			Requirements: instructionRequirements(instr),
 		}
 		entries = append(entries, e)
 		if _, ok := byClass[instr.IClass]; !ok {
@@ -120,6 +122,14 @@ func BuildCatalog(instructions []*ir.InstructionIR) *Catalog {
 		byClass[instr.IClass] = append(byClass[instr.IClass], e)
 	}
 	sort.Strings(classOrder)
+
+	inheritRequirements(entries)
+	for class := range byClass {
+		byClass[class] = nil
+	}
+	for _, entry := range entries {
+		byClass[entry.Class] = append(byClass[entry.Class], entry)
+	}
 
 	classes := make([]CatalogClass, 0, len(classOrder))
 	for _, name := range classOrder {

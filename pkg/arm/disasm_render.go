@@ -87,6 +87,9 @@ func (f *DisasmForm) matchesConstraints(word uint32) bool {
 			return false
 		}
 	}
+	if !f.anyOfMatches(word) {
+		return false
+	}
 	if guard := f.MoveWideZeroGuard; guard != nil &&
 		fieldValue(word, guard.Imm16.Start, guard.Imm16.End) == 0 &&
 		fieldValue(word, guard.HW.Start, guard.HW.End) != 0 {
@@ -158,9 +161,26 @@ func bfxPreferred(sf, uns, imms, immr uint32) bool {
 // SatisfyConstraints returns the nearest word satisfying this form's decoded
 // alias predicate. It is useful when constructing a legal representative of an
 // encoding; Render independently checks the same predicate.
+// anyOfMatches reports whether word satisfies the disjunctive alias
+// predicate, if the form has one.
+func (f *DisasmForm) anyOfMatches(word uint32) bool {
+	if len(f.AnyOf) == 0 {
+		return true
+	}
+	for _, alternative := range f.AnyOf {
+		if word&alternative.Mask == alternative.Value {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *DisasmForm) SatisfyConstraints(word uint32) (uint32, bool) {
 	word = canonicalizeDocumentedIgnoredBits(f, word, 0, 0)
 	word = word&^f.ConstraintMask | f.ConstraintValue
+	if !f.anyOfMatches(word) {
+		word = word&^f.AnyOf[0].Mask | f.AnyOf[0].Value
+	}
 	for _, eq := range f.EqualFields {
 		width := eq.LeftEnd - eq.LeftStart + 1
 		if width != eq.RightEnd-eq.RightStart+1 || width <= 0 || width > 31 {

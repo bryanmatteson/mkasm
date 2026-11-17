@@ -98,6 +98,9 @@ type DisasmForm struct {
 	SampleUnequalFields []DisasmFieldInequality
 	OneHotMasks         []uint32
 	Forbidden           []DisasmForbidden
+	// AnyOf is a disjunctive alias predicate: the word must match at least
+	// one (mask, value) pair. MOV (to/from SP) applies when Rd or Rn is SP.
+	AnyOf []DisasmForbidden
 	// SVEMoveMaskField carries the imm13 selected by ARM's
 	// SVEMoveMaskPreferred alias predicate.
 	SVEMoveMaskField  *BitPart
@@ -673,7 +676,25 @@ func addDisasmAliasConstraints(form *DisasmForm, cond string, byName map[string]
 			Field: field.Name, Start: field.Start, End: field.End, Width: 13,
 		}
 	}
-	for _, m := range aliasBitsEqRE.FindAllStringSubmatch(cond, -1) {
+	conjunction := cond
+	if strings.Contains(cond, "||") && !strings.Contains(cond, "&&") {
+		// `A == 'x' || B == 'y'`: one disjunct per field test, none implied.
+		for _, m := range aliasBitsEqRE.FindAllStringSubmatch(cond, -1) {
+			bf, ok := lookupField(m[1], byName)
+			if !ok {
+				return fmt.Errorf("alias condition field %q absent from encoding", m[1])
+			}
+			v, err := strconv.ParseUint(m[2], 2, 32)
+			if err != nil || len(m[2]) != bf.End-bf.Start+1 {
+				return fmt.Errorf("alias condition %s does not fit field %s", m[2], bf.Name)
+			}
+			form.AnyOf = append(form.AnyOf, DisasmForbidden{
+				Mask: fieldRangeMask(bf.Start, bf.End), Value: uint32(v) << uint(bf.Start),
+			})
+		}
+		conjunction = aliasBitsEqRE.ReplaceAllString(cond, "")
+	}
+	for _, m := range aliasBitsEqRE.FindAllStringSubmatch(conjunction, -1) {
 		bf, ok := lookupField(m[1], byName)
 		if !ok {
 			return fmt.Errorf("alias condition field %q absent from encoding", m[1])
@@ -815,7 +836,7 @@ func disasmOperandWithContext(
 		Symbol: c.Symbol, Class: c.Class,
 		Scale: c.Scale, Bias: c.Bias, Negate: c.Negate,
 		Default: c.Default, HasDefault: c.HasDefault,
-		Signed: c.Lo < 0, Xor: uint64(boolXor(c.InvertLSB)),
+		Signed: numericFieldSigned(c.Lo, c.Bias, c.Scale), Xor: uint64(boolXor(c.InvertLSB)),
 		RegRanges: append([]RegRange(nil), c.RegRanges...),
 		Lo:        c.Lo, Hi: c.Hi, HasRange: c.HasRange,
 		RegLo: c.RegLo, RegHi: c.RegHi, HasRegRange: c.HasRegRange,

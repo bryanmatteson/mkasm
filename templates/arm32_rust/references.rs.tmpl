@@ -1,0 +1,597 @@
+//! A32/Thumb encoded references. Byte positions respect the instruction state
+//! and endian, including the architectural high-halfword-first order of T32.
+use super::*;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AddressReferenceKind {
+    Branch,
+    Data,
+    Literal,
+    Absolute,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReferenceTransform {
+    Linear,
+    ThumbBranch25,
+    RotatedImmediate,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EncodedBits {
+    pub instruction_bit: u8,
+    pub value_bit: u8,
+    pub width: u8,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AddressReference {
+    pub kind: AddressReferenceKind,
+    pub bits: Vec<EncodedBits>,
+    pub signed: bool,
+    pub scale: u32,
+    pub pc_bias: u32,
+    pub pc_align_bits: u8,
+    pub wrap_bits: u8,
+    pub min: i64,
+    pub max: i64,
+    pub transform: ReferenceTransform,
+    pub target: u32,
+}
+impl AddressReference {
+    /// Physical byte-order bit positions. T32 stores the high architectural
+    /// halfword first; endianness applies separately inside each halfword.
+    /// ThumbBranch25's J slices retain the explicit dependent transform.
+    pub fn encoded_bits(&self, length: usize, mode: Mode, endian: Endian) -> Vec<EncodedBits> {
+        let mut out = Vec::new();
+        for b in &self.bits {
+            for k in 0..b.width {
+                let bit = b.instruction_bit + k;
+                let physical = if mode == Mode::Thumb && length == 4 {
+                    let half = if bit >= 16 { 0 } else { 2 };
+                    let within = bit % 16;
+                    let byte = if endian == Endian::Little {
+                        within / 8
+                    } else {
+                        1 - within / 8
+                    };
+                    (half + byte) * 8 + within % 8
+                } else {
+                    let byte = if endian == Endian::Little {
+                        bit / 8
+                    } else {
+                        length as u8 - 1 - bit / 8
+                    };
+                    byte * 8 + bit % 8
+                };
+                out.push(EncodedBits {
+                    instruction_bit: physical,
+                    value_bit: b.value_bit + k,
+                    width: 1,
+                });
+            }
+        }
+        out
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RelocateError {
+    Unknown,
+    Unsupported,
+    OutOfRange,
+    Truncated,
+    BufferTooSmall,
+    AddressOverflow,
+    MidInstructionTarget,
+    PositionDiscovery,
+    Unaligned,
+}
+fn b(instruction_bit: u8, value_bit: u8, width: u8) -> EncodedBits {
+    EncodedBits {
+        instruction_bit,
+        value_bit,
+        width,
+    }
+}
+impl Decoded {
+    pub fn address_references(&self, address: u64) -> Result<Vec<AddressReference>, RelocateError> {
+        let id = self.encoding_id();
+        let bias = if self.mode == Mode::Arm { 8 } else { 4 };
+        if let Some(target) = self.branch_target(address) {
+            let (bits, width, signed, scale, transform, align) = if self.mode == Mode::Arm {
+                if self.mnemonic().starts_with("BLX") {
+                    (
+                        vec![b(0, 2, 24), b(24, 1, 1)],
+                        26,
+                        true,
+                        2,
+                        ReferenceTransform::Linear,
+                        0,
+                    )
+                } else {
+                    (
+                        vec![b(0, 2, 24)],
+                        26,
+                        true,
+                        4,
+                        ReferenceTransform::Linear,
+                        0,
+                    )
+                }
+            } else if id.starts_with("CB") {
+                (
+                    vec![b(3, 1, 5), b(9, 6, 1)],
+                    7,
+                    false,
+                    2,
+                    ReferenceTransform::Linear,
+                    0,
+                )
+            } else if id.starts_with("B_T1") {
+                (vec![b(0, 1, 8)], 9, true, 2, ReferenceTransform::Linear, 0)
+            } else if id.starts_with("B_T2") {
+                (
+                    vec![b(0, 1, 11)],
+                    12,
+                    true,
+                    2,
+                    ReferenceTransform::Linear,
+                    0,
+                )
+            } else if id.starts_with("B_T3") {
+                (
+                    vec![
+                        b(26, 20, 1),
+                        b(11, 19, 1),
+                        b(13, 18, 1),
+                        b(16, 12, 6),
+                        b(0, 1, 11),
+                    ],
+                    21,
+                    true,
+                    2,
+                    ReferenceTransform::Linear,
+                    0,
+                )
+            } else if self.mnemonic().starts_with("BLX") {
+                (
+                    vec![
+                        b(26, 24, 1),
+                        b(13, 23, 1),
+                        b(11, 22, 1),
+                        b(16, 12, 10),
+                        b(1, 2, 10),
+                    ],
+                    25,
+                    true,
+                    4,
+                    ReferenceTransform::ThumbBranch25,
+                    2,
+                )
+            } else {
+                (
+                    vec![
+                        b(26, 24, 1),
+                        b(13, 23, 1),
+                        b(11, 22, 1),
+                        b(16, 12, 10),
+                        b(0, 1, 11),
+                    ],
+                    25,
+                    true,
+                    2,
+                    ReferenceTransform::ThumbBranch25,
+                    0,
+                )
+            };
+            let min = if signed { -(1i64 << (width - 1)) } else { 0 };
+            let max = if signed {
+                (1i64 << (width - 1)) - 1
+            } else {
+                (1i64 << width) - 1
+            };
+            return Ok(vec![AddressReference {
+                kind: AddressReferenceKind::Branch,
+                bits,
+                signed,
+                scale,
+                pc_bias: bias,
+                pc_align_bits: align,
+                wrap_bits: 32,
+                min,
+                max,
+                transform,
+                target,
+            }]);
+        }
+        let mut refs = Vec::new();
+        for p in self.form().parts.iter().filter(|p| p.symbol == "<label>") {
+            let adr = self.mnemonic().starts_with("ADR");
+            let thumb16 = self.mode == Mode::Thumb && self.length == 2;
+            let transform = if adr && self.mode == Mode::Arm {
+                ReferenceTransform::RotatedImmediate
+            } else {
+                ReferenceTransform::Linear
+            };
+            let scale = if thumb16 { 4 } else { p.scale.max(1) };
+            let raw = if p.bits.is_empty() {
+                self.field("imm12")
+                    .unwrap_or(self.f("i") << 11 | self.f("imm3") << 8 | self.f("imm8"))
+            } else {
+                extract(self.raw(), p.bits)
+            };
+            let value = if transform == ReferenceTransform::RotatedImmediate {
+                (raw & 255).rotate_right(((raw >> 8) & 15) * 2)
+            } else {
+                raw * scale
+            };
+            let subtract = if adr {
+                matches!(id, "ADR_A2" | "ADR_T2")
+            } else {
+                self.field("U") == Some(0)
+            };
+            let pc = (address as u32).wrapping_add(bias) & !3;
+            let target = if subtract {
+                pc.wrapping_sub(value)
+            } else {
+                pc.wrapping_add(value)
+            };
+            let bits = if !p.bits.is_empty() {
+                let mut bit = p.bits.iter().map(|v| v.width).sum::<u8>();
+                p.bits
+                    .iter()
+                    .map(|v| {
+                        bit -= v.width;
+                        b(v.lo, bit, v.width)
+                    })
+                    .collect()
+            } else if self.mode == Mode::Arm {
+                vec![b(0, 0, 12)]
+            } else if thumb16 {
+                vec![b(0, 0, 8)]
+            } else {
+                vec![b(26, 11, 1), b(12, 8, 3), b(0, 0, 8)]
+            };
+            let width = bits
+                .iter()
+                .map(|b| b.value_bit + b.width)
+                .max()
+                .unwrap_or(0);
+            refs.push(AddressReference {
+                kind: if adr {
+                    AddressReferenceKind::Data
+                } else {
+                    AddressReferenceKind::Literal
+                },
+                bits,
+                signed: false,
+                scale,
+                pc_bias: bias,
+                pc_align_bits: 2,
+                wrap_bits: 32,
+                min: 0,
+                max: if transform == ReferenceTransform::RotatedImmediate {
+                    u32::MAX as i64
+                } else {
+                    ((1i64 << width) - 1) * scale as i64
+                },
+                transform,
+                target,
+            });
+        }
+        // Explicit PC reads outside the modeled label forms can discover the
+        // original address. A relocation must reject them instead of copying.
+        if refs.is_empty()
+            && self.form().parts.iter().any(|p| {
+                matches!(p.symbol, "<Rn>" | "<Rm>" | "<Rs>")
+                    && self.scalar_register(p) == Some(Register::Gpr(15))
+            })
+        {
+            return Err(RelocateError::Unsupported);
+        }
+        if refs.is_empty()
+            && self
+                .details(address)
+                .map_err(|_| RelocateError::Unsupported)?
+                .reads
+                .contains(&Register::Gpr(15))
+        {
+            return Err(RelocateError::Unsupported);
+        }
+        Ok(refs)
+    }
+}
+fn serialize(word: u32, length: usize, mode: Mode, endian: Endian) -> Vec<u8> {
+    let half = |v: u16| match endian {
+        Endian::Little => v.to_le_bytes(),
+        Endian::Big => v.to_be_bytes(),
+    };
+    if length == 2 {
+        half(word as u16).to_vec()
+    } else if mode == Mode::Thumb {
+        [half((word >> 16) as u16), half(word as u16)].concat()
+    } else {
+        match endian {
+            Endian::Little => word.to_le_bytes(),
+            Endian::Big => word.to_be_bytes(),
+        }
+        .to_vec()
+    }
+}
+/// The reference index selects one of Decoded::address_references. Signed ranges
+/// are byte displacements; split Thumb J bits are explicitly transformed.
+pub fn rewrite_reference(
+    d: &Decoded,
+    address: u64,
+    reference_index: usize,
+    target: u32,
+    endian: Endian,
+) -> Result<Vec<u8>, RelocateError> {
+    let refs = d.address_references(address)?;
+    let r = refs
+        .get(reference_index)
+        .ok_or(RelocateError::Unsupported)?;
+    let pc = (address as u32).wrapping_add(r.pc_bias) & !((1u32 << r.pc_align_bits) - 1);
+    let mut delta = target.wrapping_sub(pc) as i32 as i64;
+    let mut word = d.raw();
+    if r.kind != AddressReferenceKind::Branch {
+        let adr = d.mnemonic().starts_with("ADR");
+        let subtract = if adr {
+            matches!(d.encoding_id(), "ADR_A2" | "ADR_T2")
+        } else {
+            d.field("U") == Some(0)
+        };
+        delta = if subtract {
+            pc.wrapping_sub(target) as i64
+        } else {
+            target.wrapping_sub(pc) as i64
+        };
+        if delta < r.min || delta > r.max {
+            return Err(RelocateError::OutOfRange);
+        }
+        if r.transform == ReferenceTransform::RotatedImmediate {
+            let value = delta as u32;
+            let raw = (0..16)
+                .find_map(|rotate| {
+                    let v = value.rotate_left(rotate * 2);
+                    (v <= 255).then_some((rotate << 8) | v)
+                })
+                .ok_or(RelocateError::OutOfRange)?;
+            delta = raw as i64;
+        } else {
+            if delta % r.scale as i64 != 0 {
+                return Err(RelocateError::OutOfRange);
+            }
+            delta /= r.scale as i64;
+        }
+    } else if delta < r.min || delta > r.max || delta % r.scale as i64 != 0 {
+        return Err(RelocateError::OutOfRange);
+    }
+    let raw = delta as u32;
+    for bits in &r.bits {
+        let mask = ((1u32 << bits.width) - 1) << bits.instruction_bit;
+        let mut value = (raw >> bits.value_bit) & ((1u32 << bits.width) - 1);
+        if r.transform == ReferenceTransform::ThumbBranch25 && matches!(bits.value_bit, 22 | 23) {
+            value = !(value ^ ((raw >> 24) & 1)) & 1;
+        }
+        word = (word & !mask) | (value << bits.instruction_bit);
+    }
+    let out = serialize(word, d.length, d.mode, endian);
+    let next = decode(&out, d.mode, endian).map_err(|_| RelocateError::OutOfRange)?;
+    if next.encoding_id() != d.encoding_id()
+        || next
+            .address_references(address)?
+            .get(reference_index)
+            .is_none_or(|r| r.target != target)
+    {
+        return Err(RelocateError::OutOfRange);
+    }
+    Ok(out)
+}
+pub fn relocate(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    mode: Mode,
+    endian: Endian,
+    output: &mut [u8],
+) -> Result<usize, RelocateError> {
+    let d = decode(original, mode, endian).map_err(|e| match e {
+        DecodeError::Truncated => RelocateError::Truncated,
+        _ => RelocateError::Unknown,
+    })?;
+    if original.len() != d.length {
+        return Err(RelocateError::Unsupported);
+    }
+    let align = if mode == Mode::Arm { 4 } else { 2 };
+    if old_ip % align != 0 || new_ip % align != 0 {
+        return Err(RelocateError::Unaligned);
+    }
+    checked_end(old_ip, d.length)?;
+    checked_end(new_ip, d.length)?;
+    let refs = d.address_references(old_ip)?;
+    if d.mnemonic().starts_with("BL")
+        && refs.iter().any(|r| {
+            r.kind == AddressReferenceKind::Branch
+                && old_ip.checked_add(d.length as u64) == Some(r.target as u64)
+        })
+    {
+        return Err(RelocateError::PositionDiscovery);
+    }
+    let mut bytes = original.to_vec();
+    for (i, r) in refs.iter().enumerate() {
+        let current = decode(&bytes, mode, endian).map_err(|_| RelocateError::Unknown)?;
+        bytes = rewrite_reference(&current, new_ip, i, r.target, endian)?;
+    }
+    if output.len() < bytes.len() {
+        return Err(RelocateError::BufferTooSmall);
+    }
+    output[..bytes.len()].copy_from_slice(&bytes);
+    Ok(bytes.len())
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelocatedBlock {
+    pub bytes: Vec<u8>,
+    pub offsets: Vec<(usize, usize)>,
+    pub original_len: usize,
+}
+fn checked_end(ip: u64, offset: usize) -> Result<u64, RelocateError> {
+    let end = ip
+        .checked_add(u64::try_from(offset).map_err(|_| RelocateError::AddressOverflow)?)
+        .ok_or(RelocateError::AddressOverflow)?;
+    if end > u32::MAX as u64 {
+        return Err(RelocateError::AddressOverflow);
+    }
+    Ok(end)
+}
+fn wide_thumb(d: &Decoded, target: u32, ip: u64, endian: Endian) -> Result<Vec<u8>, RelocateError> {
+    let conditional = d.encoding_id().starts_with("B_T1");
+    let raw = if conditional {
+        0xf000_8000 | ((d.condition() as u32) << 22)
+    } else if d.encoding_id().starts_with("B_T2") {
+        0xf000_9000
+    } else {
+        return Err(RelocateError::Unsupported);
+    };
+    let bytes = serialize(raw, 4, Mode::Thumb, endian);
+    let d = decode(&bytes, Mode::Thumb, endian).map_err(|_| RelocateError::Unsupported)?;
+    rewrite_reference(&d, ip, 0, target, endian)
+}
+/// A32/Thumb block relocation. T16 B/B.cond relax to equivalent T32 forms.
+/// IT blocks and unmodeled PC reads are rejected: widening in an IT block can
+/// change the architectural predicate count and requires a separate lowering.
+pub fn relocate_block(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    mode: Mode,
+    endian: Endian,
+) -> Result<RelocatedBlock, RelocateError> {
+    let align = if mode == Mode::Arm { 4 } else { 2 };
+    if old_ip % align != 0 || new_ip % align != 0 {
+        return Err(RelocateError::Unaligned);
+    }
+    let old_end = checked_end(old_ip, original.len())?;
+    let mut items = Vec::new();
+    let mut offset = 0usize;
+    while offset < original.len() {
+        let d = decode(&original[offset..], mode, endian).map_err(|e| match e {
+            DecodeError::Truncated => RelocateError::Truncated,
+            _ => RelocateError::Unknown,
+        })?;
+        if d.encoding_id().starts_with("IT_") {
+            return Err(RelocateError::Unsupported);
+        }
+        let refs = d.address_references(checked_end(old_ip, offset)?)?;
+        if d.mnemonic().starts_with("BL")
+            && refs
+                .iter()
+                .any(|r| old_ip.checked_add((offset + d.length) as u64) == Some(r.target as u64))
+        {
+            return Err(RelocateError::PositionDiscovery);
+        }
+        let len = d.length;
+        items.push((offset, d, refs));
+        offset = offset
+            .checked_add(len)
+            .ok_or(RelocateError::AddressOverflow)?;
+    }
+    let boundaries: Vec<usize> = items.iter().map(|i| i.0).collect();
+    let mut wide = vec![false; items.len()];
+    loop {
+        let mut offsets = vec![0usize];
+        for (i, (_, d, _)) in items.iter().enumerate() {
+            offsets.push(
+                offsets
+                    .last()
+                    .unwrap()
+                    .checked_add(if wide[i] { 4 } else { d.length })
+                    .ok_or(RelocateError::AddressOverflow)?,
+            );
+        }
+        checked_end(new_ip, *offsets.last().unwrap())?;
+        let target_for = |r: &AddressReference, d: &Decoded| -> Result<u32, RelocateError> {
+            let target = r.target as u64;
+            if r.kind == AddressReferenceKind::Branch && target >= old_ip && target < old_end {
+                if d.mnemonic().starts_with("BLX") {
+                    return Err(RelocateError::Unsupported);
+                }
+                let index = boundaries
+                    .binary_search(&((target - old_ip) as usize))
+                    .map_err(|_| RelocateError::MidInstructionTarget)?;
+                Ok(checked_end(new_ip, offsets[index])? as u32)
+            } else {
+                Ok(r.target)
+            }
+        };
+        let mut changed = false;
+        for (i, (_, d, refs)) in items.iter().enumerate() {
+            if wide[i] {
+                continue;
+            }
+            for (j, r) in refs.iter().enumerate() {
+                if let Err(error) = rewrite_reference(
+                    d,
+                    checked_end(new_ip, offsets[i])?,
+                    j,
+                    target_for(r, d)?,
+                    endian,
+                ) {
+                    if error == RelocateError::OutOfRange
+                        && mode == Mode::Thumb
+                        && d.length == 2
+                        && (d.encoding_id().starts_with("B_T1")
+                            || d.encoding_id().starts_with("B_T2"))
+                    {
+                        wide[i] = true;
+                        changed = true;
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        if changed {
+            continue;
+        }
+        let mut bytes = Vec::with_capacity(*offsets.last().unwrap());
+        for (i, (old, d, refs)) in items.iter().enumerate() {
+            let ip = checked_end(new_ip, offsets[i])?;
+            let mut out = original[*old..*old + d.length].to_vec();
+            if wide[i] {
+                out = wide_thumb(
+                    d,
+                    target_for(refs.first().ok_or(RelocateError::Unsupported)?, d)?,
+                    ip,
+                    endian,
+                )?;
+            } else {
+                for (j, r) in refs.iter().enumerate() {
+                    let next = decode(&out, mode, endian).map_err(|_| RelocateError::Unknown)?;
+                    out = rewrite_reference(&next, ip, j, target_for(r, d)?, endian)?;
+                }
+            }
+            bytes.extend_from_slice(&out);
+        }
+        return Ok(RelocatedBlock {
+            bytes,
+            offsets: items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| (item.0, offsets[i]))
+                .collect(),
+            original_len: original.len(),
+        });
+    }
+}
+pub fn relocate_block_into(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    mode: Mode,
+    endian: Endian,
+    output: &mut [u8],
+) -> Result<usize, RelocateError> {
+    let block = relocate_block(original, old_ip, new_ip, mode, endian)?;
+    if output.len() < block.bytes.len() {
+        return Err(RelocateError::BufferTooSmall);
+    }
+    output[..block.bytes.len()].copy_from_slice(&block.bytes);
+    Ok(block.bytes.len())
+}

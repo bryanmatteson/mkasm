@@ -2,10 +2,69 @@ package arm
 
 import (
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/bryanmatteson/mkasm/pkg/decoder"
 	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
+
+func TestBitDiffPinsPreserveBooleanAlternatives(t *testing.T) {
+	for _, expr := range []string{
+		"a == 1 || b == 1",
+		"!(a != 1 && b != 1)",
+		"!(!(a == 1 || b == 1))",
+		"a == 1 && (b == 1 || c == 1)",
+		"!(!(a == 1 && b == 1))",
+	} {
+		t.Run(expr, func(t *testing.T) {
+			tree, err := ParseBitDiffs(expr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			one := uint64(1)
+			instr := &ir.InstructionIR{
+				EncodingID: "boolean",
+				BitPattern: "1" + strings.Repeat("x", 31),
+				Encoding: ir.EncodingMask{Width: 32, Fields: []ir.BitField{
+					{Name: "opcode", Start: 31, End: 31, Fixed: &one},
+					{Name: "a", Start: 0, End: 0},
+					{Name: "b", Start: 1, End: 1},
+					{Name: "c", Start: 2, End: 2},
+				}},
+				BitDiffsTree: tree,
+				Operands:     []ir.OperandIR{{Name: "a"}, {Name: "b"}, {Name: "c"}},
+			}
+			if err := ir.ResolveBitDiffFields(tree, instr.Encoding); err != nil {
+				t.Fatal(err)
+			}
+			ir.ApplyBitDiffPins(instr, tree)
+			decodeTree := (&decoder.DecoderTreeBuilder{}).BuildTree([]*ir.InstructionIR{instr}, nil)
+			for bits := uint32(0); bits < 8; bits++ {
+				word := uint32(0x80000000) | bits
+				want := ir.EvalBitDiffs(tree, word)
+				if got := ir.MatchWord(instr, word); got != want {
+					t.Errorf("word=%08x match=%t, want %t; pinned pattern=%s", word, got, want, instr.BitPattern)
+				}
+				result, err := decoder.Match(decodeTree, word)
+				if (err == nil) != want || want && result.Instruction != instr {
+					t.Errorf("word=%08x decoder result=%+v err=%v, want match=%t", word, result, err, want)
+				}
+			}
+			for _, field := range instr.Encoding.Fields {
+				if field.Fixed == nil || field.Name == "opcode" {
+					continue
+				}
+				for bits := uint32(0); bits < 8; bits++ {
+					word := uint32(0x80000000) | bits
+					if ir.EvalBitDiffs(tree, word) && uint64(word>>uint(field.Start)&1) != *field.Fixed {
+						t.Errorf("field %s pinned despite valid alternative %08x", field.Name, word)
+					}
+				}
+			}
+		})
+	}
+}
 
 func TestParseBitDiffs_basic(t *testing.T) {
 	tree, err := ParseBitDiffs("cc == 110")

@@ -1,0 +1,27 @@
+//! A32 effects use encoding classes, preserving uncertainty for Thumb IT state.
+use super::{Decoded,Mode};
+{{.Types}}
+fn reg(out:&mut EffectSummary,n:u32,read:bool,write:bool,conditional:bool,address:bool) {
+    out.registers.push(RegisterEffect{register:RegisterSlice{bank:"gpr",number:Some(n as u16),name:"",offset:0,width:Some(32)},read,write,conditional,implicit:false,address,write_behavior:if write{WriteBehavior::Replace}else{WriteBehavior::Unknown}});
+}
+impl Decoded {pub fn effects(&self)->EffectSummary {effects(self)}}
+pub fn effects(d:&Decoded)->EffectSummary {
+    let mut out=EffectSummary::default();if d.mode!=Mode::Arm{return out;}
+    let w=d.raw();let cond=w>>28;if cond==15{return out;}let conditional=cond!=14;
+    for name in ["N","Z","C","V"] {
+        let read=match cond>>1 {0=>name=="Z",1=>name=="C",2=>name=="N",3=>name=="V",4=>name=="C"||name=="Z",5=>name=="N"||name=="V",6=>name=="N"||name=="V"||name=="Z",_=>false};
+        out.flags.push(FlagEffect{name,read,action:FlagAction::Unknown,conditional});
+    }
+    // A32 single-data-transfer immediate offsets, excluding register shifts
+    // and unpredictable PC/writeback combinations.
+    if w&0x0e000000==0x04000000 {
+        let rn=(w>>16)&15;let rt=(w>>12)&15;let load=w&(1<<20)!=0;let wb=w&(1<<24)==0||w&(1<<21)!=0;
+        reg(&mut out,rn,true,wb,conditional,true);reg(&mut out,rt,!load,load,conditional,false);
+        out.memory.push(MemoryEffect{operand:None,read:load,write:!load,conditional,implicit:false,width_bits:Some(if w&(1<<22)!=0{8}else{32}),ordering:MemoryOrdering::Unknown,atomicity:Atomicity::Unknown,writeback:if !wb{Writeback::None}else if w&(1<<24)==0{Writeback::After}else{Writeback::Before}});
+        // Loads into PC can change instruction state and control flow.
+        out.registers_knowledge=EffectKnowledge::Partial;out.memory_knowledge=EffectKnowledge::Complete;out.knowledge=EffectKnowledge::Partial;
+        if wb&&rn==rt{for r in &mut out.registers{r.conditional=true;}for m in &mut out.memory{m.conditional=true;}out.memory_knowledge=EffectKnowledge::Partial;}
+        for f in &mut out.flags{f.action=FlagAction::Preserve;}out.flags_knowledge=EffectKnowledge::Complete;
+    }
+    out
+}

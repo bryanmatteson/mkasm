@@ -1,0 +1,4604 @@
+//! Audited A32/Thumb scalar execution, D/Q vector chunks and typed VFP
+//! operations, including explicit IT, instruction state and data endianness.
+use super::semantics::*;
+use BinaryOp as B;
+use UnaryOp as U;
+fn c(w: u8, v: u64) -> Expr {
+    Expr::constant(w, v)
+}
+fn bin(op: B, a: Expr, b: Expr) -> Expr {
+    Expr::binary(op, a, b)
+}
+fn inv(a: Expr) -> Expr {
+    Expr::unary(U::Not, a)
+}
+fn select(p: Expr, a: Expr, b: Expr) -> Expr {
+    Expr::select(p, a, b)
+}
+fn eq(a: Expr, b: Expr) -> Expr {
+    bin(B::Eq, a, b)
+}
+fn flag(i: u16) -> Expr {
+    Expr::register(register("a32.nzcv", i, 1, 1))
+}
+fn reg(n: u32, pc: u64) -> Expr {
+    if n == 15 {
+        c(32, pc)
+    } else {
+        Expr::register(register("a32.gpr", n as u16, 32, 32))
+    }
+}
+fn write(r: &mut Recipe, n: u32, v: Expr) {
+    r.write(
+        register("a32.gpr", n as u16, 32, 32),
+        WritePolicy::ZeroUpper,
+        v,
+    )
+}
+fn setflag(r: &mut Recipe, i: u16, v: Expr, enabled: &Expr) {
+    r.write(
+        register("a32.nzcv", i, 1, 1),
+        WritePolicy::ZeroUpper,
+        select(enabled.clone(), v, flag(i)),
+    )
+}
+fn condition(code: u32) -> Expr {
+    let eqnv = eq(flag(0), flag(3));
+    let base = match code >> 1 {
+        0 => flag(1),
+        1 => flag(2),
+        2 => flag(0),
+        3 => flag(3),
+        4 => bin(B::And, flag(2), inv(flag(1))),
+        5 => eqnv,
+        6 => bin(B::And, eqnv, inv(flag(1))),
+        _ => c(1, 1),
+    };
+    if code & 1 != 0 && code != 15 {
+        inv(base)
+    } else {
+        base
+    }
+}
+fn dynamic_condition(code: Expr) -> Expr {
+    let mut out = select(
+        eq(code.clone(), c(4, 15)),
+        Expr::require_context(c(1, 0), "invalid incoming IT condition"),
+        c(1, 1),
+    );
+    for n in (0..14).rev() {
+        out = select(eq(code.clone(), c(4, n)), condition(n as u32), out);
+    }
+    out
+}
+fn sign(v: u64, b: u32) -> u64 {
+    (((v << (64 - b)) as i64) >> (64 - b)) as u64
+}
+fn unsupported(next: u64) -> Recipe {
+    Recipe::unsupported(
+        "A32/Thumb family or constrained operand requires a native transition",
+        next,
+        32,
+    )
+}
+fn itstate() -> Expr {
+    Expr::register(register("a32.itstate", 0, 8, 8))
+}
+fn in_it() -> Expr {
+    inv(eq(bin(B::And, itstate(), c(8, 15)), c(8, 0)))
+}
+fn thumb_recipe(next: u64) -> Recipe {
+    let mut r = Recipe::new(next, 32);
+    r.guard = select(
+        in_it(),
+        dynamic_condition(Expr::extract(itstate(), 4, 4)),
+        Expr::require_context(eq(itstate(), c(8, 0)), "malformed incoming ITSTATE"),
+    );
+    let advanced = select(
+        eq(bin(B::And, itstate(), c(8, 7)), c(8, 0)),
+        c(8, 0),
+        bin(
+            B::Or,
+            bin(B::And, itstate(), c(8, 0xe0)),
+            bin(B::And, bin(B::Shl, itstate(), c(8, 1)), c(8, 31)),
+        ),
+    );
+    r.write_always(
+        register("a32.itstate", 0, 8, 8),
+        WritePolicy::ZeroUpper,
+        advanced,
+    );
+    r
+}
+// Control transfers are only legal in the final IT slot. A checked context
+// rejects invalid execution rather than inventing architectural behavior.
+fn last_it(r: &mut Recipe) {
+    let legal = bin(
+        B::Or,
+        inv(in_it()),
+        eq(bin(B::And, itstate(), c(8, 7)), c(8, 0)),
+    );
+    r.guard = select(
+        legal,
+        r.guard.clone(),
+        Expr::require_context(c(1, 0), "branch before final IT slot"),
+    );
+}
+fn thumb_state(r: &mut Recipe, v: Expr) {
+    r.write(
+        register("a32.thumb_state", 0, 1, 1),
+        WritePolicy::ZeroUpper,
+        v,
+    )
+}
+fn branch_pc(r: &mut Recipe, target: Expr, exchange: bool, kind: FlowKind, thumb: bool) {
+    let target = r.bind(target);
+    let aligned = if exchange {
+        let t = Expr::extract(target.clone(), 0, 1);
+        // An ARM-state target with bit[1] set depends on A32FORCEALIGNPC:
+        // either clear bit 1 or preserve it and take a PC-alignment fault.
+        // This recipe has no implementation-policy input for that choice.
+        let legal = bin(
+            B::Or,
+            t.clone(),
+            eq(Expr::extract(target.clone(), 1, 1), c(1, 0)),
+        );
+        let target = select(
+            Expr::require_context(legal, "misaligned ARM interworking target"),
+            target.clone(),
+            c(32, 0),
+        );
+        thumb_state(r, t.clone());
+        select(
+            t,
+            bin(B::And, target.clone(), c(32, 0xfffffffe)),
+            bin(B::And, target, c(32, 0xfffffffc)),
+        )
+    } else {
+        bin(
+            B::And,
+            target,
+            c(32, if thumb { 0xfffffffe } else { 0xfffffffc }),
+        )
+    };
+    r.branch(kind, c(1, 1), aligned)
+}
+// Shift_C uses the full low byte of a register shift amount. The zero, 32,
+// greater-than-32, rotate-multiple-of-32, and RRX cases are architectural cases.
+fn shift(value: Expr, kind: u32, amount: Expr, immediate: bool) -> (Expr, Expr) {
+    let amount = Expr::cast(amount, 32, false);
+    let zero = eq(amount.clone(), c(32, 0));
+    let a = if immediate && (kind == 1 || kind == 2) {
+        select(zero.clone(), c(32, 32), amount.clone())
+    } else {
+        amount.clone()
+    };
+    let v = match kind {
+        0 => bin(B::Shl, value.clone(), a.clone()),
+        1 => bin(B::Lsr, value.clone(), a.clone()),
+        2 => bin(B::Asr, value.clone(), a.clone()),
+        _ => bin(B::Ror, value.clone(), a.clone()),
+    };
+    let carry = match kind {
+        0 => Expr::extract(
+            bin(B::Lsr, value.clone(), bin(B::Sub, c(32, 32), a.clone())),
+            0,
+            1,
+        ),
+        1 | 2 => Expr::extract(
+            bin(B::Lsr, value.clone(), bin(B::Sub, a.clone(), c(32, 1))),
+            0,
+            1,
+        ),
+        _ => Expr::extract(v.clone(), 31, 1),
+    };
+    let carry = if kind == 2 {
+        select(
+            bin(B::Ult, c(32, 32), a.clone()),
+            Expr::extract(value.clone(), 31, 1),
+            carry,
+        )
+    } else {
+        carry
+    };
+    if immediate && kind == 3 {
+        let rrx = bin(
+            B::Or,
+            bin(B::Lsr, value.clone(), c(32, 1)),
+            bin(B::Shl, Expr::cast(flag(2), 32, false), c(32, 31)),
+        );
+        return (
+            select(zero.clone(), rrx, v),
+            select(zero, Expr::extract(value, 0, 1), carry),
+        );
+    }
+    if immediate && kind != 0 {
+        (v, carry)
+    } else {
+        (select(zero.clone(), value, v), select(zero, flag(2), carry))
+    }
+}
+fn nz(r: &mut Recipe, value: &Expr, enabled: &Expr) {
+    setflag(r, 0, Expr::extract(value.clone(), 31, 1), enabled);
+    setflag(r, 1, eq(value.clone(), c(32, 0)), enabled);
+}
+// ARM's sixteen data-processing operations; operands and incoming carry are
+// captured before any flag write, including ADC/SBC and predicated aliases.
+fn alu(
+    r: &mut Recipe,
+    op: u32,
+    rd: u32,
+    a: Expr,
+    b: Expr,
+    carry: Expr,
+    enabled: Expr,
+    thumb: bool,
+) {
+    // MOV/MVN do not consume Rn. Capturing an unused presentation operand
+    // would turn an unavailable register into an execution prerequisite.
+    let a = r.bind(if matches!(op, 13 | 15) { c(32, 0) } else { a });
+    let b = r.bind(b);
+    let logical = matches!(op, 0 | 1 | 8 | 9 | 12 | 13 | 14 | 15);
+    let carry = r.bind(if logical && enabled != c(1, 0) {
+        carry
+    } else {
+        c(1, 0)
+    });
+    let (sub, left, right, ci) = match op {
+        2 | 10 => (true, a.clone(), b.clone(), c(1, 0)),
+        3 => (true, b.clone(), a.clone(), c(1, 0)),
+        5 => (false, a.clone(), b.clone(), flag(2)),
+        6 => (true, a.clone(), b.clone(), inv(flag(2))),
+        7 => (true, b.clone(), a.clone(), inv(flag(2))),
+        _ => (false, a.clone(), b.clone(), c(1, 0)),
+    };
+    let ci = r.bind(ci);
+    let value = if logical {
+        match op {
+            0 | 8 => bin(B::And, a, b.clone()),
+            1 | 9 => bin(B::Xor, a, b.clone()),
+            12 => bin(B::Or, a, b.clone()),
+            13 => b.clone(),
+            14 => bin(B::And, a, inv(b.clone())),
+            _ => inv(b.clone()),
+        }
+    } else {
+        let bop = if sub { B::Sub } else { B::Add };
+        bin(
+            bop,
+            bin(bop, left.clone(), right.clone()),
+            Expr::cast(ci.clone(), 32, false),
+        )
+    };
+    let value = r.bind(value);
+    // PC+S is exception return, not an ordinary ALU transition.
+    if rd == 15 && !matches!(op, 8..=11) {
+        branch_pc(r, value, !thumb, FlowKind::Branch, thumb);
+        return;
+    }
+    if enabled != c(1, 0) {
+        nz(r, &value, &enabled);
+        if logical {
+            setflag(r, 2, carry, &enabled)
+        } else {
+            setflag(
+                r,
+                2,
+                if sub {
+                    inv(Expr::sub_borrow(left.clone(), right.clone(), ci))
+                } else {
+                    Expr::add_carry(left.clone(), right.clone(), ci)
+                },
+                &enabled,
+            );
+            setflag(
+                r,
+                3,
+                Expr::overflow(sub, left, right, value.clone()),
+                &enabled,
+            );
+        }
+    }
+    if !matches!(op, 8..=11) {
+        write(r, rd, value)
+    }
+}
+fn memory(
+    r: &mut Recipe,
+    load: bool,
+    rt: u32,
+    address: Expr,
+    width: u8,
+    signed: bool,
+    endian: Endian,
+    pc: u64,
+    thumb: bool,
+) {
+    let m = Memory {kind: Default::default(), privilege: Default::default(),
+        address: Box::new(address),
+        width,
+        endian,
+    };
+    if load {
+        let v = r.bind(Expr::cast(Expr::load(m), 32, signed));
+        if rt == 15 {
+            branch_pc(r, v, true, FlowKind::Branch, thumb)
+        } else {
+            write(r, rt, v)
+        }
+    } else {
+        r.effects.push(Effect::Store {
+            memory: m,
+            value: Expr::cast(reg(rt, pc), width, false),
+        })
+    }
+}
+fn multiple(
+    r: &mut Recipe,
+    rn: u32,
+    list: u32,
+    load: bool,
+    wb: bool,
+    increment: bool,
+    before: bool,
+    pc: u64,
+    endian: Endian,
+    thumb: bool,
+) -> bool {
+    if list == 0 || rn == 15 || (wb && list & (1 << rn) != 0) {
+        return false;
+    }
+    let count = list.count_ones();
+    let base = r.bind(reg(rn, pc));
+    let start = if increment {
+        bin(B::Add, base.clone(), c(32, if before { 4 } else { 0 }))
+    } else {
+        bin(
+            B::Sub,
+            base.clone(),
+            c(32, 4 * (count - if before { 0 } else { 1 }) as u64),
+        )
+    };
+    let mut index = 0;
+    for n in 0..16 {
+        if list & (1 << n) != 0 {
+            let addr = r.bind(bin(B::Add, start.clone(), c(32, index * 4)));
+            memory(r, load, n, addr, 32, false, endian, pc, thumb);
+            index += 1;
+        }
+    }
+    if wb {
+        write(
+            r,
+            rn,
+            bin(
+                if increment { B::Add } else { B::Sub },
+                base,
+                c(32, 4 * count as u64),
+            ),
+        )
+    }
+    if load && rn == 13 && wb && list & 0x8000 != 0 {
+        r.flow.kind = FlowKind::Return
+    }
+    true
+}
+fn bitfield(
+    r: &mut Recipe,
+    rd: u32,
+    rn: u32,
+    lsb: u32,
+    width: u32,
+    signed: bool,
+    insert: bool,
+    pc: u64,
+) -> bool {
+    if rd == 15 || lsb >= 32 || width == 0 || width > 32 - lsb {
+        return false;
+    }
+    let value = if insert {
+        let mask = (mask(width as u8) as u32) << lsb;
+        bin(
+            B::Or,
+            bin(B::And, reg(rd, pc), c(32, (!mask) as u64)),
+            bin(
+                B::And,
+                bin(
+                    B::Shl,
+                    if rn == 15 { c(32, 0) } else { reg(rn, pc) },
+                    c(32, lsb as u64),
+                ),
+                c(32, mask as u64),
+            ),
+        )
+    } else {
+        if rn == 15 {
+            return false;
+        }
+        Expr::cast(
+            Expr::extract(reg(rn, pc), lsb as u8, width as u8),
+            32,
+            signed,
+        )
+    };
+    write(r, rd, value);
+    true
+}
+fn multiply(r: &mut Recipe, rd: u32, rn: u32, rm: u32, ra: Option<u32>, flags: Expr, pc: u64) {
+    let product = bin(B::Mul, reg(rn, pc), reg(rm, pc));
+    let value = r.bind(if let Some(ra) = ra {
+        bin(B::Add, product, reg(ra, pc))
+    } else {
+        product
+    });
+    if flags != c(1, 0) {
+        nz(r, &value, &flags)
+    }
+    write(r, rd, value)
+}
+fn atomic_context(r: &mut Recipe, address: Expr, width: u8) {
+    if width > 8 {
+        let aligned = eq(
+            bin(B::And, address, c(32, (width / 8 - 1) as u64)),
+            c(32, 0),
+        );
+        r.guard = select(
+            r.guard.clone(),
+            Expr::require_context(
+                aligned,
+                "unaligned A32 atomic access requires fault context",
+            ),
+            c(1, 0),
+        );
+    }
+}
+fn atomic_transfer(
+    r: &mut Recipe,
+    load: bool,
+    exclusive: bool,
+    ordered: bool,
+    rt: u32,
+    rt2: Option<u32>,
+    status: Option<u32>,
+    address: Expr,
+    width: u8,
+    pc: u64,
+    endian: Endian,
+) {
+    atomic_context(r, address.clone(), width);
+    let value = if width == 64 {
+        let first = Expr::cast(reg(rt, pc), 64, false);
+        let second = Expr::cast(reg(rt2.unwrap(), pc), 64, false);
+        let (low, high) = if endian == Endian::Little {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        bin(B::Or, low, bin(B::Shl, high, c(64, 32)))
+    } else {
+        Expr::cast(reg(rt, pc), width, false)
+    };
+    let kind = if load {
+        if exclusive {
+            AtomicOperationKind::LoadLinked
+        } else {
+            AtomicOperationKind::Load
+        }
+    } else if exclusive {
+        AtomicOperationKind::StoreConditional { value }
+    } else {
+        AtomicOperationKind::Store { value }
+    };
+    let results = r.atomic(AtomicOperation {
+        memory: Memory {kind: Default::default(), privilege: Default::default(),
+            address: Box::new(address),
+            width,
+            endian,
+        },
+        ordering: if ordered {
+            if load {
+                MemoryOrdering::Acquire
+            } else {
+                MemoryOrdering::Release
+            }
+        } else {
+            MemoryOrdering::Monotonic
+        },
+        scope: MemoryScope::System,
+        kind,
+    });
+    if load {
+        let value = results.value.unwrap();
+        if width == 64 {
+            let value = r.bind(value);
+            let first = if endian == Endian::Little { 0 } else { 32 };
+            write(r, rt, Expr::extract(value.clone(), first, 32));
+            write(r, rt2.unwrap(), Expr::extract(value, 32 - first, 32));
+        } else {
+            write(r, rt, Expr::cast(value, 32, false))
+        }
+    } else if exclusive {
+        // ARM returns zero for success and one for failure; the schema exposes
+        // the architecture-independent one-bit success outcome.
+        write(
+            r,
+            status.unwrap(),
+            Expr::cast(inv(results.success.unwrap()), 32, false),
+        )
+    }
+}
+fn a32_atomic(word: u32, mut r: Recipe, pc: u64, next: u64, endian: Endian) -> Option<Recipe> {
+    let rn = (word >> 16) & 15;
+    // The historical SWP/SWPB encodings have no Thumb equivalent. Rd==Rm is
+    // defined, but the address register cannot alias either data register.
+    if word & 0x0fb00ff0 == 0x01000090 {
+        let rd = (word >> 12) & 15;
+        let rm = word & 15;
+        if rn == 15 || rd == 15 || rm == 15 || rn == rd || rn == rm {
+            return Some(unsupported(next));
+        }
+        let width = if word & (1 << 22) != 0 { 8 } else { 32 };
+        let address = reg(rn, pc);
+        atomic_context(&mut r, address.clone(), width);
+        let results = r.atomic(AtomicOperation {
+            memory: Memory {kind: Default::default(), privilege: Default::default(),
+                address: Box::new(address),
+                width,
+                endian,
+            },
+            ordering: MemoryOrdering::Monotonic,
+            scope: MemoryScope::System,
+            kind: AtomicOperationKind::ReadModifyWrite {
+                operation: AtomicRmwOp::Exchange,
+                value: Expr::cast(reg(rm, pc), width, false),
+            },
+        });
+        write(&mut r, rd, Expr::cast(results.value.unwrap(), 32, false));
+        return Some(r);
+    }
+    if word & 0x0f800cf0 != 0x01800c90 {
+        return None;
+    }
+    let mode = (word >> 8) & 3;
+    let load = word & (1 << 20) != 0;
+    let exclusive = mode & 2 != 0;
+    // ex=0,ord=1 and nonexclusive doubleword forms are unallocated.
+    let width = match (word >> 21) & 3 {
+        0 => 32,
+        1 => 64,
+        2 => 8,
+        _ => 16,
+    };
+    if mode == 1 || (!exclusive && width == 64) {
+        return Some(unsupported(next));
+    }
+    let ordered = mode & 1 == 0;
+    let field = (word >> 12) & 15;
+    let rt = if load { field } else { word & 15 };
+    let rt2 = if width == 64 { Some(rt + 1) } else { None };
+    let status = if !load && exclusive {
+        Some(field)
+    } else {
+        None
+    };
+    if rn == 15
+        || rt == 15
+        || (load && word & 15 != 15)
+        || (!load && !exclusive && field != 15)
+        || (width == 64 && (rt & 1 != 0 || rt >= 14))
+        || status.is_some_and(|rd| rd == 15 || rd == rn || rd == rt || Some(rd) == rt2)
+    {
+        return Some(unsupported(next));
+    }
+    atomic_transfer(
+        &mut r,
+        load,
+        exclusive,
+        ordered,
+        rt,
+        rt2,
+        status,
+        reg(rn, pc),
+        width,
+        pc,
+        endian,
+    );
+    Some(r)
+}
+fn thumb_atomic(word: u32, mut r: Recipe, pc: u64, next: u64, endian: Endian) -> Option<Recipe> {
+    let rn = (word >> 16) & 15;
+    let rt = (word >> 12) & 15;
+    if word & 0xffe00000 == 0xe8400000 {
+        let load = word & (1 << 20) != 0;
+        let rd = (word >> 8) & 15;
+        if rn == 15
+            || rt == 15
+            || (load && rd != 15)
+            || (!load && (rd == 15 || rd == rn || rd == rt))
+        {
+            return Some(unsupported(next));
+        }
+        let address = bin(B::Add, reg(rn, pc), c(32, ((word & 255) * 4) as u64));
+        atomic_transfer(
+            &mut r,
+            load,
+            true,
+            false,
+            rt,
+            None,
+            if load { None } else { Some(rd) },
+            address,
+            32,
+            pc,
+            endian,
+        );
+        return Some(r);
+    }
+    if word & 0xffe00000 != 0xe8c00000 {
+        return None;
+    }
+    let op = (word >> 4) & 15;
+    let width = match op {
+        4 | 8 | 12 => 8,
+        5 | 9 | 13 => 16,
+        10 | 14 => 32,
+        7 | 15 => 64,
+        _ => return None,
+    };
+    let load = word & (1 << 20) != 0;
+    let exclusive = op < 8 || op >= 12;
+    let ordered = op >= 8;
+    let field = (word >> 8) & 15;
+    let rd = word & 15;
+    let rt2 = if width == 64 { Some(field) } else { None };
+    if rn == 15
+        || rt == 15
+        || (width != 64 && field != 15)
+        || (width == 64 && (field == 15 || (load && field == rt)))
+        || (load && rd != 15)
+        || (!load && !exclusive && rd != 15)
+        || (!load && exclusive && (rd == 15 || rd == rn || rd == rt || Some(rd) == rt2))
+    {
+        return Some(unsupported(next));
+    }
+    atomic_transfer(
+        &mut r,
+        load,
+        exclusive,
+        ordered,
+        rt,
+        rt2,
+        if !load && exclusive { Some(rd) } else { None },
+        reg(rn, pc),
+        width,
+        pc,
+        endian,
+    );
+    Some(r)
+}
+// The target ignores these IMPLEMENTATION DEFINED prefetch hints. Match the
+// physical allocations, including their should-be bits, before ordinary loads.
+// No address, shift/carry or memory input is needed for an ignored hint. None
+// leaves neighboring instructions to their own builder; false retains the
+// constrained/unpredictable operand exclusions even for raw-word callers.
+fn preload_hint(word: u32, thumb: bool) -> Option<bool> {
+    let rn = (word >> 16) & 15;
+    let rm = word & 15;
+    if !thumb {
+        // PLD/PLDW immediate (A1), with PLD literal (A1) at Rn == PC.
+        if word & 0xff30f000 == 0xf510f000 {
+            return Some(rn != 15 || word & (1 << 22) != 0);
+        }
+        // PLI immediate (A1), including the aligned-PC literal address.
+        if word & 0xff70f000 == 0xf450f000 {
+            return Some(true);
+        }
+        // PLD/PLDW register (A1), including the distinct RRX aliases. PLD
+        // permits a PC base; PLDW does not. Neither permits a PC offset.
+        if word & 0xff30f010 == 0xf710f000 {
+            return Some(rm != 15 && (rn != 15 || word & (1 << 22) != 0));
+        }
+        if word & 0xff70f010 == 0xf650f000 {
+            return Some(rm != 15);
+        }
+    } else {
+        // Resolve literal aliases first: their imm12 can look like a register
+        // offset (including low bits == 15), but is not subject to Rm rules.
+        if word & 0xff7ff000 == 0xf81ff000 // PLD literal (T1)
+            || word & 0xff7ff000 == 0xf91ff000 // PLI immediate (T3)
+        {
+            return Some(true);
+        }
+        if word & 0xffd0f000 == 0xf890f000 // PLD/PLDW immediate (T1)
+            || word & 0xffd0ff00 == 0xf810fc00 // PLD/PLDW immediate (T2)
+            || word & 0xfff0f000 == 0xf990f000 // PLI immediate (T1)
+            || word & 0xfff0ff00 == 0xf910fc00 // PLI immediate (T2)
+        {
+            return Some(rn != 15);
+        }
+        if word & 0xffd0ffc0 == 0xf810f000 // PLD/PLDW register (T1)
+            || word & 0xfff0ffc0 == 0xf910f000 // PLI register (T1)
+        {
+            return Some(rn != 15 && rm != 15);
+        }
+    }
+    None
+}
+pub fn for_word(word: u32, address: u64) -> Recipe {
+    for_word_with_endian(word, address, Endian::Little)
+}
+pub fn for_word_with_endian(word: u32, address: u64, endian: Endian) -> Recipe {
+    let next = (address as u32).wrapping_add(4) as u64;
+    let pc = (address as u32).wrapping_add(8) as u64;
+    let cc = word >> 28;
+    let mut r = Recipe::new(next, 32);
+    r.guard = condition(cc);
+    if let Some(legal) = preload_hint(word, false) {
+        return if legal { r } else { unsupported(next) };
+    }
+    if let Some(r) = system::a32(word, r.clone()) {
+        return r;
+    }
+    if let Some(r) = arm32_integer::a32(word, r.clone()) {
+        return r;
+    }
+    if let Some(r) = arm32_crypto::a32(word, r.clone()) {
+        return r;
+    }
+    if let Some(r) = arm32_memory::a32(word, r.clone(), endian) {
+        return r;
+    }
+    if vfp_scalar_misc(&mut r, word, false) { return r; }
+    if cc == 15 {
+        if neon(&mut r, word, false) {
+            return r;
+        }
+        if word & 0xfe000000 == 0xfa000000 {
+            write(&mut r, 14, c(32, next));
+            thumb_state(&mut r, c(1, 1));
+            r.branch(
+                FlowKind::Call,
+                c(1, 1),
+                c(
+                    32,
+                    pc.wrapping_add(sign(
+                        (((word & 0xffffff) << 2) | ((word >> 23) & 2)) as u64,
+                        26,
+                    )),
+                ),
+            );
+            return r;
+        }
+        return unsupported(next);
+    }
+    r.guard = condition(cc);
+    if let Some(r) = a32_atomic(word, r.clone(), pc, next, endian) {
+        return r;
+    }
+    if word & 0x0ffffff0 == 0x012fff10 || word & 0x0ffffff0 == 0x012fff30 {
+        let rm = word & 15;
+        if rm == 15 {
+            return unsupported(next);
+        }
+        let link = word & 0x20 != 0;
+        if link {
+            write(&mut r, 14, c(32, next))
+        }
+        branch_pc(
+            &mut r,
+            reg(rm, pc),
+            true,
+            if link {
+                FlowKind::Call
+            } else if rm == 14 {
+                FlowKind::Return
+            } else {
+                FlowKind::Branch
+            },
+            false,
+        );
+        return r;
+    }
+    if word & 0x0e000000 == 0x0a000000 {
+        let link = word & (1 << 24) != 0;
+        if link {
+            write(&mut r, 14, c(32, next))
+        }
+        r.branch(
+            if link {
+                FlowKind::Call
+            } else {
+                FlowKind::Branch
+            },
+            c(1, 1),
+            c(
+                32,
+                pc.wrapping_add(sign(((word & 0xffffff) << 2) as u64, 26)),
+            ),
+        );
+        return r;
+    }
+    if neon_core(&mut r, word, pc) {
+        return r;
+    }
+    if vfp(&mut r, word, pc, endian, false) {
+        return r;
+    }
+    if word & 0x0fd0f0f0 == 0x0710f010 {
+        let rd = (word >> 16) & 15;
+        let rn = word & 15;
+        let rm = (word >> 8) & 15;
+        if rd == 15 || rn == 15 || rm == 15 {
+            return unsupported(next);
+        }
+        write(
+            &mut r,
+            rd,
+            bin(
+                if word & (1 << 21) != 0 {
+                    B::Udiv
+                } else {
+                    B::Sdiv
+                },
+                reg(rn, pc),
+                reg(rm, pc),
+            ),
+        );
+        return r;
+    }
+    if word & 0x0fff0ff0 == 0x016f0f10 {
+        let rd = (word >> 12) & 15;
+        let rm = word & 15;
+        if rd == 15 || rm == 15 {
+            return unsupported(next);
+        }
+        write(&mut r, rd, Expr::unary(U::CountLeadingZeros, reg(rm, pc)));
+        return r;
+    }
+    if word & 0x0fbf0f70 == 0x06bf0f30 {
+        let rd = (word >> 12) & 15;
+        let rm = word & 15;
+        if rd == 15 || rm == 15 {
+            return unsupported(next);
+        }
+        let op = ((word >> 21) & 2) | ((word >> 7) & 1);
+        let v = match op {
+            0 => Expr::unary(U::ReverseBytes, reg(rm, pc)),
+            1 => reverse(reg(rm, pc), true),
+            2 => Expr::unary(U::ReverseBits, reg(rm, pc)),
+            _ => Expr::cast(Expr::extract(reverse(reg(rm, pc), true), 0, 16), 32, true),
+        };
+        write(&mut r, rd, v);
+        return r;
+    }
+    if word & 0x0f8000f0 == 0x06800070 && word & 0x00300000 >= 0x00200000 && word & 0x300 == 0 {
+        let rd = (word >> 12) & 15;
+        let rm = word & 15;
+        let rn = (word >> 16) & 15;
+        if rd == 15 || rm == 15 {
+            return unsupported(next);
+        }
+        let v = Expr::cast(
+            Expr::extract(
+                bin(B::Ror, reg(rm, pc), c(32, ((word >> 7) & 24) as u64)),
+                0,
+                if word & (1 << 20) != 0 { 16 } else { 8 },
+            ),
+            32,
+            word & (1 << 22) == 0,
+        );
+        write(
+            &mut r,
+            rd,
+            if rn == 15 {
+                v
+            } else {
+                bin(B::Add, reg(rn, pc), v)
+            },
+        );
+        return r;
+    }
+    // MOVW/MOVT are immediate-class encodings, not test/compare aliases.
+    if word & 0x0fb00000 == 0x03000000 {
+        let rd = (word >> 12) & 15;
+        if rd == 15 {
+            return unsupported(next);
+        }
+        let imm = ((word >> 4) & 0xf000) | (word & 0xfff);
+        let value = if word & (1 << 22) != 0 {
+            bin(
+                B::Or,
+                bin(B::And, reg(rd, pc), c(32, 0xffff)),
+                c(32, (imm << 16) as u64),
+            )
+        } else {
+            c(32, imm as u64)
+        };
+        write(&mut r, rd, value);
+        return r;
+    }
+    // Ordinary 32-bit and 64-bit multiply/accumulate.
+    if word & 0x0fc000f0 == 0x00000090 {
+        let rd = (word >> 16) & 15;
+        let rn = (word >> 12) & 15;
+        let rs = (word >> 8) & 15;
+        let rm = word & 15;
+        let accumulate = word & (1 << 21) != 0;
+        if rd == 15 || rs == 15 || rm == 15 || (accumulate && rn == 15) || (!accumulate && rn != 0)
+        {
+            return unsupported(next);
+        }
+        multiply(
+            &mut r,
+            rd,
+            rm,
+            rs,
+            if accumulate { Some(rn) } else { None },
+            c(1, ((word >> 20) & 1) as u64),
+            pc,
+        );
+        return r;
+    }
+    if word & 0x0f8000f0 == 0x00800090 {
+        let hi = (word >> 16) & 15;
+        let lo = (word >> 12) & 15;
+        let rs = (word >> 8) & 15;
+        let rm = word & 15;
+        if hi == 15 || lo == 15 || hi == lo || rs == 15 || rm == 15 {
+            return unsupported(next);
+        }
+        let signed = word & (1 << 22) != 0;
+        let p = bin(
+            B::Mul,
+            Expr::cast(reg(rm, pc), 64, signed),
+            Expr::cast(reg(rs, pc), 64, signed),
+        );
+        let p = if word & (1 << 21) != 0 {
+            bin(
+                B::Add,
+                p,
+                bin(
+                    B::Or,
+                    Expr::cast(reg(lo, pc), 64, false),
+                    bin(B::Shl, Expr::cast(reg(hi, pc), 64, false), c(64, 32)),
+                ),
+            )
+        } else {
+            p
+        };
+        let p = r.bind(p);
+        write(&mut r, lo, Expr::extract(p.clone(), 0, 32));
+        write(&mut r, hi, Expr::extract(p.clone(), 32, 32));
+        if word & (1 << 20) != 0 {
+            setflag(&mut r, 0, Expr::extract(p.clone(), 63, 1), &c(1, 1));
+            setflag(&mut r, 1, eq(p, c(64, 0)), &c(1, 1))
+        }
+        return r;
+    }
+    if word & 0x0fe00070 == 0x07c00010 || word & 0x0fa00070 == 0x07a00050 {
+        let insert = word & 0x40 == 0;
+        let rd = (word >> 12) & 15;
+        let rn = word & 15;
+        let lsb = (word >> 7) & 31;
+        let size = (word >> 16) & 31;
+        let width = if insert {
+            size.wrapping_sub(lsb).wrapping_add(1)
+        } else {
+            size + 1
+        };
+        if !bitfield(
+            &mut r,
+            rd,
+            rn,
+            lsb,
+            width,
+            word & (1 << 22) == 0,
+            insert,
+            pc,
+        ) {
+            return unsupported(next);
+        }
+        return r;
+    }
+    if word & 0x0e000000 == 0x08000000 {
+        if word & (1 << 22) != 0
+            || !multiple(
+                &mut r,
+                (word >> 16) & 15,
+                word & 0xffff,
+                word & (1 << 20) != 0,
+                word & (1 << 21) != 0,
+                word & (1 << 23) != 0,
+                word & (1 << 24) != 0,
+                pc,
+                endian,
+                false,
+            )
+        {
+            return unsupported(next);
+        }
+        return r;
+    }
+    // Halfword/signed byte/signed halfword and paired word transfers.
+    if word & 0x0e000090 == 0x00000090 && word & 0x60 != 0 {
+        let rn = (word >> 16) & 15;
+        let rt = (word >> 12) & 15;
+        let sh = (word >> 5) & 3;
+        let load = word & (1 << 20) != 0;
+        let pre = word & (1 << 24) != 0;
+        let wb = !pre || word & (1 << 21) != 0;
+        let offset = if word & (1 << 22) != 0 {
+            c(32, (((word >> 4) & 0xf0) | (word & 15)) as u64)
+        } else {
+            if word & 0xf00 != 0 || word & 15 == 15 {
+                return unsupported(next);
+            }
+            reg(word & 15, pc)
+        };
+        if (wb && (rn == 15 || rn == rt)) || rt == 15 {
+            return unsupported(next);
+        }
+        let base = r.bind(reg(rn, pc));
+        let adjusted = r.bind(bin(
+            if word & (1 << 23) != 0 {
+                B::Add
+            } else {
+                B::Sub
+            },
+            base.clone(),
+            offset,
+        ));
+        let addr = if pre { adjusted.clone() } else { base };
+        if !load && sh >= 2 {
+            if rt & 1 != 0 || rt >= 14 || (wb && (rn == rt || rn == rt + 1)) {
+                return unsupported(next);
+            }
+            memory(
+                &mut r,
+                sh == 2,
+                rt,
+                addr.clone(),
+                32,
+                false,
+                endian,
+                pc,
+                false,
+            );
+            memory(
+                &mut r,
+                sh == 2,
+                rt + 1,
+                bin(B::Add, addr, c(32, 4)),
+                32,
+                false,
+                endian,
+                pc,
+                false,
+            );
+        } else {
+            memory(
+                &mut r,
+                load,
+                rt,
+                addr,
+                if sh == 2 { 8 } else { 16 },
+                sh >= 2,
+                endian,
+                pc,
+                false,
+            )
+        }
+        if wb {
+            write(&mut r, rn, adjusted)
+        }
+        return r;
+    }
+    if word & 0x0c000000 == 0x04000000 {
+        let rn = (word >> 16) & 15;
+        let rt = (word >> 12) & 15;
+        let load = word & (1 << 20) != 0;
+        let pre = word & (1 << 24) != 0;
+        let wb = !pre || word & (1 << 21) != 0;
+        let byte = word & (1 << 22) != 0;
+        if (wb && (rn == 15 || rn == rt)) || (byte && rt == 15) {
+            return unsupported(next);
+        }
+        let offset = if word & (1 << 25) == 0 {
+            c(32, (word & 0xfff) as u64)
+        } else {
+            if word & 0x10 != 0 || word & 15 == 15 {
+                return unsupported(next);
+            }
+            shift(
+                reg(word & 15, pc),
+                (word >> 5) & 3,
+                c(32, ((word >> 7) & 31) as u64),
+                true,
+            )
+            .0
+        };
+        let base = r.bind(reg(rn, pc));
+        let adjusted = r.bind(bin(
+            if word & (1 << 23) != 0 {
+                B::Add
+            } else {
+                B::Sub
+            },
+            base.clone(),
+            offset,
+        ));
+        memory(
+            &mut r,
+            load,
+            rt,
+            if pre { adjusted.clone() } else { base },
+            if byte { 8 } else { 32 },
+            false,
+            endian,
+            pc,
+            false,
+        );
+        if wb {
+            write(&mut r, rn, adjusted)
+        }
+        return r;
+    }
+    if word & 0x0c000000 == 0 && (word & (1 << 25) != 0 || word & 0x90 != 0x90) {
+        let op = (word >> 21) & 15;
+        let s = word & (1 << 20) != 0;
+        let rd = (word >> 12) & 15;
+        let rn = (word >> 16) & 15;
+        if (matches!(op, 8..=11) && !s) || (rd == 15 && s) {
+            return unsupported(next);
+        }
+        let (operand, carry) = if word & (1 << 25) != 0 {
+            let rot = ((word >> 8) & 15) * 2;
+            let imm = (word & 255).rotate_right(rot);
+            (
+                c(32, imm as u64),
+                if rot == 0 {
+                    flag(2)
+                } else {
+                    c(1, (imm >> 31) as u64)
+                },
+            )
+        } else {
+            let register_shift = word & 0x10 != 0;
+            let rm = word & 15;
+            let rs = (word >> 8) & 15;
+            if register_shift && (word & 0x80 != 0 || rm == 15 || rn == 15 || rs == 15) {
+                return unsupported(next);
+            }
+            shift(
+                reg(rm, pc),
+                (word >> 5) & 3,
+                if register_shift {
+                    Expr::extract(reg(rs, pc), 0, 8)
+                } else {
+                    c(32, ((word >> 7) & 31) as u64)
+                },
+                !register_shift,
+            )
+        };
+        alu(
+            &mut r,
+            op,
+            rd,
+            reg(rn, pc),
+            operand,
+            carry,
+            c(1, s as u64),
+            false,
+        );
+        return r;
+    }
+    unsupported(next)
+}
+// Pure Advanced SIMD operations operate on D chunks; Q operands name two
+// adjacent D chunks. No host vector width or independent Q storage is assumed.
+fn neon(r: &mut Recipe, word: u32, thumb: bool) -> bool {
+    if neon_fp_conversion(r, word, thumb) || neon_extra(r, word, thumb) {
+        return true;
+    }
+    if word & 0xfe000000 != 0xf2000000 {
+        return false;
+    }
+    if neon_bits(r, word, thumb) || neon_float(r, word, thumb) {
+        return true;
+    }
+    let dd = ((word >> 12) & 15) | ((word >> 18) & 16);
+    let dn = ((word >> 16) & 15) | ((word >> 3) & 16);
+    let dm = (word & 15) | ((word >> 1) & 16);
+    let q = word & 0x40 != 0;
+    let logical = word & 0xffb00f10;
+    let unary = word & 0xffbf0f90 == 0xf3b00580;
+    let bits = 8u8 << ((word >> 20) & 3);
+    let arithmetic = word & 0xff800f10;
+    let bitwise = matches!(
+        logical,
+        0xf2000110
+            | 0xf2100110
+            | 0xf2200110
+            | 0xf2300110
+            | 0xf3000110
+            | 0xf3100110
+            | 0xf3200110
+            | 0xf3300110
+    );
+    let laneop = matches!(
+        arithmetic,
+        0xf2000800
+            | 0xf3000800
+            | 0xf2000910
+            | 0xf3000810
+            | 0xf2000300
+            | 0xf2000310
+            | 0xf3000300
+            | 0xf3000310
+    );
+    if !unary && !bitwise && !laneop {
+        return false;
+    }
+    if q && (dd & 1 != 0 || dm & 1 != 0 || (!unary && dn & 1 != 0)) {
+        return false;
+    }
+    if laneop && bits == 64 && !matches!(arithmetic, 0xf2000800 | 0xf3000800) {
+        return false;
+    }
+    for chunk in 0..if q { 2 } else { 1 } {
+        let a = if unary {
+            c(64, 0)
+        } else {
+            r.bind(Expr::register(vector_slice(dn + chunk, 64)))
+        };
+        let b = r.bind(Expr::register(vector_slice(dm + chunk, 64)));
+        let old = Expr::register(vector_slice(dd + chunk, 64));
+        let value = if unary {
+            inv(b)
+        } else if bitwise {
+            match logical {
+                0xf2000110 => bin(B::And, a, b),
+                0xf2100110 => bin(B::And, a, inv(b)),
+                0xf2200110 => bin(B::Or, a, b),
+                0xf2300110 => bin(B::Or, a, inv(b)),
+                0xf3000110 => bin(B::Xor, a, b),
+                0xf3100110 => bin(B::Or, bin(B::And, old.clone(), a), bin(B::And, inv(old), b)),
+                0xf3200110 => bin(B::Or, bin(B::And, old, inv(b.clone())), bin(B::And, a, b)),
+                _ => bin(B::Or, bin(B::And, old, b.clone()), bin(B::And, a, inv(b))),
+            }
+        } else {
+            let mut value = c(64, 0);
+            for lane in 0..64 / bits {
+                let x = Expr::extract(a.clone(), lane * bits, bits);
+                let y = Expr::extract(b.clone(), lane * bits, bits);
+                let lane_value = match arithmetic {
+                    0xf2000800 => bin(B::Add, x, y),
+                    0xf3000800 => bin(B::Sub, x, y),
+                    0xf2000910 => bin(B::Mul, x, y),
+                    _ => {
+                        let pred = if arithmetic == 0xf3000810 {
+                            eq(x, y)
+                        } else {
+                            let cmp = if arithmetic & 0x01000000 == 0 {
+                                B::Slt
+                            } else {
+                                B::Ult
+                            };
+                            if arithmetic & 0x10 == 0 {
+                                bin(cmp, y, x)
+                            } else {
+                                inv(bin(cmp, x, y))
+                            }
+                        };
+                        select(pred, c(bits, mask(bits)), c(bits, 0))
+                    }
+                };
+                value = bin(
+                    B::Or,
+                    value,
+                    bin(
+                        B::Shl,
+                        Expr::cast(lane_value, 64, false),
+                        c(64, (lane * bits) as u64),
+                    ),
+                );
+            }
+            value
+        };
+        r.write(vector_slice(dd + chunk, 64), WritePolicy::Preserve, value)
+    }
+    true
+}
+// Integer Advanced SIMD extensions. Encodings and snapshot operands follow the
+// June 2026 A32 corpus. Q registers always alias two adjacent D chunks.
+fn neon_invalid(r: &mut Recipe) -> bool {
+    r.support = Support::Unsupported("reserved or constrained Advanced SIMD integer operands");
+    true
+}
+fn neon_inputs(r: &mut Recipe, first: u32, chunks: u32) -> Vec<Expr> {
+    (0..chunks)
+        .map(|i| r.bind(Expr::register(vector_slice(first + i, 64))))
+        .collect()
+}
+fn neon_lane(values: &[Expr], index: u8, width: u8) -> Expr {
+    let bit = u16::from(index) * u16::from(width);
+    Expr::extract(
+        values[usize::from(bit / 64)].clone(),
+        (bit % 64) as u8,
+        width,
+    )
+}
+fn neon_pack(result: Expr, value: Expr, offset: u8) -> Expr {
+    bin(
+        B::Or,
+        result,
+        bin(
+            B::Shl,
+            Expr::cast(value, 64, false),
+            c(64, u64::from(offset)),
+        ),
+    )
+}
+fn neon_outputs(r: &mut Recipe, first: u32, values: Vec<Expr>) {
+    let values = values.into_iter().map(|v| r.bind(v)).collect::<Vec<_>>();
+    for (i, value) in values.into_iter().enumerate() {
+        r.write(
+            vector_slice(first + i as u32, 64),
+            WritePolicy::Preserve,
+            value,
+        );
+    }
+}
+fn neon_qc(r: &mut Recipe, saturated: Expr) {
+    let mut qc = register("a32.fpscr", 0, 1, 32);
+    qc.offset = 27;
+    r.write(
+        qc,
+        WritePolicy::Preserve,
+        select(saturated, c(1, 1), Expr::register(qc)),
+    );
+}
+fn neon_signed_sat(value: Expr, width: u8) -> (Expr, Expr) {
+    let w = value.ty.width;
+    let low = c(w, (!mask(width - 1)) & mask(w));
+    let high = c(w, mask(width - 1));
+    let below = bin(B::Slt, value.clone(), low.clone());
+    let above = bin(B::Slt, high.clone(), value.clone());
+    (
+        Expr::cast(
+            select(below.clone(), low, select(above.clone(), high, value)),
+            width,
+            false,
+        ),
+        bin(B::Or, below, above),
+    )
+}
+fn neon_signed_add(a: Expr, b: Expr, sub: bool) -> (Expr, Expr) {
+    let w = a.ty.width;
+    let value = bin(if sub { B::Sub } else { B::Add }, a.clone(), b.clone());
+    let sat = Expr::overflow(sub, a.clone(), b, value.clone());
+    (
+        select(
+            sat.clone(),
+            select(
+                Expr::extract(a, w - 1, 1),
+                c(w, 1u64 << (w - 1)),
+                c(w, mask(w - 1)),
+            ),
+            value,
+        ),
+        sat,
+    )
+}
+fn neon_extra(r: &mut Recipe, word: u32, thumb: bool) -> bool {
+    if neon_dot(r, word, thumb) {
+        return true;
+    }
+    if word & 0xfe000000 != 0xf2000000 {
+        return false;
+    }
+    let dd = ((word >> 12) & 15) | ((word >> 18) & 16);
+    let dn = ((word >> 16) & 15) | ((word >> 3) & 16);
+    let dm = (word & 15) | ((word >> 1) & 16);
+    let q = word & 0x40 != 0;
+    let chunks = if q { 2 } else { 1 };
+    let unsigned = word & 0x01000000 != 0;
+    let size = (word >> 20) & 3;
+    let bits = 8u8 << size;
+    // Unsigned VRECPE/VRSQRTE are exact fixed-point integer estimates. They
+    // neither invoke the FP engine nor consume FPSCR. RecipSqrtEstimate's
+    // bounded search is expressed in nine integer steps, without host sqrt.
+    let estimate = word & 0xffb30f90;
+    if matches!(estimate, 0xf3b30400 | 0xf3b30480) {
+        if (word >> 18) & 3 != 2 || q && (dd | dm) & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let src = neon_inputs(r, dm, chunks);
+        let mut out = vec![];
+        for chunk in 0..chunks {
+            let mut v = c(64, 0);
+            for i in 0..2 {
+                let x = neon_lane(&src, chunk as u8 * 2 + i, 32);
+                let a = r.bind(bin(B::Lsr, x.clone(), c(32, 23)));
+                let (result, small) = if estimate == 0xf3b30400 {
+                    let denominator = bin(B::Add, bin(B::Shl, a, c(32, 1)), c(32, 1));
+                    let result = bin(
+                        B::Lsr,
+                        bin(B::Add, bin(B::Udiv, c(32, 1 << 19), denominator), c(32, 1)),
+                        c(32, 1),
+                    );
+                    (result, eq(Expr::extract(x, 31, 1), c(1, 0)))
+                } else {
+                    let adjusted = r.bind(select(
+                        bin(B::Ult, a.clone(), c(32, 256)),
+                        bin(B::Add, bin(B::Shl, a.clone(), c(32, 1)), c(32, 1)),
+                        bin(
+                            B::Shl,
+                            bin(B::Add, bin(B::And, a, c(32, !1u32 as u64)), c(32, 1)),
+                            c(32, 1),
+                        ),
+                    ));
+                    let mut root = c(32, 512);
+                    for step in [256, 128, 64, 32, 16, 8, 4, 2, 1] {
+                        let candidate = r.bind(bin(B::Add, root.clone(), c(32, step)));
+                        let square = bin(B::Mul, candidate.clone(), candidate.clone());
+                        let within = bin(
+                            B::Ult,
+                            bin(B::Mul, adjusted.clone(), square),
+                            c(32, 1 << 28),
+                        );
+                        root = r.bind(select(within, candidate, root));
+                    }
+                    (
+                        bin(B::Lsr, bin(B::Add, root, c(32, 1)), c(32, 1)),
+                        eq(Expr::extract(x, 30, 2), c(2, 0)),
+                    )
+                };
+                v = neon_pack(
+                    v,
+                    select(small, c(32, 0xffffffff), bin(B::Shl, result, c(32, 23))),
+                    i * 32,
+                );
+            }
+            out.push(v);
+        }
+        neon_outputs(r, dd, out);
+        return true;
+    }
+    // AdvancedSIMDExpandImm: integer, bitmask and FP32 bit-pattern constants.
+    if word & 0xfeb80090 == 0xf2800010 {
+        if q && dd & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let cmode = (word >> 8) & 15;
+        let op = word & 0x20 != 0;
+        if cmode == 15 && op {
+            return neon_invalid(r);
+        }
+        let imm = ((word >> 17) & 0x80) | ((word >> 12) & 0x70) | (word & 15);
+        let value = match cmode {
+            0..=7 => {
+                let v = u64::from(imm) << ((cmode >> 1) * 8);
+                v | (v << 32)
+            }
+            8..=11 => {
+                let v = u64::from(imm) << (((cmode >> 1) & 1) * 8);
+                v | (v << 16) | (v << 32) | (v << 48)
+            }
+            12 => {
+                let v = (u64::from(imm) << 8) | 0xff;
+                v | (v << 32)
+            }
+            13 => {
+                let v = (u64::from(imm) << 16) | 0xffff;
+                v | (v << 32)
+            }
+            14 => {
+                if op {
+                    let mut v = 0;
+                    for i in 0..8 {
+                        if imm & (1 << i) != 0 {
+                            v |= 0xffu64 << (i * 8)
+                        }
+                    }
+                    v
+                } else {
+                    u64::from(imm) * 0x0101010101010101
+                }
+            }
+            _ => {
+                let b = (imm >> 6) & 1;
+                let exp = ((b ^ 1) << 7) | (if b != 0 { 0x7c } else { 0 }) | ((imm >> 4) & 3);
+                let v = u64::from(((imm >> 7) << 31) | (exp << 23) | ((imm & 15) << 19));
+                v | (v << 32)
+            }
+        };
+        let logic = cmode < 12 && cmode & 1 != 0;
+        let old = if logic {
+            neon_inputs(r, dd, chunks)
+        } else {
+            vec![]
+        };
+        let mut out = vec![];
+        for i in 0..chunks {
+            out.push(if logic {
+                bin(
+                    if op { B::And } else { B::Or },
+                    old[i as usize].clone(),
+                    c(64, if op { !value } else { value }),
+                )
+            } else {
+                c(64, if op && cmode != 14 { !value } else { value })
+            });
+        }
+        neon_outputs(r, dd, out);
+        return true;
+    }
+
+    if word & 0xffb00f90 == 0xf3b00c00 {
+        let imm = ((word >> 16) & 15) as u8;
+        if imm & 7 == 0 || q && dd & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let log = imm.trailing_zeros() as u8;
+        let w = 8 << log;
+        let index = imm >> (log + 1);
+        let source = neon_inputs(r, dm, 1);
+        let scalar = r.bind(neon_lane(&source, index, w));
+        let mut v = c(64, 0);
+        for i in 0..64 / w {
+            v = neon_pack(v, scalar.clone(), i * w);
+        }
+        neon_outputs(r, dd, vec![v; chunks as usize]);
+        return true;
+    }
+    if word & 0xffbf0f90 == 0xf3b20000 {
+        if q && (dd | dm) & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let a = neon_inputs(r, dd, chunks);
+        let b = neon_inputs(r, dm, chunks);
+        neon_outputs(r, dd, b);
+        neon_outputs(r, dm, a);
+        return true;
+    }
+    let op = word & 0xfe800f10;
+    let pair = matches!(op, 0xf2000a00 | 0xf2000a10) || word & 0xff800f10 == 0xf2000b10;
+    let same = matches!(
+        op,
+        0xf2000000 | 0xf2000100 | 0xf2000200 | 0xf2000600 | 0xf2000610 | 0xf2000700 | 0xf2000710
+    ) || word & 0xff800f10 == 0xf2000810;
+    if pair || same {
+        if bits == 64 || (q && ((dd | dn | dm) & 1 != 0 || pair)) {
+            return neon_invalid(r);
+        }
+        let a = neon_inputs(r, dn, chunks);
+        let b = neon_inputs(r, dm, chunks);
+        let accum = op == 0xf2000710;
+        let old = if accum {
+            neon_inputs(r, dd, chunks)
+        } else {
+            vec![]
+        };
+        let mut out = vec![];
+        for chunk in 0..chunks {
+            let mut result = c(64, 0);
+            for i in 0..64 / bits {
+                let (x, y) = if pair {
+                    let half = 32 / bits;
+                    let src = if i < half { &a } else { &b };
+                    let index = (i % half) * 2;
+                    (neon_lane(src, index, bits), neon_lane(src, index + 1, bits))
+                } else {
+                    (
+                        neon_lane(&a, chunk as u8 * (64 / bits) + i, bits),
+                        neon_lane(&b, chunk as u8 * (64 / bits) + i, bits),
+                    )
+                };
+                let v = if word & 0xff800f10 == 0xf2000810 {
+                    select(
+                        inv(eq(bin(B::And, x, y), c(bits, 0))),
+                        c(bits, mask(bits)),
+                        c(bits, 0),
+                    )
+                } else if pair && op == 0xf2000b10 {
+                    bin(B::Add, x, y)
+                } else if matches!(op, 0xf2000600 | 0xf2000610 | 0xf2000a00 | 0xf2000a10) {
+                    let less = bin(if unsigned { B::Ult } else { B::Slt }, x.clone(), y.clone());
+                    if op & 0x10 == 0 {
+                        select(less, y, x)
+                    } else {
+                        select(less, x, y)
+                    }
+                } else {
+                    let x = Expr::cast(x, bits * 2, !unsigned);
+                    let y = Expr::cast(y, bits * 2, !unsigned);
+                    let sub = matches!(op, 0xf2000200 | 0xf2000700 | 0xf2000710);
+                    let diff = bin(if sub { B::Sub } else { B::Add }, x, y);
+                    if matches!(op, 0xf2000700 | 0xf2000710) {
+                        let abs = select(
+                            Expr::extract(diff.clone(), bits * 2 - 1, 1),
+                            bin(B::Sub, c(bits * 2, 0), diff.clone()),
+                            diff,
+                        );
+                        let v = Expr::cast(abs, bits, false);
+                        if accum {
+                            bin(
+                                B::Add,
+                                neon_lane(&old, chunk as u8 * (64 / bits) + i, bits),
+                                v,
+                            )
+                        } else {
+                            v
+                        }
+                    } else {
+                        let diff = if op == 0xf2000100 {
+                            bin(B::Add, diff, c(bits * 2, 1))
+                        } else {
+                            diff
+                        };
+                        Expr::extract(diff, 1, bits)
+                    }
+                };
+                result = neon_pack(result, v, i * bits);
+            }
+            out.push(result);
+        }
+        neon_outputs(r, dd, out);
+        return true;
+    }
+    // Pairwise long add/accumulate; each D half reduces independently.
+    let misc = word & 0xffb30f10;
+    if matches!(misc, 0xf3b00200 | 0xf3b00600) {
+        let w = 8u8 << ((word >> 18) & 3);
+        if w == 64 || q && (dd | dm) & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let src = neon_inputs(r, dm, chunks);
+        let old = if misc == 0xf3b00600 {
+            neon_inputs(r, dd, chunks)
+        } else {
+            vec![]
+        };
+        let signed = word & 0x80 == 0;
+        let mut out = vec![];
+        for chunk in 0..chunks {
+            let mut v = c(64, 0);
+            for i in 0..32 / w {
+                let index = chunk as u8 * (64 / w) + i * 2;
+                let mut sum = bin(
+                    B::Add,
+                    Expr::cast(neon_lane(&src, index, w), w * 2, signed),
+                    Expr::cast(neon_lane(&src, index + 1, w), w * 2, signed),
+                );
+                if !old.is_empty() {
+                    sum = bin(
+                        B::Add,
+                        sum,
+                        neon_lane(&old, chunk as u8 * (32 / w) + i, w * 2),
+                    );
+                }
+                v = neon_pack(v, sum, i * w * 2);
+            }
+            out.push(v);
+        }
+        neon_outputs(r, dd, out);
+        return true;
+    }
+    let long = word & 0xfe800f50;
+    if bits != 64 && matches!(long, 0xf2800400 | 0xf2800600 | 0xf2800500 | 0xf2800700) {
+        let narrow = matches!(long, 0xf2800400 | 0xf2800600);
+        if (narrow && (dn | dm) & 1 != 0) || (!narrow && dd & 1 != 0) {
+            return neon_invalid(r);
+        }
+        let a = neon_inputs(r, dn, if narrow { 2 } else { 1 });
+        let b = neon_inputs(r, dm, if narrow { 2 } else { 1 });
+        let old = if long == 0xf2800500 {
+            neon_inputs(r, dd, 2)
+        } else {
+            vec![]
+        };
+        let mut out = vec![];
+        for chunk in 0..if narrow { 1 } else { 2 } {
+            let output_width = if narrow { bits } else { bits * 2 };
+            let mut v = c(64, 0);
+            for i in 0..64 / output_width {
+                let at = chunk as u8 * (64 / output_width) + i;
+                let value = if narrow {
+                    let mut value = bin(
+                        if long == 0xf2800600 { B::Sub } else { B::Add },
+                        neon_lane(&a, at, bits * 2),
+                        neon_lane(&b, at, bits * 2),
+                    );
+                    if unsigned {
+                        value = bin(B::Add, value, c(bits * 2, 1u64 << (bits - 1)));
+                    }
+                    Expr::extract(value, bits, bits)
+                } else {
+                    let diff = bin(
+                        B::Sub,
+                        Expr::cast(neon_lane(&a, at, bits), bits * 2, !unsigned),
+                        Expr::cast(neon_lane(&b, at, bits), bits * 2, !unsigned),
+                    );
+                    let value = select(
+                        Expr::extract(diff.clone(), bits * 2 - 1, 1),
+                        bin(B::Sub, c(bits * 2, 0), diff.clone()),
+                        diff,
+                    );
+                    if old.is_empty() {
+                        value
+                    } else {
+                        bin(B::Add, value, neon_lane(&old, at, bits * 2))
+                    }
+                };
+                v = neon_pack(v, value, i * output_width);
+            }
+            out.push(v);
+        }
+        neon_outputs(r, dd, out);
+        return true;
+    }
+    let unary = word & 0xffb30f90;
+    if matches!(
+        unary,
+        0xf3b00700
+            | 0xf3b00780
+            | 0xf3b10000
+            | 0xf3b10080
+            | 0xf3b10100
+            | 0xf3b10180
+            | 0xf3b10200
+            | 0xf3b10300
+            | 0xf3b10380
+    ) {
+        let w = 8u8 << ((word >> 18) & 3);
+        if w == 64 || (unary == 0xf3b00500 && w != 8) || q && (dd | dm) & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let src = neon_inputs(r, dm, chunks);
+        let mut out = vec![];
+        let mut saturated = c(1, 0);
+        for chunk in 0..chunks {
+            let mut v = c(64, 0);
+            for i in 0..64 / w {
+                let x = neon_lane(&src, chunk as u8 * (64 / w) + i, w);
+                let value = match unary {
+                    0xf3b00700 | 0xf3b00780 | 0xf3b10300 | 0xf3b10380 => {
+                        let sat = eq(x.clone(), c(w, 1u64 << (w - 1)));
+                        let neg = bin(B::Sub, c(w, 0), x.clone());
+                        let value = if unary & 0x80 != 0 {
+                            neg
+                        } else {
+                            select(Expr::extract(x.clone(), w - 1, 1), neg, x.clone())
+                        };
+                        if unary & 0x00010000 == 0 {
+                            saturated = bin(B::Or, saturated, sat.clone());
+                            select(sat, c(w, mask(w - 1)), value)
+                        } else {
+                            value
+                        }
+                    }
+                    _ => {
+                        let negative = bin(B::Slt, x.clone(), c(w, 0));
+                        let zero = eq(x, c(w, 0));
+                        let pred = match unary {
+                            0xf3b10000 => inv(bin(B::Or, negative, zero)),
+                            0xf3b10080 => inv(negative),
+                            0xf3b10100 => zero,
+                            0xf3b10180 => bin(B::Or, negative, zero),
+                            _ => negative,
+                        };
+                        select(pred, c(w, mask(w)), c(w, 0))
+                    }
+                };
+                v = neon_pack(v, value, i * w);
+            }
+            out.push(v);
+        }
+        neon_outputs(r, dd, out);
+        if matches!(unary, 0xf3b00700 | 0xf3b00780) {
+            neon_qc(r, saturated);
+        }
+        return true;
+    }
+    // Shift right and accumulate. Quotient plus discarded rounding bit avoids
+    // a lost carry when an unsigned 64-bit lane rounds past its original width.
+    if matches!(op, 0xf2800110 | 0xf2800310) {
+        let imm = ((word >> 16) & 63) | ((word >> 1) & 64);
+        if imm < 8 {
+            return false;
+        }
+        let w = 1u8 << (31 - imm.leading_zeros());
+        if q && (dd | dm) & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let shift = u32::from(w) * 2 - imm;
+        let src = neon_inputs(r, dm, chunks);
+        let old = neon_inputs(r, dd, chunks);
+        let mut out = vec![];
+        for chunk in 0..chunks {
+            let mut v = c(64, 0);
+            for i in 0..64 / w {
+                let at = chunk as u8 * (64 / w) + i;
+                let x = neon_lane(&src, at, w);
+                let mut shifted = bin(
+                    if unsigned { B::Lsr } else { B::Asr },
+                    x.clone(),
+                    c(w, u64::from(shift)),
+                );
+                if op == 0xf2800310 {
+                    shifted = bin(
+                        B::Add,
+                        shifted,
+                        Expr::cast(Expr::extract(x, shift as u8 - 1, 1), w, false),
+                    );
+                }
+                v = neon_pack(v, bin(B::Add, neon_lane(&old, at, w), shifted), i * w);
+            }
+            out.push(v);
+        }
+        neon_outputs(r, dd, out);
+        return true;
+    }
+    neon_multiply_extra(r, word, dd, dn, dm, thumb)
+}
+fn neon_multiply_extra(r: &mut Recipe, word: u32, dd: u32, dn: u32, dm: u32, thumb: bool) -> bool {
+    let bits = 8u8 << ((word >> 20) & 3);
+    let key = word & 0xfe800f50;
+    let vector = word & 0xff800f10;
+    let scalar_same = matches!(
+        key,
+        0xf2800040 | 0xf2800440 | 0xf2800840 | 0xf2800c40 | 0xf2800d40 | 0xf2800e40 | 0xf2800f40
+    );
+    let scalar_long = matches!(
+        key,
+        0xf2800240 | 0xf2800640 | 0xf2800a40 | 0xf2800340 | 0xf2800740 | 0xf2800b40
+    );
+    let vector_long = matches!(word & 0xff800f50, 0xf2800900 | 0xf2800b00 | 0xf2800d00);
+    let rdm_vector = matches!(vector, 0xf3000b10 | 0xf3000c10);
+    if !scalar_same && !scalar_long && !vector_long && !rdm_vector {
+        return false;
+    }
+    // size=11 leaves this class for two-register miscellaneous encodings.
+    if bits == 64 {
+        return false;
+    }
+    let scalar = scalar_same || scalar_long;
+    let long = scalar_long || vector_long;
+    let q = if scalar_same {
+        word & 0x01000000 != 0
+    } else {
+        rdm_vector && word & 0x40 != 0
+    };
+    let chunks = if q || long { 2 } else { 1 };
+    let doubling = vector_long
+        || matches!(
+            key,
+            0xf2800340
+                | 0xf2800740
+                | 0xf2800b40
+                | 0xf2800c40
+                | 0xf2800d40
+                | 0xf2800e40
+                | 0xf2800f40
+        )
+        || rdm_vector;
+    let rdm = rdm_vector || matches!(key, 0xf2800e40 | 0xf2800f40);
+    if rdm {
+        neon_integer_no_it(r, thumb);
+    }
+    if !matches!(bits, 16 | 32)
+        || (long && dd & 1 != 0)
+        || (q && (dd | dn) & 1 != 0)
+        || (rdm_vector && q && dm & 1 != 0)
+        || (scalar_long && doubling && word & 0x01000000 != 0)
+    {
+        return neon_invalid(r);
+    }
+    let scalar_register = if bits == 16 { word & 7 } else { word & 15 };
+    let scalar_index = if bits == 16 {
+        ((word >> 4) & 2) | ((word >> 3) & 1)
+    } else {
+        (word >> 5) & 1
+    };
+    let a = neon_inputs(r, dn, if long { 1 } else { chunks });
+    let b = neon_inputs(
+        r,
+        if scalar { scalar_register } else { dm },
+        if scalar || long { 1 } else { chunks },
+    );
+    let product_only = matches!(
+        key,
+        0xf2800840 | 0xf2800a40 | 0xf2800b40 | 0xf2800c40 | 0xf2800d40
+    ) || vector_long && word & 0xf00 == 0xd00;
+    let accumulate = rdm || !product_only;
+    let old = if accumulate {
+        neon_inputs(r, dd, chunks)
+    } else {
+        vec![]
+    };
+    let sub = matches!(key, 0xf2800440 | 0xf2800640 | 0xf2800740 | 0xf2800f40)
+        || vector_long && word & 0xf00 == 0xb00
+        || vector == 0xf3000c10;
+    let signed = doubling || !long || word & 0x01000000 == 0;
+    let mut out = vec![];
+    let mut saturated = c(1, 0);
+    let result_width = if long { bits * 2 } else { bits };
+    for chunk in 0..chunks {
+        let mut result = c(64, 0);
+        for i in 0..64 / result_width {
+            let at = chunk as u8 * (64 / result_width) + i;
+            let x = neon_lane(&a, at, bits);
+            let y = neon_lane(&b, if scalar { scalar_index as u8 } else { at }, bits);
+            let mut product = bin(
+                B::Mul,
+                Expr::cast(x.clone(), 64, signed),
+                Expr::cast(y.clone(), 64, signed),
+            );
+            let value = if rdm {
+                if sub {
+                    product = bin(B::Sub, c(64, 0), product);
+                }
+                let rounded = bin(
+                    B::Asr,
+                    bin(B::Add, product, c(64, 1u64 << (bits - 2))),
+                    c(64, u64::from(bits - 1)),
+                );
+                let value = bin(
+                    B::Add,
+                    Expr::cast(neon_lane(&old, at, bits), 64, true),
+                    rounded,
+                );
+                let (value, sat) = neon_signed_sat(value, bits);
+                saturated = bin(B::Or, saturated, sat);
+                value
+            } else if doubling && long {
+                let min = c(bits, 1u64 << (bits - 1));
+                let sat = bin(B::And, eq(x, min.clone()), eq(y, min));
+                let doubled = select(
+                    sat.clone(),
+                    c(result_width, mask(result_width - 1)),
+                    Expr::cast(bin(B::Shl, product, c(64, 1)), result_width, false),
+                );
+                saturated = bin(B::Or, saturated, sat);
+                if accumulate {
+                    let (value, sat) =
+                        neon_signed_add(neon_lane(&old, at, result_width), doubled, sub);
+                    saturated = bin(B::Or, saturated, sat);
+                    value
+                } else {
+                    doubled
+                }
+            } else if doubling {
+                if key == 0xf2800d40 {
+                    product = bin(B::Add, product, c(64, 1u64 << (bits - 2)));
+                }
+                let shifted = bin(B::Asr, product, c(64, u64::from(bits - 1)));
+                let (value, sat) = neon_signed_sat(shifted, bits);
+                saturated = bin(B::Or, saturated, sat);
+                value
+            } else {
+                let value = Expr::cast(product, result_width, false);
+                if accumulate {
+                    bin(
+                        if sub { B::Sub } else { B::Add },
+                        neon_lane(&old, at, result_width),
+                        value,
+                    )
+                } else {
+                    value
+                }
+            };
+            result = neon_pack(result, value, i * result_width);
+        }
+        out.push(result);
+    }
+    neon_outputs(r, dd, out);
+    if doubling {
+        neon_qc(r, saturated);
+    }
+    true
+}
+// FEAT_DotProd and FEAT_AA32I8MM integer instructions retain their identical
+// A32/T32 physical layout. Feature admission remains the decoder/profile's job.
+fn neon_integer_no_it(r: &mut Recipe, thumb: bool) {
+    if thumb {
+        // Decode legality is unconditional, before ConditionPassed. These new
+        // instruction classes have no legal predicated execution in an IT block.
+        r.guard = select(
+            Expr::require_context(
+                eq(itstate(), c(8, 0)),
+                "RDM/dot-product/I8MM instruction in Thumb IT block",
+            ),
+            r.guard.clone(),
+            c(1, 0),
+        );
+    }
+}
+fn neon_dot(r: &mut Recipe, word: u32, thumb: bool) -> bool {
+    let key = word & 0xffb00f10;
+    let scalar = matches!(key, 0xfe200d00 | 0xfe200d10 | 0xfe800d00 | 0xfe800d10);
+    let dot = scalar || matches!(key, 0xfc200d00 | 0xfc200d10 | 0xfca00d00);
+    let matrix = matches!(word & 0xffb00f50, 0xfc200c40 | 0xfc200c50 | 0xfca00c40);
+    if !dot && !matrix {
+        return false;
+    }
+    neon_integer_no_it(r, thumb);
+    let dd = ((word >> 12) & 15) | ((word >> 18) & 16);
+    let dn = ((word >> 16) & 15) | ((word >> 3) & 16);
+    let dm = if scalar {
+        word & 15
+    } else {
+        (word & 15) | ((word >> 1) & 16)
+    };
+    let q = word & 0x40 != 0;
+    let chunks = if q { 2 } else { 1 };
+    if q && ((dd | dn) & 1 != 0 || !scalar && dm & 1 != 0) {
+        return neon_invalid(r);
+    }
+    let mixed = key == 0xfca00d00
+        || matches!(key, 0xfe800d00 | 0xfe800d10)
+        || matrix && word & 0x00800000 != 0;
+    let signed1 = if mixed {
+        scalar && word & 0x10 != 0
+    } else {
+        word & 0x10 == 0
+    };
+    let signed2 = if mixed { !signed1 } else { signed1 };
+    let a = neon_inputs(r, dn, chunks);
+    let b = neon_inputs(r, dm, if scalar { 1 } else { chunks });
+    let old = neon_inputs(r, dd, chunks);
+    let index = ((word >> 5) & 1) as u8;
+    let mut out = vec![];
+    for chunk in 0..chunks {
+        let mut v = c(64, 0);
+        for e in 0..2u8 {
+            let at = chunk as u8 * 2 + e;
+            let mut value = neon_lane(&old, at, 32);
+            for i in 0..if matrix { 8 } else { 4 } {
+                let ai = if matrix { (at / 2) * 8 + i } else { at * 4 + i };
+                let bi = if matrix {
+                    (at % 2) * 8 + i
+                } else if scalar {
+                    index * 4 + i
+                } else {
+                    at * 4 + i
+                };
+                value = bin(
+                    B::Add,
+                    value,
+                    bin(
+                        B::Mul,
+                        Expr::cast(neon_lane(&a, ai, 8), 32, signed1),
+                        Expr::cast(neon_lane(&b, bi, 8), 32, signed2),
+                    ),
+                );
+            }
+            v = neon_pack(v, value, e * 32);
+        }
+        out.push(v);
+    }
+    neon_outputs(r, dd, out);
+    true
+}
+fn neon_core(r: &mut Recipe, word: u32, pc: u64) -> bool {
+    if word & 0x0f900f5f == 0x0e800b10 {
+        let d = ((word >> 16) & 15) | ((word >> 3) & 16);
+        let q = word & (1 << 21) != 0;
+        let rt = (word >> 12) & 15;
+        let be = (((word >> 22) & 1) << 1) | ((word >> 5) & 1);
+        if rt == 15 || be == 3 || q && d & 1 != 0 {
+            return neon_invalid(r);
+        }
+        let w = 32u8 >> be;
+        let scalar = r.bind(Expr::extract(reg(rt, pc), 0, w));
+        let mut value = c(64, 0);
+        for i in 0..64 / w {
+            value = neon_pack(value, scalar.clone(), i * w);
+        }
+        neon_outputs(r, d, vec![value; if q { 2 } else { 1 }]);
+        return true;
+    }
+    // VMOV (scalar element). opc[3] selects bytes, opc[0] halfwords;
+    // opc[2:1] supplies the lane index. Scalar S transfers use a different CP.
+    if word & 0x0f000f1f != 0x0e000b10 {
+        return false;
+    }
+    let to_arm = word & (1 << 20) != 0;
+    let unsigned = word & (1 << 23) != 0;
+    let opc = (((word >> 21) & 3) << 2) | ((word >> 5) & 3);
+    if !to_arm && unsigned {
+        return false;
+    }
+    if opc & 0b1011 == 0b0010 || to_arm && unsigned && opc & 0b1011 == 0 {
+        return neon_invalid(r);
+    }
+    let (w, index) = if opc & 8 != 0 {
+        (8, opc & 7)
+    } else if opc & 1 != 0 {
+        (16, (opc >> 1) & 3)
+    } else {
+        (32, (opc >> 2) & 1)
+    };
+    let rt = (word >> 12) & 15;
+    if rt == 15 {
+        return neon_invalid(r);
+    }
+    let d = ((word >> 16) & 15) | ((word >> 3) & 16);
+    let mut slice = vector_slice(d, w);
+    slice.register.index = d as u16;
+    slice.offset = (index * w as u32) as u8;
+    if to_arm {
+        write(r, rt, Expr::cast(Expr::register(slice), 32, !unsigned));
+    } else {
+        r.write(
+            slice,
+            WritePolicy::Preserve,
+            Expr::extract(reg(rt, pc), 0, w),
+        );
+    }
+    true
+}
+
+fn vector_slice(n: u32, width: u8) -> RegisterSlice {
+    let mut slice = register(
+        "a32.vector64",
+        if width <= 32 {
+            (n / 2) as u16
+        } else {
+            n as u16
+        },
+        width,
+        64,
+    );
+    if width <= 32 {
+        slice.offset = ((n & 1) * 32) as u8
+    }
+    slice
+}
+// H(n) setter zero-extends into S(n); it preserves the adjacent S alias.
+// Legacy VCVTB/VCVTT writes a selected half of S and does not use this setter.
+fn vfp_ieee_write(r: &mut Recipe, mut destination: RegisterSlice, value: Expr) {
+    let value = if destination.width == 16 {
+        destination.width = 32;
+        Expr::cast(value, 32, false)
+    } else { value };
+    r.write(destination, WritePolicy::Preserve, value);
+}
+fn vfp_scalar_key(word: u32, width: u8) -> u32 {
+    if width == 16 { (word & !0x300) | 0x200 } else { word }
+}
+fn vfp_register(word: u32, field: u32, extra: u32, width: u8) -> u32 {
+    let low = (word >> field) & 15;
+    let high = (word >> extra) & 1;
+    if width <= 32 {
+        (low << 1) | high
+    } else {
+        low | (high << 4)
+    }
+}
+fn vfp_scalar_context(r: &mut Recipe) {
+    let fpscr = Expr::register(register("a32.fpscr", 0, 32, 32));
+    r.guard = select(
+        r.guard.clone(),
+        select(
+            bin(
+                B::And,
+                eq(Expr::extract(fpscr.clone(), 16, 3), c(3, 0)),
+                eq(Expr::extract(fpscr, 20, 2), c(2, 0)),
+            ),
+            c(1, 1),
+            Expr::require_context(c(1, 0), "legacy VFP vector mode"),
+        ),
+        c(1, 0),
+    );
+}
+/// Legacy Armv7 Appendix D11 execution is separate from the June Armv8
+/// scalar entry point, whose affected operations reject LEN/STRIDE != 0.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LegacyVfpExceptions {
+    /// The target has admitted an enabled VFP instruction and no pending bounce.
+    /// Floating-point trap enables must be clear. No FPEXC state is consumed.
+    Untrapped,
+    /// Common VFP subarchitecture v3 synchronous bounce, with TFV=0 and no
+    /// pending EX/DEX/FP2V. a32.fpexc[0] is a complete 32-bit register image.
+    /// DEX/VV/VECITR are committed before an Undefined Instruction bounce.
+    SynchronousV3,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LegacyVfpContext {
+    /// Implemented D-register count, exactly 16 or 32.
+    pub d_registers: u8,
+    pub exceptions: LegacyVfpExceptions,
+}
+#[derive(Clone, Copy)]
+enum LegacyVfpOp {
+    Bits(u8),
+    Immediate(u64),
+    Float(FloatOperation),
+    Nonfused(u32),
+}
+fn legacy_scalar_bank(n: u32, width: u8) -> bool {
+    if width == 32 {
+        n < 8
+    } else {
+        n % 16 < 4
+    }
+}
+fn legacy_index(first: u32, bank: u32, lane: u64, stride: Expr) -> Expr {
+    bin(
+        B::Or,
+        c(32, u64::from(first & !(bank - 1))),
+        bin(
+            B::And,
+            bin(
+                B::Add,
+                c(32, u64::from(first & (bank - 1))),
+                bin(B::Mul, stride, c(32, lane)),
+            ),
+            c(32, u64::from(bank - 1)),
+        ),
+    )
+}
+fn legacy_operand(values: &[Expr], first: u32, bank: u32, index: Expr) -> Expr {
+    let start = first & !(bank - 1);
+    let mut value = values[first as usize].clone();
+    for n in start..start + bank {
+        value = select(
+            eq(index.clone(), c(32, u64::from(n))),
+            values[n as usize].clone(),
+            value,
+        );
+    }
+    value
+}
+fn legacy_fp(
+    r: &mut Recipe,
+    operation: FloatOperation,
+    width: u8,
+    inputs: Vec<Expr>,
+    control: Expr,
+    status: Expr,
+    enabled: Expr,
+) -> (Expr, Expr, Expr) {
+    // Inactive iterations, including iterations after a bounce, consume no
+    // operand registers and issue no typed FP projection callbacks.
+    let inputs = inputs
+        .into_iter()
+        .map(|input| {
+            let w = input.ty.width;
+            r.bind(select(enabled.clone(), input, c(w, 0)))
+        })
+        .collect::<Vec<_>>();
+    let projection = |projection, fallback| {
+        select(
+            enabled.clone(),
+            Expr::float(FloatExpression {
+                operation,
+                environment: FloatEnvironment::A32Vfp,
+                width,
+                inputs: inputs.clone(),
+                control: Box::new(control.clone()),
+                status: Box::new(status.clone()),
+                projection,
+            }),
+            fallback,
+        )
+    };
+    let value = r.bind(projection(FloatProjection::Value, c(width, 0)));
+    let next_status = r.bind(projection(FloatProjection::Status, status.clone()));
+    let trapped = r.bind(projection(FloatProjection::Trapped, c(1, 0)));
+    (value, next_status, trapped)
+}
+/// Execute one of Armv7 D11's fourteen affected VFP instructions under an
+/// explicitly selected legacy target. Other instructions return None so the
+/// caller can use the ordinary scalar recipe. No FPSCR write-mask meaning is
+/// inferred from LEN/STRIDE, and the a32.fpscr_write_mask bank is unchanged.
+///
+/// Unpredictable LEN/STRIDE combinations and unrepresented exception models
+/// remain checked contexts. SynchronousV3 exposes an architectural Undefined
+/// Instruction bounce. Its TFV=0 implementation-defined fault metadata is
+/// preserved. Asynchronous FPINST/FPINST2 machinery is not fabricated.
+pub fn for_legacy_vfp(
+    word: u32,
+    length: usize,
+    address: u64,
+    thumb: bool,
+    context: LegacyVfpContext,
+) -> Option<Recipe> {
+    if length != 4
+        || if thumb {
+            word >> 28 != 14
+        } else {
+            word >> 28 == 15
+        }
+    {
+        return None;
+    }
+    let width = match (word >> 8) & 15 {
+        10 => 32,
+        11 => 64,
+        _ => return None,
+    };
+    let key = word & 0x0fb00e50;
+    let unary = word & 0x0fbf0ed0;
+    let operation = if word & 0x0fb00ef0 == 0x0eb00a00 {
+        let imm = (((word >> 16) & 15) << 4) | (word & 15);
+        let exponent_bits = if width == 32 { 8 } else { 11 };
+        let fraction_bits = width - exponent_bits - 1;
+        let repeated = if imm & 64 != 0 {
+            (1u64 << (exponent_bits - 3)) - 1
+        } else {
+            0
+        };
+        let exponent = (((!imm >> 6) & 1) as u64) << (exponent_bits - 1)
+            | (repeated << 2)
+            | ((imm >> 4) & 3) as u64;
+        LegacyVfpOp::Immediate(
+            ((imm >> 7) as u64) << (width - 1)
+                | (exponent << fraction_bits)
+                | ((imm & 15) as u64) << (fraction_bits - 4),
+        )
+    } else if matches!(unary, 0x0eb00a40 | 0x0eb00ac0 | 0x0eb10a40) {
+        LegacyVfpOp::Bits(match unary {
+            0x0eb00ac0 => 1,
+            0x0eb10a40 => 2,
+            _ => 0,
+        })
+    } else if unary == 0x0eb10ac0 {
+        LegacyVfpOp::Float(FloatOperation::SquareRoot)
+    } else {
+        match key {
+            0x0e300a00 => LegacyVfpOp::Float(FloatOperation::Add),
+            0x0e300a40 => LegacyVfpOp::Float(FloatOperation::Subtract),
+            0x0e200a00 => LegacyVfpOp::Float(FloatOperation::Multiply),
+            0x0e800a00 => LegacyVfpOp::Float(FloatOperation::Divide),
+            0x0e000a00 | 0x0e000a40 | 0x0e100a00 | 0x0e100a40 | 0x0e200a40 => {
+                LegacyVfpOp::Nonfused(key)
+            }
+            _ => return None,
+        }
+    };
+    let next = (address as u32).wrapping_add(4) as u64;
+    let mut r = if thumb {
+        thumb_recipe(next)
+    } else {
+        let mut r = Recipe::new(next, 32);
+        r.guard = condition(word >> 28);
+        r
+    };
+    let d = vfp_register(word, 12, 22, width);
+    let n = vfp_register(word, 16, 7, width);
+    let m = vfp_register(word, 0, 5, width);
+    let immediate = matches!(operation, LegacyVfpOp::Immediate(_));
+    let unary = matches!(
+        operation,
+        LegacyVfpOp::Bits(_) | LegacyVfpOp::Float(FloatOperation::SquareRoot)
+    );
+    let arithmetic = matches!(operation, LegacyVfpOp::Float(_) | LegacyVfpOp::Nonfused(_));
+    if !matches!(context.d_registers, 16 | 32)
+        || (width == 64
+            && (d >= u32::from(context.d_registers)
+                || !immediate && m >= u32::from(context.d_registers)
+                || !immediate && !unary && n >= u32::from(context.d_registers)))
+    {
+        r.support = Support::Unsupported(
+            "legacy VFP instruction references an unimplemented register bank",
+        );
+        return Some(r);
+    }
+    let incoming_fpscr = Expr::register(register("a32.fpscr", 0, 32, 32));
+    let len = Expr::cast(Expr::extract(incoming_fpscr.clone(), 16, 3), 32, false);
+    let stride_bits = Expr::extract(incoming_fpscr.clone(), 20, 2);
+    let stride = select(eq(stride_bits.clone(), c(2, 0)), c(32, 1), c(32, 2));
+    let scalar = legacy_scalar_bank(d, width);
+    let vector = if scalar {
+        c(1, 0)
+    } else {
+        inv(eq(len.clone(), c(32, 0)))
+    };
+    let count = select(vector.clone(), bin(B::Add, len.clone(), c(32, 1)), c(32, 1));
+    // Table D11-1 constrains all scalar uses to the permitted SP combinations;
+    // DP vector operands have the additional four-register bank restriction.
+    let legal = bin(
+        B::Or,
+        eq(stride_bits.clone(), c(2, 0)),
+        bin(
+            B::And,
+            eq(stride_bits, c(2, 3)),
+            bin(
+                B::And,
+                bin(B::Ult, c(32, 0), len.clone()),
+                bin(B::Ult, len.clone(), c(32, 4)),
+            ),
+        ),
+    );
+    let legal = if width == 64 && !scalar {
+        bin(
+            B::And,
+            legal,
+            bin(B::Ult, bin(B::Mul, count.clone(), stride.clone()), c(32, 5)),
+        )
+    } else {
+        legal
+    };
+    r.guard = select(
+        r.guard.clone(),
+        Expr::require_context(legal, "unpredictable legacy VFP LEN/STRIDE combination"),
+        c(1, 0),
+    );
+    if arithmetic && context.exceptions == LegacyVfpExceptions::Untrapped {
+        r.guard = select(
+            r.guard.clone(),
+            Expr::require_context(
+                eq(bin(B::And, incoming_fpscr.clone(), c(32, 0x9f00)), c(32, 0)),
+                "legacy VFP trap enables need an explicit exception protocol",
+            ),
+            c(1, 0),
+        );
+    }
+    let fpexc = Expr::register(register("a32.fpexc", 0, 32, 32));
+    if context.exceptions == LegacyVfpExceptions::SynchronousV3 {
+        r.guard = select(
+            r.guard.clone(),
+            Expr::require_context(
+                eq(
+                    bin(B::And, fpexc.clone(), c(32, 0xf4000000)),
+                    c(32, 0x40000000),
+                ),
+                "legacy VFP synchronous-v3 requires enabled FPEXC, TFV=0 and no pending bounce",
+            ),
+            c(1, 0),
+        );
+    }
+    let control = r.bind(incoming_fpscr);
+    let mut status = control.clone();
+    let mut stopped = c(1, 0);
+    let bank = if width == 32 { 8 } else { 4 };
+    let mut values = (0..32)
+        .map(|n| Expr::register(vector_slice(n, width)))
+        .collect::<Vec<_>>();
+    for lane in 0..8u64 {
+        let enabled = r.bind(bin(
+            B::And,
+            bin(B::Ult, c(32, lane), count.clone()),
+            inv(stopped.clone()),
+        ));
+        let effective_stride = select(vector.clone(), stride.clone(), c(32, 0));
+        let di = legacy_index(d, bank, lane, effective_stride.clone());
+        let ni = legacy_index(n, bank, lane, effective_stride.clone());
+        let mi = legacy_index(
+            m,
+            bank,
+            lane,
+            if legacy_scalar_bank(m, width) {
+                c(32, 0)
+            } else {
+                effective_stride
+            },
+        );
+        let left = if unary || immediate {
+            c(width, 0)
+        } else {
+            legacy_operand(&values, n, bank, ni)
+        };
+        let right = if immediate {
+            c(width, 0)
+        } else {
+            legacy_operand(&values, m, bank, mi)
+        };
+        let old = legacy_operand(&values, d, bank, di.clone());
+        let (value, next_status, trapped) = match operation {
+            LegacyVfpOp::Immediate(value) => (c(width, value), status.clone(), c(1, 0)),
+            LegacyVfpOp::Bits(op) => {
+                let sign = 1u64 << (width - 1);
+                (
+                    match op {
+                        1 => bin(B::And, right, c(width, !sign)),
+                        2 => bin(B::Xor, right, c(width, sign)),
+                        _ => right,
+                    },
+                    status.clone(),
+                    c(1, 0),
+                )
+            }
+            LegacyVfpOp::Float(operation) => legacy_fp(
+                &mut r,
+                operation,
+                width,
+                if unary {
+                    vec![right]
+                } else {
+                    vec![left, right]
+                },
+                control.clone(),
+                status.clone(),
+                enabled.clone(),
+            ),
+            LegacyVfpOp::Nonfused(key) => {
+                let addend = if key == 0x0e200a40 {
+                    None
+                } else {
+                    Some(r.bind(select(enabled.clone(), old, c(width, 0))))
+                };
+                let (product, mul_status, mul_trap) = legacy_fp(
+                    &mut r,
+                    FloatOperation::Multiply,
+                    width,
+                    vec![left, right],
+                    control.clone(),
+                    status.clone(),
+                    enabled.clone(),
+                );
+                let negate = |v| bin(B::Xor, v, c(width, 1u64 << (width - 1)));
+                let product = if matches!(key, 0x0e000a40 | 0x0e100a40 | 0x0e200a40) {
+                    negate(product)
+                } else {
+                    product
+                };
+                if let Some(addend) = addend {
+                    let addend = if matches!(key, 0x0e100a00 | 0x0e100a40) {
+                        negate(addend)
+                    } else {
+                        addend
+                    };
+                    let (value, status, add_trap) = legacy_fp(
+                        &mut r,
+                        FloatOperation::Add,
+                        width,
+                        vec![addend, product],
+                        control.clone(),
+                        mul_status,
+                        bin(B::And, enabled.clone(), inv(mul_trap.clone())),
+                    );
+                    (value, status, bin(B::Or, mul_trap, add_trap))
+                } else {
+                    (product, mul_status, mul_trap)
+                }
+            }
+        };
+        status = next_status;
+        stopped = r.bind(bin(B::Or, stopped, trapped.clone()));
+        if arithmetic {
+            r.write(
+                register("a32.fpscr", 0, 32, 32),
+                WritePolicy::ZeroUpper,
+                status.clone(),
+            );
+            if context.exceptions == LegacyVfpExceptions::SynchronousV3 {
+                let remaining = bin(
+                    B::And,
+                    bin(
+                        B::Sub,
+                        bin(B::Sub, count.clone(), c(32, lane + 1)),
+                        c(32, 1),
+                    ),
+                    c(32, 7),
+                );
+                let bounce = bin(
+                    B::Or,
+                    bin(B::And, fpexc.clone(), c(32, !0x28000700u32 as u64)),
+                    bin(B::Or, c(32, 0x28000000), bin(B::Shl, remaining, c(32, 8))),
+                );
+                r.write(
+                    register("a32.fpexc", 0, 32, 32),
+                    WritePolicy::ZeroUpper,
+                    select(trapped.clone(), bounce, fpexc.clone()),
+                );
+                r.effects.push(Effect::Trap {
+                    kind: TrapKind::InvalidInstruction,
+                    condition: trapped.clone(),
+                });
+            } else {
+                r.effects.push(Effect::Trap {
+                    kind: TrapKind::FloatingPoint,
+                    condition: trapped.clone(),
+                });
+            }
+        }
+        let commit = bin(B::And, enabled, inv(trapped));
+        let value = r.bind(select(commit.clone(), value, c(width, 0)));
+        let destinations = if scalar {
+            d..d + 1
+        } else {
+            (d & !(bank - 1))..(d & !(bank - 1)) + bank
+        };
+        for register_index in destinations {
+            let selected = bin(
+                B::And,
+                commit.clone(),
+                eq(di.clone(), c(32, u64::from(register_index))),
+            );
+            // Keep forwarding lazy: an inactive output is not an input.
+            // Later aliased source operands select this lane's result only
+            // when it committed; otherwise they read the prior source value.
+            values[register_index as usize] = select(
+                selected.clone(),
+                value.clone(),
+                values[register_index as usize].clone(),
+            );
+            r.write_conditional(
+                selected,
+                vector_slice(register_index, width),
+                WritePolicy::Preserve,
+                value.clone(),
+            );
+        }
+    }
+    Some(r)
+}
+// Inputs and controls are captured once before any projection. Status chains
+// make sticky FPSCR changes from earlier lanes visible to later lanes without
+// exposing partially written destination registers as inputs.
+fn fp_outputs(
+    r: &mut Recipe,
+    operation: FloatOperation,
+    environment: FloatEnvironment,
+    width: u8,
+    inputs: Vec<Expr>,
+    control: Expr,
+    status: Expr,
+) -> (Expr, Expr, Expr) {
+    let inputs = inputs.into_iter().map(|v| r.bind(v)).collect::<Vec<_>>();
+    let projection = |projection| {
+        Expr::float(FloatExpression {
+            operation,
+            environment,
+            width,
+            inputs: inputs.clone(),
+            control: Box::new(control.clone()),
+            status: Box::new(status.clone()),
+            projection,
+        })
+    };
+    let value = r.bind(projection(FloatProjection::Value));
+    let status = r.bind(projection(FloatProjection::Status));
+    let trapped = r.bind(projection(FloatProjection::Trapped));
+    (value, status, trapped)
+}
+// A trapped multiply must not evaluate the following addition. In particular,
+// no second FP callback may fabricate an additional exception after that trap.
+fn fp_outputs_if(
+    r: &mut Recipe,
+    operation: FloatOperation,
+    environment: FloatEnvironment,
+    width: u8,
+    inputs: Vec<Expr>,
+    control: Expr,
+    status: Expr,
+    enabled: Expr,
+) -> (Expr, Expr, Expr) {
+    let inputs = inputs.into_iter().map(|v| r.bind(v)).collect::<Vec<_>>();
+    let projection = |projection, fallback| {
+        select(
+            enabled.clone(),
+            Expr::float(FloatExpression {
+                operation,
+                environment,
+                width,
+                inputs: inputs.clone(),
+                control: Box::new(control.clone()),
+                status: Box::new(status.clone()),
+                projection,
+            }),
+            fallback,
+        )
+    };
+    let value = r.bind(projection(FloatProjection::Value, c(width, 0)));
+    let next_status = r.bind(projection(FloatProjection::Status, status.clone()));
+    let trapped = r.bind(projection(FloatProjection::Trapped, c(1, 0)));
+    (value, next_status, trapped)
+}
+fn fp_nonfused(
+    r: &mut Recipe,
+    environment: FloatEnvironment,
+    width: u8,
+    addend: Option<Expr>,
+    left: Expr,
+    right: Expr,
+    negate_addend: bool,
+    negate_product: bool,
+    control: Expr,
+    status: Expr,
+) -> (Expr, Expr, Expr) {
+    // AArch32 FPNeg is an exact sign-bit toggle, including for NaN data.
+    let negate = |v| bin(B::Xor, v, c(width, 1u64 << (width - 1)));
+    let addend = addend.map(|v| r.bind(v));
+    let (product, status, first_trap) = fp_outputs(
+        r,
+        FloatOperation::Multiply,
+        environment,
+        width,
+        vec![left, right],
+        control.clone(),
+        status,
+    );
+    let product = if negate_product {
+        negate(product)
+    } else {
+        product
+    };
+    if let Some(addend) = addend {
+        let addend = if negate_addend {
+            negate(addend)
+        } else {
+            addend
+        };
+        let (value, status, second_trap) = fp_outputs_if(
+            r,
+            FloatOperation::Add,
+            environment,
+            width,
+            vec![addend, product],
+            control,
+            status,
+            inv(first_trap.clone()),
+        );
+        (value, status, bin(B::Or, first_trap, second_trap))
+    } else {
+        (product, status, first_trap)
+    }
+}
+fn vfp_nonfused(r: &mut Recipe, word: u32, width: u8) -> bool {
+    let key = vfp_scalar_key(word, width) & 0x0fb00e50;
+    if !matches!(
+        key,
+        0x0e000a00 | 0x0e000a40 | 0x0e100a00 | 0x0e100a40 | 0x0e200a40
+    ) {
+        return false;
+    }
+    vfp_scalar_context(r);
+    let vd = vector_slice(vfp_register(word, 12, 22, width), width);
+    let vn = vector_slice(vfp_register(word, 16, 7, width), width);
+    let vm = vector_slice(vfp_register(word, 0, 5, width), width);
+    let fpscr = r.bind(Expr::register(register("a32.fpscr", 0, 32, 32)));
+    let (value, status, trapped) = fp_nonfused(
+        r,
+        FloatEnvironment::A32Vfp,
+        width,
+        if key == 0x0e200a40 {
+            None
+        } else {
+            Some(Expr::register(vd))
+        },
+        Expr::register(vn),
+        Expr::register(vm),
+        matches!(key, 0x0e100a00 | 0x0e100a40),
+        matches!(key, 0x0e000a40 | 0x0e100a40 | 0x0e200a40),
+        fpscr.clone(),
+        fpscr,
+    );
+    r.write(
+        register("a32.fpscr", 0, 32, 32),
+        WritePolicy::ZeroUpper,
+        status,
+    );
+    r.effects.push(Effect::Trap {
+        kind: TrapKind::FloatingPoint,
+        condition: trapped,
+    });
+    vfp_ieee_write(r, vd, value);
+    true
+}
+fn fp_scalar(
+    r: &mut Recipe,
+    operation: FloatOperation,
+    width: u8,
+    destination: RegisterSlice,
+    inputs: Vec<Expr>,
+) {
+    fp_scalar_control(r, operation, width, destination, inputs, false, false)
+}
+fn fp_scalar_control(
+    r: &mut Recipe, operation: FloatOperation, width: u8,
+    destination: RegisterSlice, inputs: Vec<Expr>, nearest_even: bool, signed_result: bool,
+) {
+    let fpscr = r.bind(Expr::register(register("a32.fpscr", 0, 32, 32)));
+    let (value, status, trapped) = fp_outputs(
+        r,
+        operation,
+        FloatEnvironment::A32Vfp,
+        width,
+        inputs,
+        if nearest_even { bin(B::And, fpscr.clone(), c(32, !(3 << 22) & 0xffffffff)) } else { fpscr.clone() },
+        fpscr,
+    );
+    r.write(
+        register("a32.fpscr", 0, 32, 32),
+        WritePolicy::ZeroUpper,
+        status,
+    );
+    r.effects.push(Effect::Trap {
+        kind: TrapKind::FloatingPoint,
+        condition: trapped,
+    });
+    if destination.width != width {
+        r.write(destination, WritePolicy::Preserve, Expr::cast(value, destination.width, signed_result));
+    } else if width == 16 && !matches!(operation, FloatOperation::Convert { .. }) {
+        vfp_ieee_write(r, destination, value)
+    } else { r.write(destination, WritePolicy::Preserve, value) }
+}
+fn vfp_extended(r: &mut Recipe, word: u32, format: u8) -> bool {
+    let key_word = vfp_scalar_key(word, format);
+    let convert = format != 16 && key_word & 0x0fbf0ed0 == 0x0eb70ac0;
+    let from_integer = key_word & 0x0fbf0e50 == 0x0eb80a40;
+    let to_integer = key_word & 0x0fbe0e50 == 0x0ebc0a40;
+    let fused_key = key_word & 0x0fb00e50;
+    let fused = matches!(fused_key, 0x0ea00a00 | 0x0ea00a40 | 0x0e900a00 | 0x0e900a40);
+    if !convert && !from_integer && !to_integer && !fused {
+        return false;
+    }
+    let source_width = if from_integer { 32 } else { format };
+    let result_width = if convert {
+        96 - format
+    } else if to_integer {
+        32
+    } else {
+        format
+    };
+    let vd = vfp_register(word, 12, 22, result_width);
+    let vm = vfp_register(word, 0, 5, source_width);
+    let input = Expr::register(vector_slice(vm, source_width));
+    let (operation, inputs) = if fused {
+        // Fused operations use one rounding; typed sign changes preserve the
+        // architecture engine's addend-first NaN priority and A32 FPNeg rules.
+        vfp_scalar_context(r);
+        let vn = vfp_register(word, 16, 7, format);
+        (
+            FloatOperation::FusedMultiplyAdd {
+                negate_product: matches!(fused_key, 0x0ea00a40 | 0x0e900a40),
+                negate_addend: matches!(fused_key, 0x0e900a00 | 0x0e900a40),
+            },
+            vec![
+                Expr::register(vector_slice(vd, result_width)),
+                Expr::register(vector_slice(vn, format)),
+                input,
+            ],
+        )
+    } else if convert {
+        (
+            FloatOperation::Convert {
+                source_width,
+                round_to_odd: false,
+            },
+            vec![input],
+        )
+    } else if from_integer {
+        (
+            FloatOperation::FromInteger {
+                source_width: 32,
+                signed: word & 0x80 != 0,
+                fractional_bits: 0,
+            },
+            vec![input],
+        )
+    } else {
+        (
+            FloatOperation::ToInteger {
+                source_width,
+                signed: word & (1 << 16) != 0,
+                fractional_bits: 0,
+                rounding: if word & 0x80 != 0 {
+                    FloatRounding::Zero
+                } else {
+                    FloatRounding::Environment
+                },
+            },
+            vec![input],
+        )
+    };
+    fp_scalar(
+        r,
+        operation,
+        result_width,
+        vector_slice(vd, result_width),
+        inputs,
+    );
+    true
+}
+// AArch32 vector FPAbs/FPNeg only change the sign bit, including NaNs.
+fn neon_bits(r: &mut Recipe, word: u32, thumb: bool) -> bool {
+    let key = word & 0xffbf0f10;
+    if !matches!(key, 0xf3b90700 | 0xf3b50700) {
+        return false;
+    }
+    let half = key == 0xf3b50700;
+    let dd = ((word >> 12) & 15) | ((word >> 18) & 16);
+    let dm = (word & 15) | ((word >> 1) & 16);
+    let q = word & 0x40 != 0;
+    if q && (dd & 1 != 0 || dm & 1 != 0) {
+        return false;
+    }
+    if half && thumb {
+        r.guard = Expr::require_context(eq(itstate(), c(8, 0)),
+            "FP16 vector instruction cannot execute in IT");
+    }
+    let sign = if half {
+        0x8000800080008000
+    } else {
+        0x8000000080000000
+    };
+    for chunk in 0..if q { 2 } else { 1 } {
+        let input = Expr::register(vector_slice(dm + chunk, 64));
+        let value = if word & 0x80 != 0 {
+            bin(B::Xor, input, c(64, sign))
+        } else {
+            bin(B::And, input, c(64, !sign))
+        };
+        r.write(vector_slice(dd + chunk, 64), WritePolicy::Preserve, value);
+    }
+    true
+}
+// NEON integer/fixed conversion and integral rounding use StandardFPCR;
+// integer lanes have the same width as their FP16 or FP32 counterpart.
+fn neon_fp_conversion(r: &mut Recipe, word: u32, thumb: bool) -> bool {
+    let integer_round = word & 0xffb30c10 == 0xf3b30000;
+    let integral_round = word & 0xffb30c10 == 0xf3b20400;
+    let unscaled = word & 0xffb30e10 == 0xf3b30600;
+    let fixed = word & 0xfe800c90 == 0xf2800c10;
+    if !integer_round && !integral_round && !unscaled && !fixed { return false; }
+    let width = if fixed { 16 << ((word >> 9) & 1) } else {
+        match (word >> 18) & 3 { 1 => 16, 2 => 32, _ => return false }
+    };
+    let width = width as u8;
+    let rounding = |mode| match mode {
+        0 => FloatRounding::NearestAway, 1 => FloatRounding::NearestEven,
+        2 => FloatRounding::PositiveInfinity, _ => FloatRounding::NegativeInfinity,
+    };
+    let operation = if integral_round {
+        let op = (word >> 7) & 7;
+        let mode = match op {
+            0 => FloatRounding::NearestEven, 1 => FloatRounding::Environment,
+            2 => FloatRounding::NearestAway, 3 => FloatRounding::Zero,
+            5 => FloatRounding::NegativeInfinity, 7 => FloatRounding::PositiveInfinity,
+            _ => return false,
+        };
+        FloatOperation::RoundToIntegral { rounding: mode, exact: op == 1 }
+    } else {
+        let fractional_bits = if fixed {
+            let immediate = ((word >> 16) & 63) as u8;
+            if immediate < 64 - width { return false; }
+            64 - immediate
+        } else { 0 };
+        let to_integer = integer_round || word & 0x100 != 0;
+        let signed = if fixed { word & (1 << 24) == 0 } else { word & 0x80 == 0 };
+        if to_integer {
+            FloatOperation::ToInteger { source_width: width, signed, fractional_bits,
+                rounding: if integer_round {rounding((word >> 8) & 3)} else {FloatRounding::Zero} }
+        } else { FloatOperation::FromInteger { source_width: width, signed, fractional_bits } }
+    };
+    let dd = ((word >> 12) & 15) | ((word >> 18) & 16);
+    let dm = (word & 15) | ((word >> 1) & 16);
+    let q = word & 0x40 != 0;
+    if q && (dd | dm) & 1 != 0 { return false; }
+    if width == 16 && thumb {
+        r.guard = Expr::require_context(eq(itstate(), c(8, 0)), "FP16 vector instruction cannot execute in IT");
+    }
+    let fpscr = r.bind(Expr::register(register("a32.fpscr", 0, 32, 32)));
+    let mut status = fpscr.clone();
+    let mut trapped = c(1, 0);
+    let mut outputs = Vec::new();
+    for chunk in 0..if q {2} else {1} {
+        let source = r.bind(Expr::register(vector_slice(dm + chunk, 64)));
+        let mut output = c(64, 0);
+        for lane in 0..64 / width {
+            let (value, next_status, next_trapped) = fp_outputs(r, operation,
+                FloatEnvironment::A32Neon, width,
+                vec![Expr::extract(source.clone(), lane * width, width)], fpscr.clone(), status);
+            status = next_status;
+            trapped = bin(B::Or, trapped, next_trapped);
+            output = bin(B::Or, output, bin(B::Shl, Expr::cast(value, 64, false), c(64, u64::from(lane * width))));
+        }
+        outputs.push((dd + chunk, output));
+    }
+    r.write(register("a32.fpscr", 0, 32, 32), WritePolicy::ZeroUpper, status);
+    r.effects.push(Effect::Trap {kind: TrapKind::FloatingPoint, condition: trapped});
+    for (d, value) in outputs {r.write(vector_slice(d, 64), WritePolicy::Preserve, value);}
+    true
+}
+// FP16/FP32 lane arithmetic, comparisons, extrema and D-register pairwise
+// reductions. All source chunks are captured before any destination output.
+fn neon_float(r: &mut Recipe, word: u32, thumb: bool) -> bool {
+    let zero_key = word & 0xffb30f90;
+    let zero_compare = matches!(zero_key,
+        0xf3b10400 | 0xf3b10480 | 0xf3b10500 | 0xf3b10580 | 0xf3b10600);
+    let width = if zero_compare {
+        match (word >> 18) & 3 { 1 => 16, 2 => 32, _ => return false }
+    } else if word & (1 << 20) != 0 { 16 } else { 32 };
+    let arithmetic = word & 0xffa00f10;
+    let nonfused = matches!(arithmetic, 0xf2000d10 | 0xf2200d10);
+    let pair = matches!(arithmetic, 0xf3000d00 | 0xf3000f00 | 0xf3200f00) && !zero_compare;
+    let compare = zero_compare || matches!(arithmetic,
+        0xf2000e00 | 0xf3000e00 | 0xf3200e00 | 0xf3000e10 | 0xf3200e10);
+    let compare_kind = if zero_compare {
+        match zero_key { 0xf3b10500 => 0, 0xf3b10480 => 1, 0xf3b10400 => 2,
+            0xf3b10580 => 3, _ => 4 }
+    } else if arithmetic == 0xf2000e00 { 0 }
+        else if arithmetic & (1 << 21) == 0 { 1 } else { 2 };
+    let absolute_compare = compare && !zero_compare && word & 0x10 != 0;
+    let absolute_difference = arithmetic == 0xf3200d00;
+    let operation = if compare {
+        FloatOperation::Compare { source_width: width, signal_all_nans: compare_kind != 0 }
+    } else {
+        match arithmetic {
+            0xf2000c10 | 0xf2200c10 => FloatOperation::FusedMultiplyAdd {
+                negate_product: arithmetic == 0xf2200c10, negate_addend: false },
+            0xf2000d10 | 0xf2200d10 | 0xf3000d10 => FloatOperation::Multiply,
+            0xf2000d00 | 0xf3000d00 => FloatOperation::Add,
+            0xf2200d00 | 0xf3200d00 => FloatOperation::Subtract,
+            0xf2000f00 | 0xf2200f00 | 0xf3000f00 | 0xf3200f00
+                | 0xf3000f10 | 0xf3200f10 => FloatOperation::MinMax {
+                    minimum: word & (1 << 21) != 0, numeric: word & 0x10 != 0 },
+            _ => return false,
+        }
+    };
+    let dd = ((word >> 12) & 15) | ((word >> 18) & 16);
+    let dn = ((word >> 16) & 15) | ((word >> 3) & 16);
+    let dm = (word & 15) | ((word >> 1) & 16);
+    let q = word & 0x40 != 0;
+    if pair && q || q && (dd & 1 != 0 || dm & 1 != 0 || (!zero_compare && dn & 1 != 0)) {
+        return false;
+    }
+    if width == 16 && thumb {
+        r.guard = Expr::require_context(eq(itstate(), c(8, 0)),
+            "FP16 vector instruction cannot execute in IT");
+    }
+    let fpscr = r.bind(Expr::register(register("a32.fpscr", 0, 32, 32)));
+    let mut status = fpscr.clone();
+    let mut trapped = c(1, 0);
+    let mut outputs = vec![];
+    let lanes = 64 / width;
+    for chunk in 0..if q { 2 } else { 1 } {
+        let a = if zero_compare { c(64, 0) }
+            else { r.bind(Expr::register(vector_slice(dn + chunk, 64))) };
+        let b = r.bind(Expr::register(vector_slice(dm + chunk, 64)));
+        let old = if nonfused || matches!(operation, FloatOperation::FusedMultiplyAdd { .. }) {
+            r.bind(Expr::register(vector_slice(dd + chunk, 64)))
+        } else { c(64, 0) };
+        let mut combined = c(64, 0);
+        for lane in 0..lanes {
+            let extract = |v: Expr, index| Expr::extract(v, index * width, width);
+            let (mut left, mut right) = if zero_compare { (extract(b.clone(), lane), c(width, 0)) }
+                else if pair {
+                    let source = if lane < lanes / 2 { a.clone() } else { b.clone() };
+                    let index = (lane % (lanes / 2)) * 2;
+                    (extract(source.clone(), index), extract(source, index + 1))
+                } else { (extract(a.clone(), lane), extract(b.clone(), lane)) };
+            if absolute_compare {
+                let magnitude = c(width, (1u64 << (width - 1)) - 1);
+                left = bin(B::And, left, magnitude.clone());
+                right = bin(B::And, right, magnitude);
+            }
+            let inputs = if matches!(operation, FloatOperation::FusedMultiplyAdd { .. }) {
+                    vec![extract(old.clone(), lane), left.clone(), right.clone()]
+                } else { vec![left.clone(), right.clone()] };
+            let (mut value, next_status, next_trapped) = if nonfused {
+                fp_nonfused(r, FloatEnvironment::A32Neon, width,
+                    Some(extract(old.clone(), lane)), left, right,
+                    false, arithmetic == 0xf2200d10, fpscr.clone(), status)
+            } else {
+                fp_outputs(r, operation, FloatEnvironment::A32Neon,
+                    if compare { 4 } else { width }, inputs, fpscr.clone(), status)
+            };
+            status = next_status;
+            trapped = bin(B::Or, trapped, next_trapped);
+            if compare {
+                let n = Expr::extract(value.clone(), 3, 1);
+                let z = Expr::extract(value.clone(), 2, 1);
+                let ge = bin(B::And, Expr::extract(value.clone(), 1, 1), inv(Expr::extract(value.clone(), 0, 1)));
+                let passed = match compare_kind { 0 => z, 1 => ge, 2 => bin(B::And, ge, inv(z)),
+                    3 => bin(B::Or, n, z), _ => n };
+                value = select(passed, c(width, if width == 32 {u64::from(u32::MAX)} else {u64::from(u16::MAX)}), c(width, 0));
+            } else if absolute_difference {
+                value = bin(B::And, value, c(width, (1u64 << (width - 1)) - 1));
+            }
+            combined = bin(B::Or, combined, bin(B::Shl, Expr::cast(value, 64, false), c(64, u64::from(lane * width))));
+        }
+        outputs.push((dd + chunk, combined));
+    }
+    r.write(register("a32.fpscr", 0, 32, 32), WritePolicy::ZeroUpper, status);
+    r.effects.push(Effect::Trap { kind: TrapKind::FloatingPoint, condition: trapped });
+    for (d, value) in outputs { r.write(vector_slice(d, 64), WritePolicy::Preserve, value); }
+    true
+}
+// Legacy VCVTB/VCVTT select either half of an S register; they do not
+// inherit the AL/no-IT or LEN/STRIDE restrictions of FP16 arithmetic.
+fn vfp_half_convert(r: &mut Recipe, word: u32) -> bool {
+    if word & 0x0fbe0e50 != 0x0eb20a40 {
+        return false;
+    }
+    let from_half = word & (1 << 16) == 0;
+    let wide = if word & 0x100 == 0 { 32 } else { 64 };
+    let source_width = if from_half { 16 } else { wide };
+    let result_width = if from_half { wide } else { 16 };
+    let vd = vfp_register(word, 12, 22, if from_half { wide } else { 32 });
+    let vm = vfp_register(word, 0, 5, if from_half { 32 } else { wide });
+    let mut source = vector_slice(vm, source_width);
+    let mut destination = vector_slice(vd, result_width);
+    let half_offset = if word & 0x80 != 0 { 16 } else { 0 };
+    if from_half {
+        source.offset += half_offset;
+    } else {
+        destination.offset += half_offset;
+    }
+    let fpscr = Expr::register(register("a32.fpscr", 0, 32, 32));
+    r.guard = select(
+        r.guard.clone(),
+        Expr::require_context(
+            eq(Expr::extract(fpscr, 26, 1), c(1, 0)),
+            "legacy FP16 conversion requires IEEE half format (AHP=0)",
+        ),
+        c(1, 0),
+    );
+    fp_scalar(
+        r,
+        FloatOperation::Convert {
+            source_width,
+            round_to_odd: false,
+        },
+        result_width,
+        destination,
+        vec![Expr::register(source)],
+    );
+    true
+}
+fn vfp_compare(r: &mut Recipe, word: u32, width: u8) -> bool {
+    let key = vfp_scalar_key(word, width) & 0x0fbf0e50;
+    if !matches!(key, 0x0eb40a40 | 0x0eb50a40) {
+        return false;
+    }
+    let zero = key == 0x0eb50a40;
+    if zero && word & 0x2f != 0 {
+        return false;
+    }
+    let d = vfp_register(word, 12, 22, width);
+    let m = vfp_register(word, 0, 5, width);
+    let fpscr = r.bind(Expr::register(register("a32.fpscr", 0, 32, 32)));
+    let (nzcv, status, trapped) = fp_outputs(
+        r,
+        FloatOperation::Compare {
+            source_width: width,
+            signal_all_nans: word & 0x80 != 0,
+        },
+        FloatEnvironment::A32Vfp,
+        4,
+        vec![
+            Expr::register(vector_slice(d, width)),
+            if zero {
+                c(width, 0)
+            } else {
+                Expr::register(vector_slice(m, width))
+            },
+        ],
+        fpscr.clone(),
+        fpscr,
+    );
+    // An enabled exception updates status before taking the trap, but leaves
+    // the comparison's FPSCR.NZCV assignment and integer NZCV untouched.
+    r.write(
+        register("a32.fpscr", 0, 32, 32),
+        WritePolicy::ZeroUpper,
+        status.clone(),
+    );
+    r.effects.push(Effect::Trap {
+        kind: TrapKind::FloatingPoint,
+        condition: trapped,
+    });
+    r.write(
+        register("a32.fpscr", 0, 32, 32),
+        WritePolicy::ZeroUpper,
+        bin(
+            B::Or,
+            bin(B::And, status, c(32, 0x0fffffff)),
+            bin(B::Shl, Expr::cast(nzcv, 32, false), c(32, 28)),
+        ),
+    );
+    true
+}
+fn vfp_half_context(r: &mut Recipe, word: u32, thumb: bool) {
+    let valid = if thumb {
+        eq(itstate(), c(8, 0))
+    } else {
+        c(1, (word >> 28 == 14) as u64)
+    };
+    r.guard = select(
+        r.guard.clone(),
+        Expr::require_context(
+            valid,
+            "FP16 scalar instruction requires AL and no Thumb IT block",
+        ),
+        c(1, 0),
+    );
+}
+// Scalar rounding, numeric extrema, flag selection and fixed-point conversion.
+// Unconditional encodings are dispatched before A32's cond=1111 rejection.
+fn vfp_scalar_misc(r: &mut Recipe, word: u32, thumb: bool) -> bool {
+    let fixed_round = word & 0xffbc0cd0 == 0xfeb80840;
+    let fixed_integer = word & 0xffbc0c50 == 0xfebc0840;
+    let selection = word & 0xff800c50 == 0xfe000800;
+    let numeric = word & 0xffb00c10 == 0xfe800800;
+    let current_key = word & 0x0fbf0cd0;
+    let current_round = matches!(current_key, 0x0eb60840 | 0x0eb608c0 | 0x0eb70840);
+    let fixed_point = word >> 28 != 15 && word & 0x0fba0c50 == 0x0eba0840;
+    if !fixed_round && !fixed_integer && !selection && !numeric && !current_round && !fixed_point {
+        return false;
+    }
+    let size = ((word >> 8) & 3) as u8;
+    if size == 0 { return false; }
+    let width = 8 << size;
+    let d = vfp_register(word, 12, 22, width);
+    let m = vfp_register(word, 0, 5, width);
+    let unconditional = fixed_round || fixed_integer || selection || numeric;
+    if unconditional {
+        r.guard = if thumb {
+            Expr::require_context(eq(itstate(), c(8, 0)), "unconditional scalar VFP forbids Thumb IT")
+        } else { c(1, 1) };
+    } else if width == 16 { vfp_half_context(r, word, thumb); }
+    if selection {
+        let n = vfp_register(word, 16, 7, width);
+        let cc = (word >> 20) & 3;
+        let code = (cc << 2) | ((((cc >> 1) ^ cc) & 1) << 1);
+        vfp_ieee_write(r, vector_slice(d, width), select(condition(code),
+            Expr::register(vector_slice(n, width)), Expr::register(vector_slice(m, width))));
+        return true;
+    }
+    if fixed_point {
+        let integer_width = if word & 0x80 == 0 { 16 } else { 32 };
+        let encoded = (((word & 15) << 1) | ((word >> 5) & 1)) as u8;
+        if encoded > integer_width { return false; }
+        let fractional_bits = integer_width - encoded;
+        let signed = word & (1 << 16) == 0;
+        if word & (1 << 18) != 0 {
+            fp_scalar_control(r, FloatOperation::ToInteger { source_width: width, signed,
+                fractional_bits, rounding: FloatRounding::Zero }, integer_width,
+                vector_slice(d, if width == 64 {64} else {32}),
+                vec![Expr::register(vector_slice(d, width))], false, signed);
+        } else {
+            let mut source = vector_slice(d, if width == 64 {64} else {32});
+            source.width = integer_width;
+            fp_scalar_control(r, FloatOperation::FromInteger { source_width: integer_width, signed, fractional_bits },
+                width, vector_slice(d, width), vec![Expr::register(source)], true, false);
+        }
+        return true;
+    }
+    let rounding = || match (word >> 16) & 3 {
+        0 => FloatRounding::NearestAway, 1 => FloatRounding::NearestEven,
+        2 => FloatRounding::PositiveInfinity, _ => FloatRounding::NegativeInfinity,
+    };
+    if fixed_integer {
+        let dest = vfp_register(word, 12, 22, 32);
+        fp_scalar(r, FloatOperation::ToInteger { source_width: width, signed: word & 0x80 != 0,
+            fractional_bits: 0, rounding: rounding() }, 32, vector_slice(dest,32),
+            vec![Expr::register(vector_slice(m, width))]);
+    } else if numeric {
+        let n = vfp_register(word, 16, 7, width);
+        fp_scalar(r, FloatOperation::MinMax { minimum: word & 0x40 != 0, numeric: true }, width,
+            vector_slice(d,width),vec![Expr::register(vector_slice(n,width)),Expr::register(vector_slice(m,width))]);
+    } else {
+        fp_scalar(r, FloatOperation::RoundToIntegral {
+            rounding: if fixed_round { rounding() } else if word & 0x80 != 0 {FloatRounding::Zero} else {FloatRounding::Environment},
+            exact: current_round && current_key == 0x0eb70840,
+        }, width,vector_slice(d,width),vec![Expr::register(vector_slice(m,width))]);
+    }
+    true
+}
+// VLDM/VSTM (including VPUSH/VPOP aliases and legacy FLDMX/FSTMX).
+// The primary operation performs word-aligned 32-bit accesses even for D
+// registers. The odd legacy count contributes a spare word to writeback but
+// does not transfer that word. Never replace these with 64-bit accesses.
+fn vfp_multiple(r: &mut Recipe, word: u32, pc: u64, endian: Endian, thumb: bool) -> bool {
+    let increment = word & (1 << 23) != 0;
+    let writeback = word & (1 << 21) != 0;
+    let double = word & 0x100 != 0;
+    let width = if double { 64 } else { 32 };
+    let first = vfp_register(word, 12, 22, width);
+    let words = word & 255;
+    let count = if double { words / 2 } else { words };
+    let rn = (word >> 16) & 15;
+    if count == 0 || first + count > 32 || (double && count > 16)
+        || (double && words & 1 != 0 && first + count > 16)
+        || (rn == 15 && (writeback || thumb)) {
+        return false;
+    }
+    let incoming_base = reg(rn, pc);
+    // MemA{32} requires four-byte alignment regardless of SCTLR.A. This
+    // preflight runs after predication and before any vector or memory input.
+    r.preflight_traps.push((TrapKind::Protection, inv(eq(
+        bin(B::And, incoming_base.clone(), c(32, 3)), c(32, 0)))));
+    let base = r.bind(incoming_base);
+    let updated = r.bind(bin(if increment { B::Add } else { B::Sub },
+        base.clone(), c(32, u64::from(words * 4))));
+    let start = if increment { base } else { updated.clone() };
+    let load = word & (1 << 20) != 0;
+    for index in 0..count {
+        let source = if load { None } else {
+            Some(r.bind(Expr::register(vector_slice(first + index, width))))
+        };
+        let mut loaded = Vec::new();
+        for part in 0..if double { 2 } else { 1 } {
+            let memory = Memory { kind: Default::default(), privilege: Default::default(),
+                address: Box::new(bin(B::Add, start.clone(),
+                    c(32, u64::from(index * u32::from(width / 8) + part * 4)))),
+                width: 32, endian };
+            if load {
+                // Keep each register load at its write effect so native list
+                // faults can publish earlier completed registers.
+                loaded.push(Expr::load(memory));
+            } else {
+                let offset = if double && endian == Endian::Big { (1 - part) * 32 } else { part * 32 };
+                r.effects.push(Effect::Store { memory,
+                    value: Expr::extract(source.as_ref().unwrap().clone(), offset as u8, 32) });
+            }
+        }
+        if load {
+            // Preserve ascending access order in both endian modes.
+            let value = if double {
+                let first_word = Expr::cast(loaded[0].clone(), 64, false);
+                let second_word = Expr::cast(loaded[1].clone(), 64, false);
+                if endian == Endian::Big {
+                    bin(B::Or, bin(B::Shl, first_word, c(64, 32)), second_word)
+                } else {
+                    bin(B::Or, first_word, bin(B::Shl, second_word, c(64, 32)))
+                }
+            } else { loaded.remove(0) };
+            r.write(vector_slice(first + index, width), WritePolicy::Preserve, value);
+        }
+    }
+    if writeback { write(r, rn, updated); }
+    true
+}
+fn vfp(r: &mut Recipe, word: u32, pc: u64, endian: Endian, thumb: bool) -> bool {
+    if word & 0x0e000e00 == 0x0c000a00 {
+        let puw = ((word >> 22) & 6) | ((word >> 21) & 1);
+        if matches!(puw, 2 | 3 | 5) {
+            return vfp_multiple(r, word, pc, endian, thumb);
+        }
+    }
+    let half = (word >> 8) & 15 == 9;
+    let width = if half {
+        16
+    } else if word & 0x100 == 0 {
+        32
+    } else {
+        64
+    };
+    let vd = vfp_register(word, 12, 22, width);
+    let vn = vfp_register(word, 16, 7, width);
+    let vm = vfp_register(word, 0, 5, width);
+    // VMRS FPSCR and APSR_nzcv. Other system register numbers are not inferred.
+    if word & 0x0fff0fff == 0x0ef10a10 {
+        let rt = (word >> 12) & 15;
+        let fpscr = r.bind(Expr::register(register("a32.fpscr", 0, 32, 32)));
+        if rt == 15 {
+            for i in 0..4 {
+                setflag(
+                    r,
+                    i,
+                    Expr::extract(fpscr.clone(), 31 - i as u8, 1),
+                    &c(1, 1),
+                );
+            }
+        } else {
+            write(r, rt, fpscr);
+        }
+        return true;
+    }
+    // Scalar VLDR/VSTR. VFP register width controls memory endian conversion.
+    if word & 0x0f200e00 == 0x0d000a00 || word & 0x0f200f00 == 0x0d000900 {
+        let rn = (word >> 16) & 15;
+        let load = word & (1 << 20) != 0;
+        if rn == 15 && !load && (thumb || !half) {
+            return false;
+        }
+        let addr = bin(
+            if word & (1 << 23) != 0 {
+                B::Add
+            } else {
+                B::Sub
+            },
+            if rn == 15 {
+                c(32, pc & !3)
+            } else {
+                reg(rn, pc)
+            },
+            c(32, ((word & 255) * if half { 2 } else { 4 }) as u64),
+        );
+        let m = Memory {kind: Default::default(), privilege: Default::default(),
+            address: Box::new(addr),
+            width,
+            endian,
+        };
+        if half {
+            vfp_half_context(r, word, thumb);
+        }
+        if load {
+            vfp_ieee_write(r, vector_slice(vd, width), Expr::load(m))
+        } else {
+            r.effects.push(Effect::Store {
+                memory: m,
+                value: Expr::register(vector_slice(vd, width)),
+            })
+        }
+        return true;
+    }
+    // VMOV transfers use D-register slices so S/D/Q aliases share storage.
+    if word & 0x0fe00f7f == 0x0e000910 {
+        let rt = (word >> 12) & 15;
+        let sn = (((word >> 16) & 15) << 1) | ((word >> 7) & 1);
+        if rt == 15 {
+            return false;
+        }
+        vfp_half_context(r, word, thumb);
+        if word & (1 << 20) != 0 {
+            write(
+                r,
+                rt,
+                Expr::cast(Expr::register(vector_slice(sn, 16)), 32, false),
+            )
+        } else {
+            r.write(
+                vector_slice(sn, 32),
+                WritePolicy::Preserve,
+                Expr::cast(Expr::extract(reg(rt, pc), 0, 16), 32, false),
+            )
+        }
+        return true;
+    }
+    // Two consecutive S registers can span two different D parents.
+    if word & 0x0fe00fd0 == 0x0c400a10 {
+        let rt = (word >> 12) & 15;
+        let rt2 = (word >> 16) & 15;
+        let sm = ((word & 15) << 1) | ((word >> 5) & 1);
+        if sm == 31 || rt == 15 || rt2 == 15 || (word & (1 << 20) != 0 && rt == rt2) {
+            return false;
+        }
+        if word & (1 << 20) != 0 {
+            let a = r.bind(Expr::register(vector_slice(sm, 32)));
+            let b = r.bind(Expr::register(vector_slice(sm + 1, 32)));
+            write(r, rt, a);
+            write(r, rt2, b);
+        } else {
+            r.write(vector_slice(sm, 32), WritePolicy::Preserve, reg(rt, pc));
+            r.write(
+                vector_slice(sm + 1, 32),
+                WritePolicy::Preserve,
+                reg(rt2, pc),
+            );
+        }
+        return true;
+    }
+    // VFPExpandImm has no arithmetic or FPSCR side effect.
+    if word & 0x0fb00ef0 == 0x0eb00a00 || word & 0x0fb00ff0 == 0x0eb00900 {
+        if half {
+            vfp_half_context(r, word, thumb);
+        }
+        let imm = (((word >> 16) & 15) << 4) | (word & 15);
+        let exponent_bits = match width {
+            16 => 5,
+            32 => 8,
+            _ => 11,
+        };
+        let fraction_bits = width - exponent_bits - 1;
+        let repeated = if imm & 64 != 0 {
+            (1u64 << (exponent_bits - 3)) - 1
+        } else {
+            0
+        };
+        let exponent = (((!imm >> 6) & 1) as u64) << (exponent_bits - 1)
+            | (repeated << 2)
+            | ((imm >> 4) & 3) as u64;
+        let value = ((imm >> 7) as u64) << (width - 1)
+            | (exponent << fraction_bits)
+            | ((imm & 15) as u64) << (fraction_bits - 4);
+        r.write(
+            vector_slice(vd, if half { 32 } else { width }),
+            WritePolicy::Preserve,
+            c(if half { 32 } else { width }, value),
+        );
+        return true;
+    }
+    if half { vfp_half_context(r, word, thumb); }
+
+    if word & 0x0fe00f7f == 0x0e000a10 {
+        let rt = (word >> 12) & 15;
+        let sn = (((word >> 16) & 15) << 1) | ((word >> 7) & 1);
+        if rt == 15 {
+            return false;
+        }
+        if word & (1 << 20) != 0 {
+            write(r, rt, Expr::register(vector_slice(sn, 32)))
+        } else {
+            r.write(vector_slice(sn, 32), WritePolicy::Preserve, reg(rt, pc))
+        }
+        return true;
+    }
+    if word & 0x0fe00fd0 == 0x0c400b10 {
+        let rt = (word >> 12) & 15;
+        let rt2 = (word >> 16) & 15;
+        let dm = (word & 15) | ((word >> 1) & 16);
+        if rt == 15 || rt2 == 15 || (word & (1 << 20) != 0 && rt == rt2) {
+            return false;
+        }
+        if word & (1 << 20) != 0 {
+            let value = r.bind(Expr::register(vector_slice(dm, 64)));
+            write(r, rt, Expr::extract(value.clone(), 0, 32));
+            write(r, rt2, Expr::extract(value, 32, 32))
+        } else {
+            r.write(
+                vector_slice(dm, 64),
+                WritePolicy::Preserve,
+                bin(
+                    B::Or,
+                    Expr::cast(reg(rt, pc), 64, false),
+                    bin(B::Shl, Expr::cast(reg(rt2, pc), 64, false), c(64, 32)),
+                ),
+            )
+        }
+        return true;
+    }
+    if vfp_half_convert(r, word)
+        || vfp_compare(r, word, width)
+        || vfp_nonfused(r, word, width)
+        || vfp_extended(r, word, width)
+    {
+        return true;
+    }
+    // Pure bitwise VFP move, absolute and negation do not update FPSCR.
+    let unary = vfp_scalar_key(word, width) & 0x0fbf0ed0;
+    if matches!(unary, 0x0eb00a40 | 0x0eb00ac0 | 0x0eb10a40) {
+        if half && unary == 0x0eb00a40 { return false; }
+        vfp_scalar_context(r);
+        let value = Expr::register(vector_slice(vm, width));
+        let sign = 1u64 << (width - 1);
+        let value = match unary {
+            0x0eb00ac0 => bin(B::And, value, c(width, !sign)),
+            0x0eb10a40 => bin(B::Xor, value, c(width, sign)),
+            _ => value,
+        };
+        vfp_ieee_write(r, vector_slice(vd, width), value);
+        return true;
+    }
+    let operation = match vfp_scalar_key(word, width) & 0x0fb00e50 {
+        0x0e300a00 => FloatOperation::Add,
+        0x0e300a40 => FloatOperation::Subtract,
+        0x0e200a00 => FloatOperation::Multiply,
+        0x0e800a00 => FloatOperation::Divide,
+        _ => {
+            if unary == 0x0eb10ac0 {
+                FloatOperation::SquareRoot
+            } else {
+                return false;
+            }
+        }
+    };
+    let fpscr = r.bind(Expr::register(register("a32.fpscr", 0, 32, 32)));
+    // The old VFP vector LEN/STRIDE mode requires a separate multi-result recipe.
+    vfp_scalar_context(r);
+    let inputs = if operation == FloatOperation::SquareRoot {
+        vec![r.bind(Expr::register(vector_slice(vm, width)))]
+    } else {
+        vec![
+            r.bind(Expr::register(vector_slice(vn, width))),
+            r.bind(Expr::register(vector_slice(vm, width))),
+        ]
+    };
+    let projection = |projection| {
+        Expr::float(FloatExpression {
+            operation,
+            environment: FloatEnvironment::A32Vfp,
+            width,
+            inputs: inputs.clone(),
+            control: Box::new(fpscr.clone()),
+            status: Box::new(fpscr.clone()),
+            projection,
+        })
+    };
+    let value = r.bind(projection(FloatProjection::Value));
+    let status = r.bind(projection(FloatProjection::Status));
+    let trapped = r.bind(projection(FloatProjection::Trapped));
+    r.write(
+        register("a32.fpscr", 0, 32, 32),
+        WritePolicy::ZeroUpper,
+        status,
+    );
+    r.effects.push(Effect::Trap {
+        kind: TrapKind::FloatingPoint,
+        condition: trapped,
+    });
+    vfp_ieee_write(r, vector_slice(vd, width), value);
+    true
+}
+fn reverse(value: Expr, half: bool) -> Expr {
+    let mut result = c(32, 0);
+    for i in 0..4 {
+        let dst = if half { i ^ 1 } else { 3 - i };
+        result = bin(
+            B::Or,
+            result,
+            bin(
+                B::Shl,
+                Expr::cast(Expr::extract(value.clone(), i * 8, 8), 32, false),
+                c(32, (dst * 8) as u64),
+            ),
+        );
+    }
+    result
+}
+fn thumb16(word: u32, address: u64, endian: Endian) -> Recipe {
+    let next = (address as u32).wrapping_add(2) as u64;
+    let pc = (address as u32).wrapping_add(4) as u64;
+    let mut r = thumb_recipe(next);
+    if let Some(r) = system::thumb(word, 2, r.clone()) {
+        return r;
+    }
+    let implicit_flags = inv(in_it());
+    let rd = word & 7;
+    let rn = (word >> 3) & 7;
+    let rm = (word >> 6) & 7;
+    if word & 0xff00 == 0xbf00 {
+        let mask = word & 15;
+        let cond = (word >> 4) & 15;
+        if mask == 0 {
+            return if word == 0xbf00 { r } else { unsupported(next) };
+        }
+        if cond >= 14 {
+            return unsupported(next);
+        }
+        r = Recipe::new(next, 32);
+        r.guard = select(
+            in_it(),
+            Expr::require_context(c(1, 0), "nested IT instruction"),
+            c(1, 1),
+        );
+        r.write_always(
+            register("a32.itstate", 0, 8, 8),
+            WritePolicy::ZeroUpper,
+            c(8, (word & 255) as u64),
+        );
+        return r;
+    }
+    if word & 0xe000 == 0 {
+        if word & 0x1800 == 0x1800 {
+            let b = if word & 0x400 != 0 {
+                c(32, rm as u64)
+            } else {
+                reg(rm, pc)
+            };
+            alu(
+                &mut r,
+                if word & 0x200 != 0 { 2 } else { 4 },
+                rd,
+                reg(rn, pc),
+                b,
+                flag(2),
+                implicit_flags,
+                true,
+            );
+        } else {
+            let (v, carry) = shift(
+                reg(rn, pc),
+                (word >> 11) & 3,
+                c(32, ((word >> 6) & 31) as u64),
+                true,
+            );
+            alu(&mut r, 13, rd, c(32, 0), v, carry, implicit_flags, true);
+        }
+        return r;
+    }
+    if word & 0xe000 == 0x2000 {
+        let op = (word >> 11) & 3;
+        let rd = (word >> 8) & 7;
+        alu(
+            &mut r,
+            [13, 10, 4, 2][op as usize],
+            rd,
+            reg(rd, pc),
+            c(32, (word & 255) as u64),
+            flag(2),
+            if op == 1 { c(1, 1) } else { implicit_flags },
+            true,
+        );
+        return r;
+    }
+    if word & 0xfc00 == 0x4000 {
+        let op = (word >> 6) & 15;
+        if matches!(op, 2 | 3 | 4 | 7) {
+            let (v, carry) = shift(
+                reg(rd, pc),
+                match op {
+                    2 => 0,
+                    3 => 1,
+                    4 => 2,
+                    _ => 3,
+                },
+                Expr::extract(reg(rn, pc), 0, 8),
+                false,
+            );
+            alu(&mut r, 13, rd, c(32, 0), v, carry, implicit_flags, true)
+        } else if op == 13 {
+            multiply(&mut r, rd, rd, rn, None, implicit_flags, pc)
+        } else {
+            let code = match op {
+                0 => 0,
+                1 => 1,
+                5 => 5,
+                6 => 6,
+                8 => 8,
+                9 => 3,
+                10 => 10,
+                11 => 11,
+                12 => 12,
+                14 => 14,
+                _ => 15,
+            };
+            alu(
+                &mut r,
+                code,
+                rd,
+                reg(if op == 9 { rn } else { rd }, pc),
+                if op == 9 { c(32, 0) } else { reg(rn, pc) },
+                flag(2),
+                if matches!(op, 8 | 10 | 11) {
+                    c(1, 1)
+                } else {
+                    implicit_flags
+                },
+                true,
+            )
+        }
+        return r;
+    }
+    if word & 0xfc00 == 0x4400 {
+        let op = (word >> 8) & 3;
+        let rd = (word & 7) | ((word >> 4) & 8);
+        let rm = (word >> 3) & 15;
+        if rd == 15 && rm == 15 {
+            return unsupported(next);
+        }
+        if op == 1 && rd < 8 && rm < 8 {
+            return unsupported(next);
+        }
+        if op == 3 {
+            if word & 7 != 0 || rm == 15 {
+                return unsupported(next);
+            }
+            last_it(&mut r);
+            let link = word & 0x80 != 0;
+            if link {
+                write(&mut r, 14, c(32, next | 1))
+            }
+            branch_pc(
+                &mut r,
+                reg(rm, pc),
+                true,
+                if link {
+                    FlowKind::Call
+                } else if rm == 14 {
+                    FlowKind::Return
+                } else {
+                    FlowKind::Branch
+                },
+                true,
+            );
+        } else {
+            if op == 1 && (rd == 15 || rm == 15) {
+                return unsupported(next);
+            }
+            if rd == 15 {
+                last_it(&mut r)
+            }
+            alu(
+                &mut r,
+                [4, 10, 13][op as usize],
+                rd,
+                reg(rd, pc),
+                reg(rm, pc),
+                flag(2),
+                c(1, (op == 1) as u64),
+                true,
+            )
+        }
+        return r;
+    }
+    if word & 0xf800 == 0x4800 {
+        memory(
+            &mut r,
+            true,
+            (word >> 8) & 7,
+            c(32, (pc & !3).wrapping_add(((word & 255) * 4) as u64)),
+            32,
+            false,
+            endian,
+            pc,
+            true,
+        );
+        return r;
+    }
+    if word & 0xf000 == 0x5000 {
+        let op = (word >> 9) & 7;
+        let load = op >= 3;
+        let width = match op {
+            0 | 4 => 32,
+            1 | 5 | 7 => 16,
+            _ => 8,
+        };
+        memory(
+            &mut r,
+            load,
+            rd,
+            bin(B::Add, reg(rn, pc), reg(rm, pc)),
+            width,
+            matches!(op, 3 | 7),
+            endian,
+            pc,
+            true,
+        );
+        return r;
+    }
+    if word & 0xe000 == 0x6000 || word & 0xf000 == 0x8000 {
+        let half = word & 0xf000 == 0x8000;
+        let byte = !half && word & 0x1000 != 0;
+        let width = if half {
+            16
+        } else if byte {
+            8
+        } else {
+            32
+        };
+        memory(
+            &mut r,
+            word & 0x800 != 0,
+            rd,
+            bin(
+                B::Add,
+                reg(rn, pc),
+                c(32, (((word >> 6) & 31) * (width as u32 / 8)) as u64),
+            ),
+            width,
+            false,
+            endian,
+            pc,
+            true,
+        );
+        return r;
+    }
+    if word & 0xf000 == 0x9000 {
+        memory(
+            &mut r,
+            word & 0x800 != 0,
+            (word >> 8) & 7,
+            bin(B::Add, reg(13, pc), c(32, ((word & 255) * 4) as u64)),
+            32,
+            false,
+            endian,
+            pc,
+            true,
+        );
+        return r;
+    }
+    if word & 0xf000 == 0xa000 {
+        write(
+            &mut r,
+            (word >> 8) & 7,
+            bin(
+                B::Add,
+                if word & 0x800 != 0 {
+                    reg(13, pc)
+                } else {
+                    c(32, pc & !3)
+                },
+                c(32, ((word & 255) * 4) as u64),
+            ),
+        );
+        return r;
+    }
+    if word & 0xff00 == 0xb000 {
+        write(
+            &mut r,
+            13,
+            bin(
+                if word & 0x80 != 0 { B::Sub } else { B::Add },
+                reg(13, pc),
+                c(32, ((word & 127) * 4) as u64),
+            ),
+        );
+        return r;
+    }
+    if word & 0xff00 == 0xb200 {
+        let op = (word >> 6) & 3;
+        let width = if op & 1 == 0 { 16 } else { 8 };
+        write(
+            &mut r,
+            rd,
+            Expr::cast(Expr::extract(reg(rn, pc), 0, width), 32, op < 2),
+        );
+        return r;
+    }
+    if word & 0xff00 == 0xba00 {
+        let op = (word >> 6) & 3;
+        if op == 2 {
+            return unsupported(next);
+        }
+        let v = reverse(reg(rn, pc), op != 0);
+        write(
+            &mut r,
+            rd,
+            if op == 3 {
+                Expr::cast(Expr::extract(v, 0, 16), 32, true)
+            } else {
+                v
+            },
+        );
+        return r;
+    }
+    if word & 0xf500 == 0xb100 {
+        // CBZ/CBNZ are forbidden in IT blocks.
+        r.guard = select(
+            in_it(),
+            Expr::require_context(c(1, 0), "CBZ in IT block"),
+            c(1, 1),
+        );
+        let zero = eq(reg(word & 7, pc), c(32, 0));
+        let cond = if word & 0x800 != 0 { inv(zero) } else { zero };
+        let off = ((word >> 2) & 0x3e) | ((word >> 3) & 0x40);
+        r.branch(FlowKind::Branch, cond, c(32, pc.wrapping_add(off as u64)));
+        return r;
+    }
+    if word & 0xf600 == 0xb400 {
+        let load = word & 0x800 != 0;
+        let list = (word & 255)
+            | if word & 0x100 != 0 {
+                1 << if load { 15 } else { 14 }
+            } else {
+                0
+            };
+        if load && list & 0x8000 != 0 {
+            last_it(&mut r)
+        }
+        if !multiple(&mut r, 13, list, load, true, load, !load, pc, endian, true) {
+            return unsupported(next);
+        }
+        return r;
+    }
+    if word & 0xf000 == 0xc000 {
+        let rn = (word >> 8) & 7;
+        let list = word & 255;
+        let load = word & 0x800 != 0;
+        // T16 LDM suppresses writeback when the base is in the list.
+        let wb = !load || list & (1 << rn) == 0;
+        if !multiple(&mut r, rn, list, load, wb, true, false, pc, endian, true) {
+            return unsupported(next);
+        }
+        return r;
+    }
+    if word & 0xf000 == 0xd000 {
+        let cond = (word >> 8) & 15;
+        if cond >= 14 {
+            return unsupported(next);
+        }
+        r.guard = select(
+            in_it(),
+            Expr::require_context(c(1, 0), "conditional branch in IT block"),
+            c(1, 1),
+        );
+        r.branch(
+            FlowKind::Branch,
+            condition(cond),
+            c(32, pc.wrapping_add(sign(((word & 255) << 1) as u64, 9))),
+        );
+        return r;
+    }
+    if word & 0xf800 == 0xe000 {
+        last_it(&mut r);
+        r.branch(
+            FlowKind::Branch,
+            c(1, 1),
+            c(32, pc.wrapping_add(sign(((word & 0x7ff) << 1) as u64, 12))),
+        );
+        return r;
+    }
+    unsupported(next)
+}
+// ThumbExpandImm_C: four replication forms and an architectural rotate. Invalid
+// zero replication forms are reserved and must not acquire executable recipes.
+fn thumb_immediate(imm: u32) -> Option<(Expr, Expr)> {
+    if imm >> 10 == 0 {
+        let byte = imm & 255;
+        let v = match (imm >> 8) & 3 {
+            0 => byte,
+            1 => byte | (byte << 16),
+            2 => (byte << 8) | (byte << 24),
+            _ => byte * 0x01010101,
+        };
+        if imm & 0x300 != 0 && byte == 0 {
+            return None;
+        }
+        Some((c(32, v as u64), flag(2)))
+    } else {
+        let v = (0x80 | (imm & 127)).rotate_right((imm >> 7) & 31);
+        Some((c(32, v as u64), c(1, (v >> 31) as u64)))
+    }
+}
+fn thumb32(word: u32, address: u64, endian: Endian) -> Recipe {
+    let next = (address as u32).wrapping_add(4) as u64;
+    let pc = (address as u32).wrapping_add(4) as u64;
+    let mut r = thumb_recipe(next);
+    if let Some(legal) = preload_hint(word, true) {
+        return if legal { r } else { unsupported(next) };
+    }
+    if let Some(r) = system::thumb(word, 4, r.clone()) {
+        return r;
+    }
+    if let Some(r) = arm32_integer::thumb(word, 4, r.clone()) {
+        return r;
+    }
+    if let Some(r) = arm32_crypto::thumb(word, 4, r.clone()) {
+        return r;
+    }
+    if let Some(r) = arm32_memory::thumb(word, 4, r.clone(), endian) {
+        return r;
+    }
+    let rn = (word >> 16) & 15;
+    let rd = (word >> 8) & 15;
+    let rm = word & 15;
+    if let Some(r) = thumb_atomic(word, r.clone(), pc, next, endian) {
+        return r;
+    }
+    if word & 0xef000000 == 0xef000000
+        && neon(
+            &mut r,
+            (word & 0x00ffffff) | 0xf2000000 | ((word & 0x10000000) >> 4),
+            true,
+        )
+    {
+        return r;
+    }
+    if neon_core(&mut r, word, pc) {
+        return r;
+    }
+    if neon_dot(&mut r, word, true) {
+        return r;
+    }
+    if vfp_scalar_misc(&mut r, word, true) { return r; }
+    if vfp(&mut r, word, pc, endian, true) {
+        return r;
+    }
+    if word & 0xf8008000 == 0xf0008000 {
+        let s = (word >> 26) & 1;
+        let j1 = (word >> 13) & 1;
+        let j2 = (word >> 11) & 1;
+        let class = word & 0x5000;
+        if class == 0 {
+            let cond = (word >> 22) & 15;
+            if cond >= 14 {
+                return unsupported(next);
+            }
+            let off = (s << 20)
+                | (j2 << 19)
+                | (j1 << 18)
+                | (((word >> 16) & 63) << 12)
+                | ((word & 0x7ff) << 1);
+            r.guard = select(
+                in_it(),
+                Expr::require_context(c(1, 0), "conditional branch in IT block"),
+                c(1, 1),
+            );
+            r.branch(
+                FlowKind::Branch,
+                condition(cond),
+                c(32, pc.wrapping_add(sign(off as u64, 21))),
+            );
+            return r;
+        }
+        last_it(&mut r);
+        let link = class & 0x4000 != 0;
+        let exchange = class == 0x4000;
+        if exchange && word & 1 != 0 {
+            return unsupported(next);
+        }
+        let i1 = (!(j1 ^ s)) & 1;
+        let i2 = (!(j2 ^ s)) & 1;
+        let off = (s << 24)
+            | (i1 << 23)
+            | (i2 << 22)
+            | (((word >> 16) & 0x3ff) << 12)
+            | ((word & 0x7ff) << 1);
+        if link {
+            write(&mut r, 14, c(32, next | 1))
+        }
+        if exchange {
+            thumb_state(&mut r, c(1, 0))
+        }
+        let target = (if exchange { pc & !3 } else { pc }).wrapping_add(sign(off as u64, 25));
+        r.branch(
+            if link {
+                FlowKind::Call
+            } else {
+                FlowKind::Branch
+            },
+            c(1, 1),
+            c(32, if exchange { target & !3 } else { target }),
+        );
+        return r;
+    }
+    // Shifted-register and modified-immediate data processing share operation
+    // fields. The S bit here is explicit and is not suppressed by ITSTATE.
+    if word & 0xfe000000 == 0xea000000 || word & 0xfa008000 == 0xf0000000 {
+        let immediate = word & 0x10000000 != 0;
+        let op = (word >> 21) & 15;
+        let s = word & (1 << 20) != 0;
+        let (operand, carry) = if immediate {
+            let imm = (((word >> 26) & 1) << 11) | (((word >> 12) & 7) << 8) | (word & 255);
+            match thumb_immediate(imm) {
+                Some(v) => v,
+                None => return unsupported(next),
+            }
+        } else {
+            if rm == 15 || word & 0x8000 != 0 {
+                return unsupported(next);
+            }
+            shift(
+                reg(rm, pc),
+                (word >> 4) & 3,
+                c(32, ((((word >> 12) & 7) << 2) | ((word >> 6) & 3)) as u64),
+                true,
+            )
+        };
+        let code = match op {
+            0 => {
+                if rd == 15 && s {
+                    8
+                } else {
+                    0
+                }
+            }
+            1 => 14,
+            2 => {
+                if rn == 15 {
+                    13
+                } else {
+                    12
+                }
+            }
+            3 => {
+                if rn == 15 {
+                    15
+                } else {
+                    15
+                }
+            }
+            4 => {
+                if rd == 15 && s {
+                    9
+                } else {
+                    1
+                }
+            }
+            8 => {
+                if rd == 15 && s {
+                    11
+                } else {
+                    4
+                }
+            }
+            10 => 5,
+            11 => 6,
+            13 => {
+                if rd == 15 && s {
+                    10
+                } else {
+                    2
+                }
+            }
+            14 => 3,
+            _ => return unsupported(next),
+        };
+        if rd == 15 && !matches!(code, 8..=11) {
+            return unsupported(next);
+        }
+        if rn == 15 && !matches!(op, 2 | 3) {
+            return unsupported(next);
+        }
+        // ORN is OR with complemented operand; MVN is its Rn==PC alias.
+        if op == 3 && rn != 15 {
+            let value = r.bind(bin(B::Or, reg(rn, pc), inv(operand)));
+            write(&mut r, rd, value.clone());
+            if s {
+                nz(&mut r, &value, &c(1, 1));
+                setflag(&mut r, 2, carry, &c(1, 1))
+            }
+        } else {
+            alu(
+                &mut r,
+                code,
+                rd,
+                reg(rn, pc),
+                operand,
+                carry,
+                c(1, s as u64),
+                true,
+            )
+        }
+        return r;
+    }
+    // ADDW/SUBW, MOVW/MOVT and scalar bitfields.
+    if word & 0xfa008000 == 0xf2000000 {
+        let op = (word >> 20) & 31;
+        let imm = (((word >> 26) & 1) << 11) | (((word >> 12) & 7) << 8) | (word & 255);
+        if rd == 15 {
+            return unsupported(next);
+        }
+        match op {
+            0 | 10 => {
+                let base = if rn == 15 {
+                    c(32, pc & !3)
+                } else {
+                    reg(rn, pc)
+                };
+                write(
+                    &mut r,
+                    rd,
+                    bin(
+                        if op == 0 { B::Add } else { B::Sub },
+                        base,
+                        c(32, imm as u64),
+                    ),
+                )
+            }
+            4 | 12 => {
+                let imm = (rn << 12) | imm;
+                let v = if op == 4 {
+                    c(32, imm as u64)
+                } else {
+                    bin(
+                        B::Or,
+                        bin(B::And, reg(rd, pc), c(32, 0xffff)),
+                        c(32, (imm << 16) as u64),
+                    )
+                };
+                write(&mut r, rd, v)
+            }
+            20 | 22 | 28 => {
+                let lsb = (((word >> 12) & 7) << 2) | ((word >> 6) & 3);
+                let size = word & 31;
+                let insert = op == 22;
+                if !bitfield(
+                    &mut r,
+                    rd,
+                    rn,
+                    lsb,
+                    if insert {
+                        size.wrapping_sub(lsb).wrapping_add(1)
+                    } else {
+                        size + 1
+                    },
+                    op == 20,
+                    insert,
+                    pc,
+                ) {
+                    return unsupported(next);
+                }
+            }
+            _ => return unsupported(next),
+        }
+        return r;
+    }
+    // Scalar transfers, both positive imm12 and register/imm8 indexed forms.
+    if word & 0xfe000000 == 0xf8000000 {
+        let op = (word >> 20) & 31;
+        let rt = (word >> 12) & 15;
+        let load = op & 1 != 0;
+        let signed = op & 16 != 0;
+        let size = (op >> 1) & 3;
+        if size == 3 || (!load && signed) {
+            return unsupported(next);
+        }
+        let width = 8u8 << size;
+        if rt == 15 && (width != 32 || !load) {
+            return unsupported(next);
+        }
+        let positive = op & 8 != 0;
+        let mut wb = false;
+        let base = if rn == 15 {
+            c(32, pc & !3)
+        } else {
+            reg(rn, pc)
+        };
+        let base = r.bind(base);
+        let (addr, adjusted) = if rn == 15 {
+            if !load {
+                return unsupported(next);
+            }
+            let a = bin(
+                if positive { B::Add } else { B::Sub },
+                base,
+                c(32, (word & 0xfff) as u64),
+            );
+            (a.clone(), a)
+        } else if positive {
+            let a = bin(B::Add, base, c(32, (word & 0xfff) as u64));
+            (a.clone(), a)
+        } else if word & 0x800 != 0 {
+            let pre = word & 0x400 != 0;
+            let up = word & 0x200 != 0;
+            wb = word & 0x100 != 0;
+            if !pre && !wb {
+                return unsupported(next);
+            }
+            let a = r.bind(bin(
+                if up { B::Add } else { B::Sub },
+                base.clone(),
+                c(32, (word & 255) as u64),
+            ));
+            (if pre { a.clone() } else { base }, a)
+        } else {
+            if word & 0xfc0 != 0 || rm == 15 {
+                return unsupported(next);
+            }
+            let a = bin(
+                B::Add,
+                base,
+                bin(B::Shl, reg(rm, pc), c(32, ((word >> 4) & 3) as u64)),
+            );
+            (a.clone(), a)
+        };
+        if wb && rn == rt {
+            return unsupported(next);
+        }
+        if rt == 15 {
+            last_it(&mut r)
+        }
+        memory(&mut r, load, rt, addr, width, signed, endian, pc, true);
+        if wb {
+            write(&mut r, rn, adjusted)
+        }
+        return r;
+    }
+    if word & 0xfe400000 == 0xe8400000 {
+        let load = word & (1 << 20) != 0;
+        let pre = word & (1 << 24) != 0;
+        let wb = word & (1 << 21) != 0;
+        let rt = (word >> 12) & 15;
+        let rt2 = (word >> 8) & 15;
+        if (!pre && !wb)
+            || rt >= 13
+            || rt2 >= 13
+            || rt == rt2
+            || (wb && (rn == 15 || rn == rt || rn == rt2))
+            || (!load && rn == 15)
+        {
+            return unsupported(next);
+        }
+        let base = r.bind(if rn == 15 {
+            c(32, pc & !3)
+        } else {
+            reg(rn, pc)
+        });
+        let adjusted = r.bind(bin(
+            if word & (1 << 23) != 0 {
+                B::Add
+            } else {
+                B::Sub
+            },
+            base.clone(),
+            c(32, ((word & 255) * 4) as u64),
+        ));
+        let addr = if pre { adjusted.clone() } else { base };
+        memory(&mut r, load, rt, addr.clone(), 32, false, endian, pc, true);
+        memory(
+            &mut r,
+            load,
+            rt2,
+            bin(B::Add, addr, c(32, 4)),
+            32,
+            false,
+            endian,
+            pc,
+            true,
+        );
+        if wb {
+            write(&mut r, rn, adjusted)
+        }
+        return r;
+    }
+    // LDM/STM and PUSH/POP wide aliases (ordinary register lists only).
+    if word & 0xfe400000 == 0xe8000000 && word & 0x00400000 == 0 {
+        let load = word & (1 << 20) != 0;
+        let wb = word & (1 << 21) != 0;
+        let before = word & (1 << 24) != 0;
+        let up = word & (1 << 23) != 0;
+        let list = word & 0xffff;
+        if list.count_ones() < 2
+            || list & 0x2000 != 0
+            || (!load && list & 0x8000 != 0)
+            || (load && list & 0xc000 == 0xc000)
+            || up == before
+        {
+            return unsupported(next);
+        }
+        if load && list & 0x8000 != 0 {
+            last_it(&mut r)
+        }
+        if !multiple(&mut r, rn, list, load, wb, up, before, pc, endian, true) {
+            return unsupported(next);
+        }
+        return r;
+    }
+    if word & 0xffd0f0f0 == 0xfb90f0f0 {
+        if rd == 15 || rn == 15 || rm == 15 {
+            return unsupported(next);
+        }
+        write(
+            &mut r,
+            rd,
+            bin(
+                if word & (1 << 21) != 0 {
+                    B::Udiv
+                } else {
+                    B::Sdiv
+                },
+                reg(rn, pc),
+                reg(rm, pc),
+            ),
+        );
+        return r;
+    }
+    // MUL/MLA/MLS, and signed/unsigned long multiply and accumulate.
+    if word & 0xfff000c0 == 0xfb000000 {
+        let ra = (word >> 12) & 15;
+        if rn == 15 || rm == 15 || rd == 15 {
+            return unsupported(next);
+        }
+        if word & 0x30 == 0 {
+            multiply(
+                &mut r,
+                rd,
+                rn,
+                rm,
+                if ra == 15 { None } else { Some(ra) },
+                c(1, 0),
+                pc,
+            )
+        } else if word & 0x30 == 0x10 && ra != 15 {
+            write(
+                &mut r,
+                rd,
+                bin(B::Sub, reg(ra, pc), bin(B::Mul, reg(rn, pc), reg(rm, pc))),
+            )
+        } else {
+            return unsupported(next);
+        }
+        return r;
+    }
+    if word & 0xff8000f0 == 0xfb800000 {
+        let op = (word >> 20) & 7;
+        let lo = (word >> 12) & 15;
+        let hi = rd;
+        if !matches!(op, 0 | 2 | 4 | 6) || rn == 15 || rm == 15 || lo == 15 || hi == 15 || lo == hi
+        {
+            return unsupported(next);
+        }
+        let p = bin(
+            B::Mul,
+            Expr::cast(reg(rn, pc), 64, op & 2 == 0),
+            Expr::cast(reg(rm, pc), 64, op & 2 == 0),
+        );
+        let p = if op & 4 != 0 {
+            bin(
+                B::Add,
+                p,
+                bin(
+                    B::Or,
+                    Expr::cast(reg(lo, pc), 64, false),
+                    bin(B::Shl, Expr::cast(reg(hi, pc), 64, false), c(64, 32)),
+                ),
+            )
+        } else {
+            p
+        };
+        let p = r.bind(p);
+        write(&mut r, lo, Expr::extract(p.clone(), 0, 32));
+        write(&mut r, hi, Expr::extract(p, 32, 32));
+        return r;
+    }
+    if word & 0xfff0f0c0 == 0xfa90f080 || word & 0xfff0f0f0 == 0xfab0f080 {
+        if rn != rm || rn == 15 || rd == 15 {
+            return unsupported(next);
+        }
+        let v = if word & 0x00200000 != 0 {
+            Expr::unary(U::CountLeadingZeros, reg(rm, pc))
+        } else {
+            match (word >> 4) & 3 {
+                0 => Expr::unary(U::ReverseBytes, reg(rm, pc)),
+                1 => reverse(reg(rm, pc), true),
+                2 => Expr::unary(U::ReverseBits, reg(rm, pc)),
+                _ => Expr::cast(Expr::extract(reverse(reg(rm, pc), true), 0, 16), 32, true),
+            }
+        };
+        write(&mut r, rd, v);
+        return r;
+    }
+    if word & 0xff80f0c0 == 0xfa00f080 {
+        let op = (word >> 20) & 7;
+        if !matches!(op, 0 | 1 | 4 | 5) || rm == 15 || rd == 15 {
+            return unsupported(next);
+        }
+        let v = Expr::cast(
+            Expr::extract(
+                bin(B::Ror, reg(rm, pc), c(32, (((word >> 4) & 3) * 8) as u64)),
+                0,
+                if op & 4 == 0 { 16 } else { 8 },
+            ),
+            32,
+            op & 1 == 0,
+        );
+        write(
+            &mut r,
+            rd,
+            if rn == 15 {
+                v
+            } else {
+                bin(B::Add, reg(rn, pc), v)
+            },
+        );
+        return r;
+    }
+    // Register-controlled shifts (FA00..FA70), without the extend aliases.
+    if word & 0xff80f0f0 == 0xfa00f000 {
+        if rn == 15 || rm == 15 || rd == 15 {
+            return unsupported(next);
+        }
+        let (v, carry) = shift(
+            reg(rn, pc),
+            (word >> 21) & 3,
+            Expr::extract(reg(rm, pc), 0, 8),
+            false,
+        );
+        alu(
+            &mut r,
+            13,
+            rd,
+            c(32, 0),
+            v,
+            carry,
+            c(1, ((word >> 20) & 1) as u64),
+            true,
+        );
+        return r;
+    }
+    unsupported(next)
+}
+pub fn for_thumb(word: u32, length: usize, address: u64, endian: Endian) -> Recipe {
+    match length {
+        2 => thumb16(word & 0xffff, address, endian),
+        4 => thumb32(word, address, endian),
+        _ => unsupported(address.wrapping_add(length as u64)),
+    }
+}
+impl super::Decoded {
+    /// Target-qualified pre-Armv8 VFP short-vector execution. The caller must
+    /// select a target that implements Armv7 Appendix D11 and its exception
+    /// protocol. None means an unaffected instruction; use the scalar recipe.
+    pub fn legacy_vfp_recipe(&self, address: u64, context: LegacyVfpContext) -> Option<Recipe> {
+        for_legacy_vfp(
+            self.raw(),
+            self.length as usize,
+            address,
+            self.mode == super::Mode::Thumb,
+            context,
+        )
+    }
+    /// Successful scalar execution with little-endian data memory by default.
+    /// Thumb recipes read a32.itstate and explicitly update pipeline ITSTATE.
+    pub fn semantic_recipe(&self, address: u64) -> Recipe {
+        self.semantic_recipe_with_endian(address, Endian::Little)
+    }
+    /// Data endianness is independent of instruction-byte decoding endianness.
+    pub fn semantic_recipe_with_endian(&self, address: u64, endian: Endian) -> Recipe {
+        if self.mode == super::Mode::Arm {
+            for_word_with_endian(self.raw(), address, endian)
+        } else {
+            for_thumb(self.raw(), self.length as usize, address, endian)
+        }
+    }
+}

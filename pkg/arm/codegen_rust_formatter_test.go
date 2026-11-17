@@ -20,6 +20,7 @@ func TestRustFormatterExportsAPIAndPreservesNegativeFormulaScale(t *testing.T) {
 	generated := source.String()
 	for _, required := range []string{
 		"pub enum FormatError", "pub fn format(word: u32, _address: u64)",
+		"pub fn format_into(word: u32, _address: u64, output: &mut String)",
 		"if formula.raw_mul == 0 { 1 } else { formula.raw_mul }",
 		"31u32.checked_sub((n << 6 | (!imms & 0x3f)).leading_zeros())?",
 	} {

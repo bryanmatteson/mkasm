@@ -15,6 +15,13 @@ impl std::fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
+// A compact rejection key, never an identity: equal keys still compare names.
+#[inline]
+const fn field_key(name:&str)->u16 {
+    let bytes=name.as_bytes();let mut key=0x811cu16;let mut i=0;
+    while i<bytes.len(){key=(key^bytes[i] as u16).wrapping_mul(0x0193);i+=1;}key
+}
+
 /// Allocation-free lazy view of an instruction's decoded fields.
 #[derive(Clone, Copy)]
 pub struct Fields {
@@ -23,8 +30,10 @@ pub struct Fields {
 }
 
 impl Fields {
+    #[inline]
     pub fn get(&self, name: &str) -> Option<u64> {
-        let field = self.defs.iter().find(|field| field.name == name)?;
+        let key=field_key(name);
+        let field = self.defs.iter().find(|field| field.key == key && field.name == name)?;
         Some(extract_field(self.raw, field))
     }
 
@@ -73,7 +82,7 @@ impl ExactSizeIterator for FieldsIter {}
 #[derive(Clone, Copy)]
 pub struct Ambiguous {
     word: u32,
-    best: u16,
+    pub(crate) best: u16,
     source: CandidateSource,
 }
 
@@ -139,6 +148,7 @@ impl Decoded {
         self.ambiguous.is_empty()
     }
 
+    #[inline]
     pub fn field(&self, name: &str) -> Option<u64> {
         self.fields.get(name)
     }
@@ -170,6 +180,7 @@ struct Entry {
 }
 
 struct FieldDef {
+    key: u16,
     name: &'static str,
     start: u8,
     end: u8,
@@ -243,33 +254,45 @@ pub fn catalog_entry(index: usize) -> Option<CatalogEntry> {
 
 {{.Candidates}}
 
+{{.Preferred}}
+
 {{.Untreed}}
 
 const ROOT: Option<u32> = {{.Root}};
 
 #[derive(Clone, Copy)]
 enum CandidateSource {
-    Leaf(&'static [u16]),
+    Leaf { start:u32, len:u16 },
     All,
 }
 
 impl CandidateSource {
     fn len(self) -> usize {
         match self {
-            Self::Leaf(candidates) => candidates.len() + UNTRED.len(),
+            Self::Leaf{len,..} => len as usize + UNTRED.len(),
             Self::All => TABLE.len(),
         }
     }
 
     fn get(self, pos: usize) -> Option<u16> {
         match self {
-            Self::Leaf(candidates) => candidates
-                .get(pos)
-                .copied()
-                .or_else(|| UNTRED.get(pos.saturating_sub(candidates.len())).copied()),
+            Self::Leaf{start,len} => if pos<(len as usize) {
+                CANDIDATES.get(start as usize+pos).copied()
+            } else {UNTRED.get(pos-len as usize).copied()},
             Self::All => (pos < TABLE.len()).then_some(pos as u16),
         }
     }
+
+{{if not .Adaptive}}
+    fn preferred(self)->&'static[u16] {
+        match self {
+            Self::Leaf{start,len}=>&PREFERRED_CANDIDATES[start as usize..start as usize+len as usize],
+            Self::All=>PREFERRED_ALL,
+        }
+    }
+
+{{end}}
+
 }
 
 /// Decode a 32-bit instruction word through the generated decision tree.
@@ -281,6 +304,7 @@ pub fn decode(word: u32) -> Result<Decoded, DecodeError> {
     decode_tree(word).or_else(|_| decode_table(word))
 }
 
+{{if .Adaptive}}
 fn decode_tree(word: u32) -> Result<Decoded, DecodeError> {
     let mut node_index = ROOT.ok_or(DecodeError::NoMatch(word))? as usize;
     loop {
@@ -288,8 +312,44 @@ fn decode_tree(word: u32) -> Result<Decoded, DecodeError> {
         if node.candidate_len != 0 {
             let start = node.candidate_start as usize;
             let end = start + node.candidate_len as usize;
-            let candidates = CANDIDATES.get(start..end).ok_or(DecodeError::NoMatch(word))?;
-            return resolve(word, CandidateSource::Leaf(candidates));
+            CANDIDATES.get(start..end).ok_or(DecodeError::NoMatch(word))?;
+            return resolve(word, CandidateSource::Leaf{start:node.candidate_start,len:node.candidate_len},selection_candidates(word,node.edge_start as usize));
+        }
+
+        let start = node.edge_start as usize;
+        let end = start + node.edge_len as usize;
+        let edges = EDGES.get(start..end).ok_or(DecodeError::NoMatch(word))?;
+        let key = word & node.mask;
+        let edge = edges
+            .binary_search_by_key(&key, |edge| edge.value)
+            .ok()
+            .and_then(|index| edges.get(index))
+            .ok_or(DecodeError::NoMatch(word))?;
+        node_index = edge.node as usize;
+    }
+}
+
+fn decode_table(word: u32) -> Result<Decoded, DecodeError> {
+    resolve(word, CandidateSource::All,selection_candidates(word,ALL_SELECTOR))
+}
+
+fn selection_candidates(word:u32,mut node:usize)->&'static[u16]{
+    loop {let (bit,zero,one)=SELECT_TREE[node];
+        if bit==0{return &SELECT_CANDIDATES[zero as usize..zero as usize+one as usize];}
+        node=if word&bit==0{zero as usize}else{one as usize};
+    }
+}
+
+{{else}}
+fn decode_tree(word: u32) -> Result<Decoded, DecodeError> {
+    let mut node_index = ROOT.ok_or(DecodeError::NoMatch(word))? as usize;
+    loop {
+        let node = NODES.get(node_index).ok_or(DecodeError::NoMatch(word))?;
+        if node.candidate_len != 0 {
+            let start = node.candidate_start as usize;
+            let end = start + node.candidate_len as usize;
+            CANDIDATES.get(start..end).ok_or(DecodeError::NoMatch(word))?;
+            return resolve(word, CandidateSource::Leaf{start:node.candidate_start,len:node.candidate_len});
         }
 
         let start = node.edge_start as usize;
@@ -309,15 +369,15 @@ fn decode_table(word: u32) -> Result<Decoded, DecodeError> {
     resolve(word, CandidateSource::All)
 }
 
-fn resolve(word: u32, source: CandidateSource) -> Result<Decoded, DecodeError> {
-    let mut best: Option<u16> = None;
-    for pos in 0..source.len() {
-        let candidate = source.get(pos).expect("candidate position is in range");
-        if !entry_matches(candidate, word) {
-            continue;
-        }
-        if best.is_none_or(|current| better_entry(candidate, current)) {
-            best = Some(candidate);
+{{end}}
+fn resolve(word: u32, source: CandidateSource{{if .Adaptive}}, preferred:&[u16]{{end}}) -> Result<Decoded, DecodeError> {
+    // Preference is immutable. Stop at the first valid candidate rather than
+    // testing every alternative and repeatedly ranking the matches.
+    let mut best={{if .Adaptive}}preferred{{else}}source.preferred(){{end}}.iter().copied().find(|&index|entry_matches(index,word));
+    if matches!(source,CandidateSource::Leaf{..}) {
+        for &candidate in PREFERRED_UNTREED {
+            if best.is_some_and(|current|!better_entry(candidate,current)){break;}
+            if entry_matches(candidate,word){best=Some(candidate);break;}
         }
     }
     let best = best.ok_or(DecodeError::NoMatch(word))?;
@@ -445,5 +505,51 @@ mod tests {
                 assert!(tree.ambiguous.contains(peer), "word 0x{word:08X}: missing {peer}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod field_lookup_tests {
+    use super::*;
+    #[test]
+    fn rejection_keys_preserve_colliding_names_and_layout() {
+        assert_eq!(field_key("field499"),field_key("field1210"));
+        static DEFS:&[FieldDef]=&[
+            FieldDef{name:"field499",key:field_key("field499"),start:0,end:3},
+            FieldDef{name:"field1210",key:field_key("field1210"),start:4,end:7},
+        ];
+        let fields=Fields{raw:0xa5,defs:DEFS};
+        assert_eq!(fields.get("field499"),Some(5));
+        assert_eq!(fields.get("field1210"),Some(10));
+        assert_eq!(fields.get("missing"),None);
+        assert!(std::mem::size_of::<FieldDef>()<=std::mem::size_of::<(&str,u8,u8)>());
+    }
+}
+
+#[cfg(test)]
+mod priority_tests {
+    use super::*;
+    fn reference(word:u32,source:CandidateSource)->Option<u16> {
+        let mut best=None;
+        for pos in 0..source.len(){let candidate=source.get(pos).unwrap();
+            if entry_matches(candidate,word)&&best.is_none_or(|current|better_entry(candidate,current)){best=Some(candidate);}
+        }best
+    }
+    fn check(word:u32){
+        let expected=reference(word,CandidateSource::All);
+        assert_eq!(decode_table(word).ok().map(|d|d.ambiguous.best),expected,"{word:08x}");
+        if let Ok(d)=decode_tree(word){
+            assert_eq!(Some(d.ambiguous.best),reference(word,d.ambiguous.source),"{word:08x}");
+            // Preserve the original view order, including overlapping forms.
+            let mut actual=d.ambiguous.iter();
+            for pos in 0..d.ambiguous.source.len(){let i=d.ambiguous.source.get(pos).unwrap();
+                if i!=d.ambiguous.best&&entry_matches(i,word){assert_eq!(actual.next(),Some(TABLE[i as usize].encoding_id));}
+            }assert_eq!(actual.next(),None);
+        }
+    }
+    #[test]
+    fn preferred_selection_preserves_flat_ranking_and_ambiguity_order(){
+        for entry in TABLE {for pattern in [0,u32::MAX,0x55555555,0xaaaaaaaa]{check(entry.value|(!entry.mask&pattern));}}
+        let mut random=0x51f7825cu32;for _ in 0..4096{random=random.wrapping_mul(1664525).wrapping_add(1013904223);check(random);}
     }
 }

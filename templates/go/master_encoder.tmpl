@@ -68,10 +68,9 @@ func EncodeWithFields(encodingID string, fields map[string]uint64) (uint32, erro
 	}
 	defs, ok := FieldsByEncoding[encodingID]
 	if !ok {
-		if len(fields) == 0 {
-			return w, nil
+		if len(fields) != 0 {
+			return 0, fmt.Errorf("%s: no variable fields; got %v", encodingID, keysOf(fields))
 		}
-		return 0, fmt.Errorf("%s: no variable fields; got %v", encodingID, keysOf(fields))
 	}
 	for name, val := range fields {
 		d, ok := defs[name]
@@ -98,8 +97,13 @@ func EncodeWithFields(encodingID string, fields map[string]uint64) (uint32, erro
 		w &^= d.Free
 		w |= placed & d.Free
 	}
+	if !matchesEncodingConstraints(encodingID, w) {
+		return 0, fmt.Errorf("%s: fields violate the encoding's allocation constraints", encodingID)
+	}
 	return w, nil
 }
+
+{{.Constraints}}
 
 func keysOf(m map[string]uint64) []string {
 	out := make([]string, 0, len(m))

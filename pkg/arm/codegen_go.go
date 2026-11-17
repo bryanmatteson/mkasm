@@ -24,10 +24,11 @@ type fieldMapRow struct {
 }
 
 type masterEncoderTmplData struct {
-	Classes    []ClassEncoderRef
-	Dispatches []MasterDispatchEntry
-	FixedWords []fixedWordRow
-	FieldMaps  []fieldMapRow
+	Classes     []ClassEncoderRef
+	Dispatches  []MasterDispatchEntry
+	FixedWords  []fixedWordRow
+	FieldMaps   []fieldMapRow
+	Constraints string
 }
 
 func emitMasterEncoderSource(classes []ClassEncoderRef, dispatches []MasterDispatchEntry, instrs []*ir.InstructionIR) string {
@@ -36,6 +37,8 @@ func emitMasterEncoderSource(classes []ClassEncoderRef, dispatches []MasterDispa
 	})
 	var fixed []fixedWordRow
 	var fieldMaps []fieldMapRow
+	var constraints strings.Builder
+	constraints.WriteString("func matchesEncodingConstraints(id string, w uint32) bool { switch id {\n")
 	for _, instr := range instrs {
 		if instr == nil || instr.EncodingID == "" {
 			continue
@@ -57,12 +60,64 @@ func emitMasterEncoderSource(classes []ClassEncoderRef, dispatches []MasterDispa
 		if len(fields) > 0 {
 			fieldMaps = append(fieldMaps, fieldMapRow{ID: instr.EncodingID, Fields: fields})
 		}
+		if instr.BitDiffsTree != nil {
+			fmt.Fprintf(&constraints, "case %q: return %s\n", instr.EncodingID, bitDiffBooleanExpression(instr.BitDiffsTree))
+		}
 	}
+	constraints.WriteString("default: return true\n} }\n")
 	data := masterEncoderTmplData{
 		Classes: classes, Dispatches: dispatches,
-		FixedWords: fixed, FieldMaps: fieldMaps,
+		FixedWords: fixed, FieldMaps: fieldMaps, Constraints: constraints.String(),
 	}
 	return mustExecGoTemplate("master_encoder.tmpl", data)
+}
+
+// Both generated encoders enforce the same resolved allocation constraints as
+// the decoder. The expression syntax here is shared by Go and Rust.
+func bitDiffBooleanExpression(n *ir.BitDiffNode) string {
+	if n == nil {
+		return "true"
+	}
+	switch n.Kind {
+	case ir.BitDiffAnd:
+		var terms []string
+		for _, child := range n.Kids {
+			terms = append(terms, bitDiffBooleanExpression(child))
+		}
+		if len(terms) == 0 {
+			return "true"
+		}
+		return "(" + strings.Join(terms, " && ") + ")"
+	case ir.BitDiffNot:
+		if len(n.Kids) == 0 {
+			return "true"
+		}
+		return "!(" + bitDiffBooleanExpression(n.Kids[0]) + ")"
+	default:
+		a := n.Atom
+		if a == nil || a.Start < 0 || a.End < a.Start || a.End > 31 {
+			return "true"
+		}
+		compare := func(pattern string) string {
+			mask, value := rustBitPattern(pattern, a.End-a.Start+1)
+			return fmt.Sprintf("((w & 0x%08X) == 0x%08X)", mask<<uint(a.Start), value<<uint(a.Start))
+		}
+		if a.Op == ir.BitDiffIn {
+			var terms []string
+			for _, alt := range a.Alts {
+				terms = append(terms, compare(alt))
+			}
+			if len(terms) == 0 {
+				return "false"
+			}
+			return "(" + strings.Join(terms, " || ") + ")"
+		}
+		expr := compare(a.Bits)
+		if a.Op == ir.BitDiffNe {
+			return "!(" + expr + ")"
+		}
+		return expr
+	}
 }
 
 // fieldRangeMask returns the bit mask covering [start,end] inclusive.

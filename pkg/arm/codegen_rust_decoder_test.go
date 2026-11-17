@@ -128,3 +128,35 @@ func rustDecoderWildcardFixture() []*ir.InstructionIR {
 		},
 	}
 }
+
+func TestEncoderTestWordsKeepRejectedProbesAndAddLegalFields(t *testing.T) {
+	tree, err := ParseBitDiffs("bits != '0001' && bits != '0000'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instr := &ir.InstructionIR{Encoding: ir.EncodingMask{Width: 32, Fields: []ir.BitField{{Name: "bits", Start: 4, End: 7}}}}
+	if err := ir.ResolveBitDiffFields(tree, instr.Encoding); err != nil {
+		t.Fatal(err)
+	}
+	fields := []RawField{{Name: "bits", Start: 4, End: 7, Free: 0xf0}}
+	words := encoderTestWords(0xa0000001, fields, tree)
+	if len(words) != 2 || words[0] != 0xa0000011 || ir.EvalBitDiffs(tree, words[0]) || !ir.EvalBitDiffs(tree, words[1]) {
+		t.Fatalf("probes: %08x", words)
+	}
+	for _, word := range words {
+		if word & ^uint32(0xf0) != 0xa0000001 {
+			t.Fatalf("pinned bits changed: %08x", word)
+		}
+	}
+	// An impossible fixed allocation must retain a negative check.
+	impossible := &ir.BitDiffNode{Kind: ir.BitDiffAtomKind, Atom: &ir.BitDiffAtom{Start: 0, End: 0, Op: ir.BitDiffEq, Bits: "0"}}
+	if got := encoderTestWords(1, nil, impossible); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("negative fixed allocation: %x", got)
+	}
+	surface := &AsmSurface{Exact: []ExactEncoding{{Fn: "enc_probe", EncodingID: "PROBE", FixedWord: 0xa0000001, Fields: fields, Constraints: tree}}, Raw: []RawEncoding{{EncodingID: "PROBE", FixedWord: 0xa0000001, Fields: fields, Constraints: tree}}}
+	for name, source := range map[string]string{"exact": emitExactEncoderTests(surface), "raw": emitRawEncoderTests(surface)} {
+		if !strings.Contains(source, "AllocationConstraint") || !strings.Contains(source, "0xA0000011") || !strings.Contains(source, "0xA00000F1") {
+			t.Fatalf("%s lost a positive or negative allocation case", name)
+		}
+	}
+}

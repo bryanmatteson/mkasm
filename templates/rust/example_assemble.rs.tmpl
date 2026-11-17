@@ -1,0 +1,87 @@
+//! The generated text assembler as a command-line tool.
+//!
+//! ```sh
+//! cargo run --example assemble -- asm 'stp x29, x30, [sp, #-16]!'
+//! cargo run --example assemble -- describe A9BF7BFD
+//! cargo run --example assemble -- scan code.bin 0x100000 'bl $target'
+//! printf '0x1000\tbl 0x2000\n' | cargo run --example assemble
+//! ```
+//!
+//! With no arguments it reads one instruction per stdin line, optionally
+//! prefixed by `ADDRESS<TAB>` for absolute label targets, and prints
+//! `LINE<TAB>OK<TAB>WORD WORD ...` (every encoding, preferred first) or
+//! `LINE<TAB>ERR<TAB>message`, where LINE counts from 0.
+
+use std::io::{self, BufRead, Write};
+
+use {{.CrateName}}::{assemble_at, describe, format, Template};
+
+fn parse_number(text: &str) -> Option<u64> {
+    let text = text.trim();
+    match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        Some(hex) => u64::from_str_radix(hex, 16).ok(),
+        None => text.parse().ok(),
+    }
+}
+
+fn batch() {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut out = io::BufWriter::new(stdout.lock());
+    for (index, line) in stdin.lock().lines().enumerate() {
+        let line = line.expect("read stdin");
+        let (address, text) = match line.split_once('\t') {
+            Some((address, text)) => (parse_number(address), text),
+            None => (Some(0), line.as_str()),
+        };
+        let Some(address) = address else {
+            writeln!(out, "{index}\tERR\tbad address").expect("write stdout");
+            continue;
+        };
+        match assemble_at(text, address) {
+            Ok(words) => {
+                let words: Vec<String> = words.iter().map(|word| format!("{word:08X}")).collect();
+                writeln!(out, "{index}\tOK\t{}", words.join(" ")).expect("write stdout");
+            }
+            Err(error) => writeln!(out, "{index}\tERR\t{error}").expect("write stdout"),
+        }
+    }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] => batch(),
+        ["asm", text] => match assemble_at(text, 0) {
+            Ok(words) => for word in words { println!("{word:08X}  {}", format(word, 0).unwrap_or_default()) },
+            Err(error) => { eprintln!("{error}"); std::process::exit(1) }
+        },
+        ["describe", word] => {
+            let word = parse_number(&format!("0x{}", word.trim_start_matches("0x"))).unwrap_or(0) as u32;
+            match describe(word) {
+                Some(described) => {
+                    println!("{}", described.text);
+                    for span in described.operands {
+                        println!("  {:>3}..{:<3} {:<12} {:<6} {}{}", span.start, span.end, span.class.name(), span.value,
+                            &described.text[span.start..span.end], if span.position_dependent() { "  (position-dependent)" } else { "" });
+                    }
+                }
+                None => { eprintln!("0x{word:08X} has no assembly spelling"); std::process::exit(1) }
+            }
+        }
+        ["scan", path, base, template] => {
+            let base = parse_number(base).expect("base address");
+            let template = Template::parse(template).unwrap_or_else(|error| { eprintln!("{error}"); std::process::exit(1) });
+            let bytes = std::fs::read(path).expect("read file");
+            let mut values = Vec::new();
+            for (index, chunk) in bytes.chunks_exact(4).enumerate() {
+                let word = u32::from_le_bytes(chunk.try_into().unwrap());
+                if !template.matches(word, &mut values) { continue; }
+                let bound: Vec<String> = template.holes().iter().zip(&values)
+                    .map(|(hole, value)| format!("{}={value}", hole.name())).collect();
+                println!("{:#x}  {word:08X}  {}  {}", base + 4 * index as u64, format(word, 0).unwrap_or_default(), bound.join(" "));
+            }
+        }
+        _ => { eprintln!("usage: assemble [asm TEXT | describe WORD | scan FILE BASE TEMPLATE]"); std::process::exit(2) }
+    }
+}

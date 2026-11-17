@@ -32,10 +32,30 @@ func TestARM32SplitOperandsAndScaling(t *testing.T) {
 	if _, _, ok := arm32Slices([]string{"Vd[4]"}, fields); ok {
 		t.Fatal("accepted out-of-range selector")
 	}
-	p := &ParsedIForm{InstructionSet: "T32", Width: 16, AsmOperands: []AsmOperand{{Symbol: "<imm>", Prefix: ", #"}}, Explanations: []AsmExplanation{{Symbol: "<imm>", Fields: []string{"imm5"}, Prose: `encoded as <imm>/4.`}}}
-	f, err := arm32PrintForm(CatalogEntry{EncodingID: "LDR_i_T1", Fields: []CatalogField{{Name: "imm5", Start: 6, End: 10}}}, p)
-	if err != nil || !strings.Contains(f, "scale: 4") {
-		t.Fatalf("scaled load displacement: %s %v", f, err)
+	for _, symbol := range []string{"<imm>", "<imm7>", "<imm8>"} {
+		for _, prose := range []string{`encoded as ` + symbol + `/4.`, `Values are multiples of 4 in the range 0-1020.`} {
+			p := &ParsedIForm{InstructionSet: "T32", Width: 16, AsmOperands: []AsmOperand{{Symbol: symbol, Prefix: ", #"}}, Explanations: []AsmExplanation{{Symbol: symbol, Fields: []string{"imm5"}, Prose: prose}}}
+			f, err := arm32PrintForm(CatalogEntry{EncodingID: "LDR_i_T1", Fields: []CatalogField{{Name: "imm5", Start: 6, End: 10}}}, p, false)
+			if err != nil || !strings.Contains(f, "scale: 4") {
+				t.Fatalf("scaled %s displacement: %s %v", symbol, f, err)
+			}
+		}
+	}
+	p := &ParsedIForm{InstructionSet: "T32", Width: 16, AsmOperands: []AsmOperand{{Symbol: "<Rdm>"}}, Explanations: []AsmExplanation{{Symbol: "<Rdm>", Fields: []string{"Rdm"}}}}
+	f, err := arm32PrintForm(CatalogEntry{EncodingID: "ADD_SP_r_T1", Fields: []CatalogField{{Name: "DM", Start: 7, End: 7}, {Name: "Rdm", Start: 0, End: 2}}}, p, false)
+	if err != nil || !strings.Contains(f, "lo: 7, width: 1 },Bits { lo: 0, width: 3") {
+		t.Fatalf("high Thumb register bit: %s %v", f, err)
+	}
+}
+
+func TestARM32GeneralSyntaxKeepsImmediateAndShiftOperands(t *testing.T) {
+	page := `<instructionsection><classes><iclass isa="T32"><regdiagram form="16x2"/><encoding name="RSBS_i_T2"><asmtemplate><text>RSBS{</text><a>&lt;q&gt;</a><text>} </text><a>&lt;Rd&gt;</a><text>, </text><a>&lt;Rn&gt;</a><text>, #</text><a>&lt;const&gt;</a></asmtemplate><asmtemplate comment="Outside IT block"><text>RSBS.W </text><a>&lt;Rd&gt;</a><text>, </text><a>&lt;Rn&gt;</a><text>, #0</text></asmtemplate></encoding></iclass></classes></instructionsection>`
+	p, err := parseIForm(strings.NewReader(page), "RSBS_i_T2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.AsmTemplate, "<const>") || len(p.AsmOperands) != 4 || p.AsmSuffix != "" {
+		t.Fatalf("general syntax was replaced by a specialized example: %#v", p)
 	}
 }
 

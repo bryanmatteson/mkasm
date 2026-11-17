@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 // emitRustInsnTests generates a round-trip test per typed form: encode with the
@@ -106,10 +108,12 @@ func emitExactEncoderTests(s *AsmSurface) string {
 // a function with the bit positions inlined, the other looks them up at run
 // time. Agreeing on non-zero field values is what shows the inlined positions
 // are right — decoding a word built from all-zero fields would not.
-fn xchk(bad: &mut Vec<String>, id: &'static str, fields: &[(&str, u64)], got: u32) {
+fn xchk(bad: &mut Vec<String>, id: &'static str, fields: &[(&str, u64)], expected: u32, legal: bool, got: u32) {
+    if got != expected { bad.push(format!("{id}: exact field placement gave 0x{got:08X}, expected 0x{expected:08X}")); }
     match crate::encoders::encode_with_fields(id, fields) {
-        Ok(want) if want == got => {}
+        Ok(want) if legal && want == got => {}
         Ok(want) => bad.push(format!("{id}: exact encoder gave 0x{got:08X}, table gave 0x{want:08X}")),
+        Err(crate::encoders::EncodeError::AllocationConstraint(_)) if !legal => {},
         Err(e) => bad.push(format!("{id}: table encoder failed: {e:?}")),
     }
 }
@@ -145,25 +149,19 @@ fn chk(bad: &mut Vec<String>, id: &'static str, alias_of: &'static str, w: u32) 
 					e.EncodingID, e.AliasOf, e.Fn, strings.Join(args, ", "))
 			}
 
-			// Same encoder again with a distinct value per field, cross-checked
-			// against the table-driven encoder. A field written at the wrong
-			// offset, or with another field's width, shows up here.
-			vals := make([]string, 0, len(e.Fields))
-			pairs := make([]string, 0, len(e.Fields))
-			for k, f := range e.Fields {
-				shift := freeLowBit(f.Free, f.Start)
-				// Within the bits the encoding leaves free, so the value is
-				// representable and both encoders must agree on where it lands.
-				v := uint32(k*7+1) & (f.Free >> uint(shift))
-				vals = append(vals, fmt.Sprintf("%d", v))
-				// The table encoder takes the whole field, so the pinned bits of
-				// this encoding are put back before comparing.
-				fieldMask := fieldRangeMask(f.Start, f.End)
-				full := (e.FixedWord&fieldMask&^f.Free | (v<<uint(shift))&f.Free) >> uint(f.Start)
-				pairs = append(pairs, fmt.Sprintf("(%q, %d)", f.Name, full))
+			// The positional/raw APIs place bits without checking allocation
+			// predicates. Check both placement and the checked table API's
+			// expected acceptance, retaining rejected probes as negative tests.
+			for _, word := range encoderTestWords(e.FixedWord, e.Fields, e.Constraints) {
+				var vals, pairs []string
+				for _, f := range e.Fields {
+					vals = append(vals, fmt.Sprintf("%d", word&f.Free>>uint(freeLowBit(f.Free, f.Start))))
+					full := word & fieldRangeMask(f.Start, f.End) >> uint(f.Start)
+					pairs = append(pairs, fmt.Sprintf("(%q, %d)", f.Name, full))
+				}
+				fmt.Fprintf(&b, "    xchk(&mut bad, %q, &[%s], 0x%08X, %t, { let mut a = Assembler::new(); a.%s(%s); a.words()[0] });\n",
+					e.EncodingID, strings.Join(pairs, ", "), word, ir.EvalBitDiffs(e.Constraints, word), e.Fn, strings.Join(vals, ", "))
 			}
-			fmt.Fprintf(&b, "    xchk(&mut bad, %q, &[%s], { let mut a = Assembler::new(); a.%s(%s); a.words()[0] });\n",
-				e.EncodingID, strings.Join(pairs, ", "), e.Fn, strings.Join(vals, ", "))
 		}
 		b.WriteString("    assert!(bad.is_empty(), \"{} exact encoders wrong:\\n{}\", bad.len(), bad.join(\"\\n\"));\n}\n\n")
 	}
@@ -189,39 +187,68 @@ func emitRawEncoderTests(s *AsmSurface) string {
 		}
 		fmt.Fprintf(&b, "#[test]\nfn raw_encoders_%04d() {\n    let mut bad: Vec<String> = Vec::new();\n", i/perTest)
 		for _, r := range s.Raw[i:end] {
-			u32Fields := make([]string, 0, len(r.Fields))
-			u64Fields := make([]string, 0, len(r.Fields))
-			for k, f := range r.Fields {
-				shift := freeLowBit(f.Free, f.Start)
-				v := uint32(k*7+1) & (f.Free >> uint(shift))
-				fieldMask := fieldRangeMask(f.Start, f.End)
-				full := (r.FixedWord&fieldMask&^f.Free | (v<<uint(shift))&f.Free) >> uint(f.Start)
-				u32Fields = append(u32Fields, fmt.Sprintf("(%q, %d)", f.Name, full))
-				u64Fields = append(u64Fields, fmt.Sprintf("(%q, %du64)", f.Name, full))
-			}
-			fmt.Fprintf(&b, `    {
+			for _, word := range encoderTestWords(r.FixedWord, r.Fields, r.Constraints) {
+				var u32Fields, u64Fields []string
+				for _, f := range r.Fields {
+					full := word & fieldRangeMask(f.Start, f.End) >> uint(f.Start)
+					u32Fields = append(u32Fields, fmt.Sprintf("(%q, %d)", f.Name, full))
+					u64Fields = append(u64Fields, fmt.Sprintf("(%q, %du64)", f.Name, full))
+				}
+				fmt.Fprintf(&b, `    {
         let mut a = Assembler::new();
         match a.emit_raw(%q, &[%s]) {
-            Ok(()) => match crate::encoders::encode_with_fields(%q, &[%s]) {
-                Ok(want) if a.words() == &[want] => {}
-                Ok(want) => bad.push(format!(%q, a.words())),
-                Err(e) => bad.push(format!(%q)),
+            Ok(()) => {
+                if a.words() != &[0x%08X] { bad.push(format!(%q, a.words())); }
+                match crate::encoders::encode_with_fields(%q, &[%s]) {
+                    Ok(want) if %t && a.words() == &[want] => {},
+                    Err(crate::encoders::EncodeError::AllocationConstraint(_)) if %t => {},
+                    result => bad.push(format!(%q)),
+                }
             },
             Err(e) => bad.push(format!(%q)),
         }
     }
-`,
-				r.EncodingID, strings.Join(u32Fields, ", "),
-				r.EncodingID, strings.Join(u64Fields, ", "),
-				r.EncodingID+": raw fallback gave {:?}, table gave 0x{want:08X}",
-				r.EncodingID+": table encoder failed: {e}",
-				r.EncodingID+": raw fallback failed: {e}",
-			)
+`, r.EncodingID, strings.Join(u32Fields, ", "), word,
+					r.EncodingID+": raw field placement gave {:?}",
+					r.EncodingID, strings.Join(u64Fields, ", "), ir.EvalBitDiffs(r.Constraints, word), !ir.EvalBitDiffs(r.Constraints, word),
+					r.EncodingID+": unexpected checked encoder result: {result:?}", r.EncodingID+": raw fallback failed: {e}")
+			}
 		}
 		b.WriteString("    assert!(bad.is_empty(), \"{} raw encoders wrong:\\n{}\", bad.len(), bad.join(\"\\n\"));\n}\n\n")
 	}
 	fmt.Fprintf(&b, "// %d raw fallback encoders covered.\n", len(s.Raw))
 	return b.String()
+}
+
+// encoderTestWords keeps the original distinct-field probe even when it is
+// unallocated, then adds a legal probe if one is found. Unsatisfiable fixed-only
+// forms remain checked negative cases rather than disappearing from coverage.
+func encoderTestWords(fixed uint32, fields []RawField, constraints *ir.BitDiffNode) []uint32 {
+	word, free := fixed, uint32(0)
+	for k, f := range fields {
+		free |= f.Free
+		shift := uint(freeLowBit(f.Free, f.Start))
+		value := (uint32(k*7+1) << shift) & f.Free
+		word = word&^f.Free | value
+	}
+	out := []uint32{word}
+	if ir.EvalBitDiffs(constraints, word) || free == 0 {
+		return out
+	}
+	seed := uint32(0x51f7825c)
+	for i := 0; i < 4098; i++ {
+		candidate := fixed &^ free
+		if i == 1 {
+			candidate |= free
+		} else if i > 1 {
+			seed = seed*1664525 + 1013904223
+			candidate |= seed & free
+		}
+		if ir.EvalBitDiffs(constraints, candidate) {
+			return append(out, candidate)
+		}
+	}
+	return out
 }
 
 // rustTestName includes the method because one encoding can be reachable from

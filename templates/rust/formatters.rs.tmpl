@@ -5,6 +5,15 @@
 use crate::decoders::Decoded;
 use std::fmt::Write as _;
 
+/// The text assembler reads this module's tables; see `assembler.rs`.
+#[path = "assembler.rs"]
+pub mod assembler;
+#[path = "references.rs"]
+pub mod references;
+
+#[path = "analysis.rs"]
+pub mod analysis;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FormatError { Unknown(u32), Unprintable(u32) }
 
@@ -56,6 +65,8 @@ struct Form {
     constraint_mask: u32, constraint_value: u32,
     equalities: &'static [Equality], inequalities: &'static [Inequality],
     one_hot: &'static [u32], forbidden: &'static [Forbidden],
+    /// A disjunctive alias predicate: at least one pair must match.
+    any_of: &'static [Forbidden],
     move_wide_guard: Option<MoveWideGuard>, logical_guard: Option<LogicalGuard>,
     bitfield_guard: Option<BitfieldGuard>,
     sve_mask: Option<BitPart>, parts: &'static [TextPart],
@@ -69,17 +80,27 @@ static FORMS: &[Form] = &[
 /// `address` is accepted for API symmetry; A64 labels are emitted relative to
 /// the current instruction (`.`), preserving round-trip assembler semantics.
 pub fn format(word: u32, _address: u64) -> Result<String, FormatError> {
-    let mut best: Option<&Form> = None;
-    for form in FORMS {
-        if !form_matches(form, word) { continue; }
-        if best.is_none_or(|old| better_form(form, old)) { best = Some(form); }
-    }
-    let form = best.ok_or(FormatError::Unknown(word))?;
+    let form = analysis::selected_form(word).ok_or(FormatError::Unknown(word))?;
     render_form(form, word).ok_or(FormatError::Unprintable(word))
+}
+
+/// Replace `output` with the preferred assembler spelling. Reuses its capacity;
+/// no allocations occur when it can hold the unnormalized template text.
+/// On a formatting error the buffer is empty.
+pub fn format_into(word: u32, _address: u64, output: &mut String) -> Result<(), FormatError> {
+    output.clear();
+    let form = analysis::selected_form(word).ok_or(FormatError::Unknown(word))?;
+    if render_form_into(form, word, output).is_none() {
+        output.clear();
+        return Err(FormatError::Unprintable(word));
+    }
+    Ok(())
 }
 
 impl Decoded {
     pub fn format(&self, address: u64) -> Result<String, FormatError> { format(self.raw, address) }
+    /// Replace `output`, retaining its allocation. The buffer is empty on error.
+    pub fn format_into(&self, address: u64, output: &mut String) -> Result<(), FormatError> { format_into(self.raw, address, output) }
 }
 
 fn better_form(new: &Form, old: &Form) -> bool {
@@ -103,6 +124,7 @@ fn form_matches(form: &Form, word: u32) -> bool {
     }
     if form.one_hot.iter().any(|mask| (word & mask).count_ones() != 1) { return false; }
     if form.forbidden.iter().any(|item| word & item.mask == item.value) { return false; }
+    if !form.any_of.is_empty() && !form.any_of.iter().any(|item| word & item.mask == item.value) { return false; }
     if let Some(guard) = form.move_wide_guard {
         if part_value(word, guard.imm16) == 0 && part_value(word, guard.hw) != 0 { return false; }
     }
@@ -128,18 +150,37 @@ fn form_matches(form: &Form, word: u32) -> bool {
 }
 
 fn render_form(form: &Form, word: u32) -> Option<String> {
+    let mut output = String::with_capacity(64);
+    render_form_into(form, word, &mut output)?;
+    Some(output)
+}
+
+fn render_form_into(form: &Form, word: u32, output: &mut String) -> Option<()> {
     let mut skipped = [false; 32];
+    let mut visited=1u32;
     for part in form.parts {
-        let group = part.group as usize;
-        if group != 0 && group < skipped.len() { skipped[group] = group_omitted(form, part.group, word); }
+        let group=part.group as usize;
+        if group!=0 && group<skipped.len() && visited&(1<<group)==0 {
+            visited|=1<<group;
+            skipped[group]=group_omitted(form,part.group,word);
+        }
     }
-    let mut output = String::new();
+    // Resolve ancestors once for each group, then the render loop only reads
+    // the final decision. Omission is monotonic, so parent order is irrelevant.
+    let mut remaining=visited&!1;
+    while remaining!=0 {
+        let group=remaining.trailing_zeros() as usize;
+        remaining&=remaining-1;
+        if !skipped[group] {skipped[group]=ancestor_skipped(form,group as u8,&skipped);}
+    }
     for part in form.parts {
-        if part.group != 0 && (skipped[part.group as usize] || ancestor_skipped(form, part.group, &skipped)) { continue; }
-        if let Some(operand) = part.operand { output.push_str(&render_operand(operand, word)?); }
+        if part.group != 0 && skipped[part.group as usize] { continue; }
+        if let Some(operand) = part.operand.as_ref() { render_operand_into(operand, word, output)?; }
         else { output.push_str(part.literal); }
     }
-    Some(canonical_alternatives(&collapse_space(&output)).trim_end().to_string())
+    *output = canonical_alternatives(collapse_space(std::mem::take(output)));
+    output.truncate(output.trim_end().len());
+    Some(())
 }
 
 fn ancestor_skipped(form: &Form, mut group: u8, skipped: &[bool; 32]) -> bool {
@@ -165,7 +206,7 @@ fn contains_group(form: &Form, group: u8, mut candidate: u8) -> bool {
 fn group_omitted(form: &Form, group: u8, word: u32) -> bool {
     if form.required.contains(&group) || form.encoding_id.contains("addsub_ext") { return false; }
     for part in form.parts {
-        let Some(op) = part.operand else { continue };
+        let Some(op) = part.operand.as_ref() else { continue };
         if !contains_group(form, group, part.group) { continue; }
         let mut want = 0u64;
         if op.has_default && op.default >= 0 {
@@ -179,21 +220,32 @@ fn group_omitted(form: &Form, group: u8, word: u32) -> bool {
     true
 }
 
-fn render_operand(op: OperandDef, word: u32) -> Option<String> {
-    if op.when_mask != 0 && word & op.when_mask != op.when_value { return Some(String::new()); }
+fn render_operand(op: &OperandDef, word: u32) -> Option<String> {
+    let mut output = String::new();
+    render_operand_into(op, word, &mut output)?;
+    Some(output)
+}
+
+fn render_operand_into(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
+    if op.when_mask != 0 && word & op.when_mask != op.when_value { return Some(()); }
     match op.kind {
-        Kind::Reg => render_reg(op, word), Kind::Num => render_num(op, word),
-        Kind::FpImm => render_fp_imm(op, word), Kind::SysReg => render_sysreg(op, word),
-        Kind::Table => render_table(op, word), Kind::Derived => render_derived(op, word),
-        Kind::Formula => render_formula(op, word), Kind::LogicalImm => render_logical_imm(op, word),
-        Kind::BitfieldWidth => render_bitfield_width(op, word),
-        Kind::ByteMaskImm => render_byte_mask(op, word), Kind::MoveWideImm => render_move_wide(op, word),
-        Kind::Literal => (!op.literal.is_empty()).then(|| op.literal.to_string()),
-        Kind::ElementIndex => render_element_index(op, word), Kind::TileMask => render_tile_mask(op, word),
+        Kind::Reg => render_reg(op, word, output),
+        Kind::Num => render_num(op, word, output),
+        Kind::Literal => {
+            if op.literal.is_empty() { return None; }
+            output.push_str(op.literal);
+            Some(())
+        }
+        Kind::FpImm => render_fp_imm(op, word, output), Kind::SysReg => render_sysreg(op, word, output),
+        Kind::Table => render_table(op, word, output), Kind::Derived => render_derived(op, word, output),
+        Kind::Formula => render_formula(op, word, output), Kind::LogicalImm => render_logical_imm(op, word, output),
+        Kind::BitfieldWidth => render_bitfield_width(op, word, output),
+        Kind::ByteMaskImm => render_byte_mask(op, word, output), Kind::MoveWideImm => render_move_wide(op, word, output),
+        Kind::ElementIndex => render_element_index(op, word, output), Kind::TileMask => render_tile_mask(op, word, output),
     }
 }
 
-fn render_reg(op: OperandDef, word: u32) -> Option<String> {
+fn render_reg(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     let raw = raw_value(op, word) as i64;
     let mut value = raw + op.bias;
     if !op.ranges.is_empty() {
@@ -210,10 +262,10 @@ fn render_reg(op: OperandDef, word: u32) -> Option<String> {
     value *= op.scale;
     if value < 0 || op.has_reg_range && (value < op.reg_lo || value > op.reg_hi) ||
         op.reg_multiple > 1 && value % op.reg_multiple != 0 { return None; }
-    register_name(op.class, value as u64)
+    write_register_name(op.class, value as u64, output)
 }
 
-fn render_num(op: OperandDef, word: u32) -> Option<String> {
+fn render_num(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     let raw = raw_value(op, word);
     let mut value = if op.has_num_constant { op.num_constant }
         else if op.negate != 0 { op.negate - raw as i64 }
@@ -222,47 +274,55 @@ fn render_num(op: OperandDef, word: u32) -> Option<String> {
     if op.raw_mul != 0 { value *= op.raw_mul; }
     value *= op.scale;
     if op.has_range && (value < op.lo || value > op.hi) { return None; }
-    if op.class == "label" { return Some(if value < 0 { format!(".-{}", -value) } else { format!(".+{value}") }); }
-    if op.symbol.contains("|SP") && value == 31 { return Some("sp".to_string()); }
-    Some(format!("{}{value}", op.num_prefix))
+    if op.class == "label" {
+        if value < 0 {output.push_str(".-");crate::number_text::unsigned(output,value.unsigned_abs()).ok()?;}
+        else {output.push_str(".+");crate::number_text::unsigned(output,value as u64).ok()?;}
+    } else if op.symbol.contains("|SP") && value == 31 {
+        output.push_str("sp");
+    } else {
+        output.push_str(op.num_prefix);crate::number_text::signed(output,value).ok()?;
+    }
+    Some(())
 }
 
-fn render_fp_imm(op: OperandDef, word: u32) -> Option<String> {
+fn render_fp_imm(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     let raw = raw_value(op, word);
     if raw > 0xff { return None; }
     let sign = if raw & 0x80 != 0 { -1.0 } else { 1.0 };
     let n = (16 + (raw & 0x0f)) as f64;
     let exp = ((raw >> 4) & 7) as i32;
     let power = if exp >= 4 { exp - 7 } else { exp + 1 };
-    Some(format!("{}", sign * n / 16.0 * 2f64.powi(power)))
+    write!(output, "{}", sign * n / 16.0 * 2f64.powi(power)).ok()
 }
 
-fn render_sysreg(op: OperandDef, word: u32) -> Option<String> {
+fn render_sysreg(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     if op.parts.len() != 5 || op.parts[0].width != 1 || op.parts[1].width != 3 ||
         op.parts[2].width != 4 || op.parts[3].width != 4 || op.parts[4].width != 3 { return None; }
-    let values: Vec<u32> = op.parts.iter().map(|part| part_value(word, *part)).collect();
-    Some(format!("s{}_{}_c{}_c{}_{}", 2 + values[0], values[1], values[2], values[3], values[4]))
+    let value = |i| part_value(word, op.parts[i]);
+    output.push('s');crate::number_text::unsigned(output,u64::from(2+value(0))).ok()?;
+    for (index,prefix) in [(1,"_"),(2,"_c"),(3,"_c"),(4,"_")] {output.push_str(prefix);crate::number_text::unsigned(output,u64::from(value(index))).ok()?;}
+    Some(())
 }
 
-fn render_table(op: OperandDef, word: u32) -> Option<String> {
+fn render_table(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     for row in op.rows {
         if !row_matches(row, op.cols, word, op.xor) { continue; }
-        if numeric_placeholder(row.symbol) { return Some(format!("#{}", raw_value(op, word))); }
-        return match row.symbol.to_ascii_lowercase().as_str() {
-            "[absent]" => Some(String::new()), "[present]" => Some(op.symbol.to_string()),
-            _ => Some(canonical_symbol(row.symbol)),
-        };
+        if numeric_placeholder(row.symbol) { output.push('#');return crate::number_text::unsigned(output,raw_value(op,word)).ok(); }
+        if row.symbol.eq_ignore_ascii_case("[absent]") { return Some(()); }
+        if row.symbol.eq_ignore_ascii_case("[present]") { output.push_str(op.symbol); }
+        else { write_canonical_symbol(row.symbol, output); }
+        return Some(());
     }
     None
 }
 
-fn render_derived(op: OperandDef, word: u32) -> Option<String> {
+fn render_derived(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     let mut value = if op.parts.is_empty() { op.add } else { raw_value(op, word) as i64 * op.mul + op.add };
     if op.modulo > 0 { value = ((value % op.modulo) + op.modulo) % op.modulo; }
-    if op.class.is_empty() { Some(value.to_string()) } else { register_name(op.class, value as u64) }
+    if op.class.is_empty() { crate::number_text::signed(output,value as i64).ok() } else { write_register_name(op.class, value as u64, output) }
 }
 
-fn render_formula(op: OperandDef, word: u32) -> Option<String> {
+fn render_formula(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     for (index, row) in op.rows.iter().enumerate() {
         if index >= op.formulas.len() || !row_matches(row, op.cols, word, 0) { continue; }
         let formula = op.formulas[index];
@@ -280,12 +340,13 @@ fn render_formula(op: OperandDef, word: u32) -> Option<String> {
             let highest = 63 - size_raw.leading_zeros() as i64;
             value += formula.esize_mul * (formula.esize_base << highest);
         }
-        return (value >= 0).then(|| value.to_string());
+        if value < 0 { return None; }
+        return crate::number_text::signed(output,value as i64).ok();
     }
     None
 }
 
-fn render_logical_imm(op: OperandDef, word: u32) -> Option<String> {
+fn render_logical_imm(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     let (n, immr, imms, sf, packed) = match op.parts {
         [part] if part.width == 13 => { let raw = part_value(word, *part); (raw >> 12, raw >> 6 & 0x3f, raw & 0x3f, 1, true) }
         [n, r, s, sf] => (part_value(word, *n), part_value(word, *r), part_value(word, *s), part_value(word, *sf), false),
@@ -303,28 +364,29 @@ fn render_logical_imm(op: OperandDef, word: u32) -> Option<String> {
     let rotation = r % element_size;
     let mut element = rotate_element(ones, rotation, element_size) & element_mask;
     if op.logical_invert { element = !element & element_mask; }
-    if packed { return Some(format!("0x{element:x}")); }
+    if packed { return crate::number_text::hex(output,element).ok(); }
     let mut value = 0u64; let mut shift = 0;
     while shift < data_size { value |= element << shift; shift += element_size; }
-    Some(format!("0x{value:x}"))
+    crate::number_text::hex(output,value).ok()
 }
 
-fn render_bitfield_width(op: OperandDef, word: u32) -> Option<String> {
+fn render_bitfield_width(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     if op.parts.len() != 2 { return None; }
     let imms = part_value(word, op.parts[0]); let immr = part_value(word, op.parts[1]);
     if op.data_size > 0 && imms as i64 >= op.data_size { return None; }
-    if op.add == 1 { (imms < immr).then(|| (imms + 1).to_string()) }
-    else { (imms >= immr).then(|| (imms - immr + 1).to_string()) }
+    let value = if op.add == 1 { if imms >= immr { return None; } imms + 1 }
+        else { if imms < immr { return None; } imms - immr + 1 };
+    crate::number_text::signed(output,value as i64).ok()
 }
 
-fn render_byte_mask(op: OperandDef, word: u32) -> Option<String> {
+fn render_byte_mask(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     if op.parts.len() != 8 { return None; }
     let mut value = 0u64;
     for part in op.parts { value = value << 8 | if part_value(word, *part) != 0 { 0xff } else { 0 }; }
-    Some(format!("0x{value:x}"))
+    crate::number_text::hex(output,value).ok()
 }
 
-fn render_move_wide(op: OperandDef, word: u32) -> Option<String> {
+fn render_move_wide(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     if op.parts.len() != 3 { return None; }
     let imm16 = part_value(word, op.parts[0]) as u64;
     let shift = part_value(word, op.parts[1]) * 16;
@@ -332,10 +394,10 @@ fn render_move_wide(op: OperandDef, word: u32) -> Option<String> {
     if shift >= data_size { return None; }
     let mut value = imm16 << shift;
     if op.move_wide_invert { value = !value; if data_size == 32 { value &= 0xffff_ffff; } }
-    Some(format!("0x{value:x}"))
+    crate::number_text::hex(output,value).ok()
 }
 
-fn render_element_index(op: OperandDef, word: u32) -> Option<String> {
+fn render_element_index(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     if op.index_size_parts == 0 || op.index_size_parts as usize >= op.parts.len() { return None; }
     let size_start = op.parts.len() - op.index_size_parts as usize;
     let mut raw = 0u64; let mut size = 0u64;
@@ -344,17 +406,17 @@ fn render_element_index(op: OperandDef, word: u32) -> Option<String> {
         if index >= size_start { size = size << part.width | value; }
     }
     if size == 0 { return None; }
-    Some((raw >> (size.trailing_zeros() + 1)).to_string())
+    crate::number_text::unsigned(output,raw >> (size.trailing_zeros() + 1)).ok()
 }
 
-fn render_tile_mask(op: OperandDef, word: u32) -> Option<String> {
+fn render_tile_mask(op: &OperandDef, word: u32, output: &mut String) -> Option<()> {
     if op.parts.len() != 1 || op.parts[0].width != 8 { return None; }
-    let mask = part_value(word, op.parts[0]); let mut output = String::new();
-    for index in 0..8 { if mask & (1 << index) != 0 { if !output.is_empty() { output.push_str(", "); } let _ = write!(output, "za{index}.d"); } }
-    Some(output)
+    let mask = part_value(word, op.parts[0]); let mut first = true;
+    for index in 0..8 { if mask & (1 << index) != 0 { if !first { output.push_str(", "); } first = false; output.push_str("za");crate::number_text::unsigned(output,index).ok()?;output.push_str(".d"); } }
+    Some(())
 }
 
-fn raw_value(op: OperandDef, word: u32) -> u64 {
+fn raw_value(op: &OperandDef, word: u32) -> u64 {
     let parts = if op.parts.is_empty() { op.cols } else { op.parts };
     let mut value = 0u64;
     for part in parts { value = value << part.width | literal_or_field(word, *part); }
@@ -366,7 +428,7 @@ fn literal_or_field(word: u32, part: BitPart) -> u64 {
     part.literal.bytes().fold(0, |value, bit| value << 1 | u64::from(bit == b'1'))
 }
 
-fn total_width(op: OperandDef) -> u8 {
+fn total_width(op: &OperandDef) -> u8 {
     let parts = if op.parts.is_empty() { op.cols } else { op.parts };
     parts.iter().map(|part| part.width).sum()
 }
@@ -396,14 +458,26 @@ fn row_matches(row: &Row, cols: &[BitPart], word: u32, xor: u64) -> bool {
 }
 
 fn register_name(class: &str, number: u64) -> Option<String> {
+    let mut output = String::new();
+    write_register_name(class, number, &mut output)?;
+    Some(output)
+}
+
+fn write_register_name(class: &str, number: u64, output: &mut String) -> Option<()> {
     if number == 31 {
-        match class { "gpr32" => return Some("wzr".into()), "gpr64" => return Some("xzr".into()),
-            "gpr32sp" => return Some("wsp".into()), "gpr64sp" => return Some("sp".into()), _ => {} }
+        let special = match class {
+            "gpr32" => Some("wzr"), "gpr64" => Some("xzr"),
+            "gpr32sp" => Some("wsp"), "gpr64sp" => Some("sp"), _ => None,
+        };
+        if let Some(special) = special {
+            output.push_str(special);
+            return Some(());
+        }
     }
     let bank = match class { "gpr32" | "gpr32sp" => "w", "gpr64" | "gpr64sp" => "x",
         "simdb" => "b", "simdh" => "h", "simds" => "s", "simdd" => "d", "simdq" => "q",
         "simdvec" => "v", "svez" => "z", "svep" => "p", "svepn" => "pn", "smetile" => "za", _ => return None };
-    Some(format!("{bank}{number}"))
+    output.push_str(bank);crate::number_text::unsigned(output,number).ok()
 }
 
 fn move_wide_preferred(sf: u32, n: u32, imms: u32, immr: u32) -> bool {
@@ -456,52 +530,120 @@ fn rotate_element(value: u64, rotation: u32, width: u32) -> u64 {
 }
 
 fn numeric_placeholder(symbol: &str) -> bool {
-    let lower = symbol.trim().to_ascii_lowercase();
-    lower.strip_prefix("#uimm").is_some_and(|tail| !tail.is_empty() && tail.bytes().all(|byte| byte.is_ascii_digit()))
+    let symbol = symbol.trim();
+    symbol.get(..5).is_some_and(|prefix| prefix.eq_ignore_ascii_case("#uimm")) &&
+        symbol.get(5..).is_some_and(|tail| !tail.is_empty() && tail.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn canonical_symbol(symbol: &str) -> String {
-    let lower = symbol.trim().to_ascii_lowercase();
-    if lower.starts_with('(') && lower.ends_with(')') {
-        if let Some(bar) = lower.find('|') { return lower[1..bar].trim().to_string(); }
-    }
-    if let Some(bar) = lower.find('|') { return if &lower[..bar] == "lsl" { lower[bar + 1..].trim().into() } else { lower[..bar].trim().into() }; }
-    lower
+    let mut output = String::new();
+    write_canonical_symbol(symbol, &mut output);
+    output
 }
 
-fn canonical_alternatives(input: &str) -> String {
-    let mut output = input.to_string();
+fn write_canonical_symbol(symbol: &str, output: &mut String) {
+    let mut choice = symbol.trim();
+    if choice.starts_with('(') && choice.ends_with(')') {
+        if let Some(bar) = choice.find('|') { choice = choice[1..bar].trim(); }
+    } else if let Some(bar) = choice.find('|') {
+        choice = if choice[..bar].eq_ignore_ascii_case("lsl") { choice[bar + 1..].trim() } else { choice[..bar].trim() };
+    }
+    let start = output.len();
+    output.push_str(choice);
+    output[start..].make_ascii_lowercase();
+}
+
+fn canonical_alternatives(mut output: String) -> String {
     while let Some(close) = output.find(')') {
         let Some(open) = output[..close].rfind('(') else { break };
-        let inside = &output[open + 1..close]; let Some(bar) = inside.find('|') else { break };
-        let choice = if inside[..bar].trim().is_empty() { inside[bar + 1..].trim() } else { inside[..bar].trim() }.to_string();
-        output.replace_range(open..=close, &choice);
+        let inside = &output[open + 1..close];
+        let Some(bar) = inside.find('|') else { break };
+        let (start, end) = if inside[..bar].trim().is_empty() {
+            (open + 1 + bar + 1, close)
+        } else {
+            (open + 1, open + 1 + bar)
+        };
+        retain_alternative(&mut output, open, close + 1, start, end);
     }
-	while let Some(bar) = output.find('|') {
-		let bytes = output.as_bytes();
-		let mut left = bar;
-		while left > 0 && !matches!(bytes[left - 1], b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') { left -= 1; }
-		let mut right = bar + 1;
-		while right < bytes.len() && !matches!(bytes[right], b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') { right += 1; }
-		let choice = if output[left..bar].trim().is_empty() { output[bar + 1..right].trim() } else { output[left..bar].trim() }.to_string();
-		output.replace_range(left..right, &choice);
-	}
+    while let Some(bar) = output.find('|') {
+        let bytes = output.as_bytes();
+        let mut left = bar;
+        while left > 0 && !matches!(bytes[left - 1], b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') { left -= 1; }
+        let mut right = bar + 1;
+        while right < bytes.len() && !matches!(bytes[right], b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}') { right += 1; }
+        let (start, end) = if output[left..bar].trim().is_empty() {
+            (bar + 1, right)
+        } else {
+            (left, bar)
+        };
+        retain_alternative(&mut output, left, right, start, end);
+    }
     output
 }
 
-fn collapse_space(input: &str) -> String {
-    let mut output = String::with_capacity(input.len()); let mut space = false;
-    for ch in input.chars() {
-        if ch.is_whitespace() { space = true; continue; }
-        if space && !output.is_empty() { output.push(' '); }
-        space = false; output.push(ch);
+fn retain_alternative(output: &mut String, left: usize, right: usize, start: usize, end: usize) {
+    let choice = &output[start..end];
+    let start = start + choice.len() - choice.trim_start().len();
+    let end = start + choice.trim().len();
+    // Remove suffix first so the chosen text never needs its own allocation.
+    output.replace_range(end..right, "");
+    output.replace_range(left..start, "");
+}
+
+fn collapse_space(mut input: String) -> String {
+    if !input.is_ascii() {
+        let mut index = 0;
+        while index < input.len() {
+            let ch = input[index..].chars().next().unwrap();
+            let width = ch.len_utf8();
+            if ch.is_whitespace() && !ch.is_ascii() {
+                input.replace_range(index..index + width, " ");
+                index += 1;
+            } else { index += width; }
+        }
     }
-    output
+    // Templates and architectural operand spellings are ASCII. Compact them
+    // in their owned buffer; keep Unicode whitespace behavior for other text.
+    let mut bytes = input.into_bytes();
+    let mut written = 0;
+    let mut space = false;
+    for read in 0..bytes.len() {
+        let byte = bytes[read];
+        if byte.is_ascii_whitespace() || byte == 0x0b { space = true; continue; }
+        if space && written != 0 { bytes[written] = b' '; written += 1; }
+        space = false;
+        bytes[written] = byte;
+        written += 1;
+    }
+    bytes.truncate(written);
+    String::from_utf8(bytes).expect("compacting ASCII preserves UTF-8")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bucket_selection_matches_flat_priority_and_constraints() {
+        let check = |word| {
+            let mut expected = None;
+            for form in FORMS {
+                if form_matches(form, word) && expected.is_none_or(|old| better_form(form, old)) {
+                    expected = Some(form);
+                }
+            }
+            assert_eq!(analysis::selected_form(word).map(|form| form.encoding_id),
+                expected.map(|form| form.encoding_id), "word {word:08x}");
+        };
+        for form in FORMS {
+            check(form.value);
+            check(form.value | !form.mask);
+        }
+        let mut word = 0x91e1_0da5_u32;
+        for _ in 0..4096 {
+            word = word.wrapping_mul(1664525).wrapping_add(1013904223);
+            check(word);
+        }
+    }
     #[test]
     fn representative_formatting() {
         for (word, expected) in [(0xD503201F, "NOP"), (0xD65F03C0, "RET")] {
@@ -519,4 +661,205 @@ mod tests {
 			assert_eq!(format(word, 0).as_deref(), Ok(expected), "word 0x{word:08x}");
 		}
 	}
+    #[test]
+    fn owned_normalization_matches_reference() {
+        fn canonical_alternatives_reference(input: &str) -> String {
+            let mut output = input.to_string();
+            while let Some(close) = output.find(')') {
+                let Some(open) = output[..close].rfind('(') else {
+                    break;
+                };
+                let inside = &output[open + 1..close];
+                let Some(bar) = inside.find('|') else { break };
+                let choice = if inside[..bar].trim().is_empty() {
+                    inside[bar + 1..].trim()
+                } else {
+                    inside[..bar].trim()
+                }
+                .to_string();
+                output.replace_range(open..=close, &choice);
+            }
+            while let Some(bar) = output.find('|') {
+                let bytes = output.as_bytes();
+                let mut left = bar;
+                while left > 0
+                    && !matches!(
+                        bytes[left - 1],
+                        b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}'
+                    )
+                {
+                    left -= 1;
+                }
+                let mut right = bar + 1;
+                while right < bytes.len()
+                    && !matches!(
+                        bytes[right],
+                        b' ' | b'\t' | b',' | b'[' | b']' | b'{' | b'}'
+                    )
+                {
+                    right += 1;
+                }
+                let choice = if output[left..bar].trim().is_empty() {
+                    output[bar + 1..right].trim()
+                } else {
+                    output[left..bar].trim()
+                }
+                .to_string();
+                output.replace_range(left..right, &choice);
+            }
+            output
+        }
+
+        fn collapse_space_reference(input: &str) -> String {
+            let mut output = String::with_capacity(input.len());
+            let mut space = false;
+            for ch in input.chars() {
+                if ch.is_whitespace() {
+                    space = true;
+                    continue;
+                }
+                if space && !output.is_empty() {
+                    output.push(' ');
+                }
+                space = false;
+                output.push(ch);
+            }
+            output
+        }
+
+        let normalize = |text: String| {
+            let mut text = canonical_alternatives(collapse_space(text));
+            text.truncate(text.trim_end().len());
+            text
+        };
+        let tokens = ["a", "b", " ", "\t", "\n", "\x0b", "(", ")", "|", ",", "[", "]", "{", "}", "é", "\u{a0}"];
+        let mut random = 0x42f5_9d17_u64;
+        for _ in 0..2048 {
+            let mut input = String::new();
+            for _ in 0..16 {
+                random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                input.push_str(tokens[(random >> 60) as usize]);
+            }
+            let expected = canonical_alternatives_reference(&collapse_space_reference(&input));
+            assert_eq!(normalize(input.clone()), expected.trim_end(), "{input:?}");
+        }
+
+    }
+
+    #[test]
+    fn ascii_normalization_reuses_its_owned_buffer() {
+        let mut input = String::with_capacity(128);
+        let pointer = input.as_ptr();
+        for _ in 0..256 {
+            input.clear();
+            input.push_str("  add\t x0, (lsl|uxtx)  #1\x0b ");
+            input = canonical_alternatives(collapse_space(input));
+            input.truncate(input.trim_end().len());
+            assert_eq!(input, "add x0, lsl #1");
+            assert_eq!(input.as_ptr(), pointer);
+            assert_eq!(input.capacity(), 128);
+        }
+    }
+
+}
+
+#[cfg(test)]
+mod format_reuse_tests {
+    use super::*;
+    use std::alloc::{GlobalAlloc,Layout,System};
+    use std::cell::Cell;
+    struct CountingAllocator;
+    thread_local!{static CALLS:Cell<Option<usize>>=const{Cell::new(None)};}
+    fn count_allocation(){let _=CALLS.try_with(|count|{if let Some(n)=count.get(){count.set(Some(n+1))}});}
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self,l:Layout)->*mut u8{count_allocation();unsafe{System.alloc(l)}}
+        unsafe fn alloc_zeroed(&self,l:Layout)->*mut u8{count_allocation();unsafe{System.alloc_zeroed(l)}}
+        unsafe fn dealloc(&self,p:*mut u8,l:Layout){unsafe{System.dealloc(p,l)}}
+        unsafe fn realloc(&self,p:*mut u8,l:Layout,n:usize)->*mut u8{count_allocation();unsafe{System.realloc(p,l,n)}}
+    }
+    #[global_allocator]static ALLOC:CountingAllocator=CountingAllocator;
+    fn without_allocations(f:impl FnOnce()) {
+        CALLS.with(|c|c.set(Some(0)));f();
+        let calls=CALLS.with(|c|c.replace(None).unwrap());
+        assert_eq!(calls,0,"reusable formatting allocated");
+    }
+
+    #[test]
+    fn reusable_formatting_covers_all_forms_and_error_paths() {
+        let mut output=String::with_capacity(4096);
+        let mut checked=0;
+        for form in FORMS {
+            for pattern in [0,u32::MAX,0x55555555,0xaaaaaaaa] {
+                let word=form.value|(!form.mask&pattern);
+                let expected=format(word,0x1234);
+                output.clear();output.push_str("stale output");
+                let mut result=Ok(());
+                without_allocations(||{result=format_into(word,0x1234,&mut output);});
+                assert_eq!(result,expected.as_ref().map(|_|()).map_err(|e|*e),"{word:08x}");
+                assert_eq!(output,expected.as_deref().unwrap_or(""),"{word:08x}");
+                if let Ok(decoded)=crate::decode(word) {
+                    without_allocations(||{result=decoded.format_into(0x1234,&mut output);});
+                    assert_eq!(result,expected.as_ref().map(|_|()).map_err(|e|*e));
+                }
+                let mut empty=String::new();
+                assert_eq!(format_into(word,0x1234,&mut empty),result);
+                assert_eq!(empty,output);
+                checked+=1;
+            }
+        }
+        assert_eq!(checked,FORMS.len()*4);
+    }
+    #[test]
+    fn unknown_owned_formatting_keeps_its_allocation_free_error_path() {
+        for word in [0,u32::MAX,0x02000000] {
+            if analysis::selected_form(word).is_none() {
+                let mut result=Ok(String::new());
+                without_allocations(||{result=format(word,0);});
+                assert_eq!(result,Err(FormatError::Unknown(word)));
+            }
+        }
+    }
+    #[test]
+    fn unicode_normalization_and_symbols_reuse_the_buffer() {
+        for input in [" \u{a0} A \u{2003} é ","İ \t (a|b)  ","a\x0bb"] {
+            let expected=input.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut output=input.to_string();
+            without_allocations(||{output=collapse_space(std::mem::take(&mut output));});
+            assert_eq!(output,expected);
+        }
+        for (input,expected) in [(" (A|B) ","a"),("LSL|LSR","lsr"),("A|B","a"),(" é ","é")] {
+            let mut output=String::with_capacity(64);
+            without_allocations(||write_canonical_symbol(input,&mut output));
+            assert_eq!(output,expected);
+        }
+    }
+}
+
+#[cfg(test)]
+mod group_cache_tests {
+    use super::*;
+    // Preserve the uncached traversal as an independent oracle for nested,
+    // required and defaulted groups throughout the imported instruction set.
+    fn reference(form:&Form,word:u32,out:&mut String)->Option<()> {
+        let mut skipped=[false;32];
+        for part in form.parts {if part.group!=0&&(part.group as usize)<32 {
+            skipped[part.group as usize]=group_omitted(form,part.group,word);
+        }}
+        for part in form.parts {
+            if part.group!=0&&(skipped[part.group as usize]||ancestor_skipped(form,part.group,&skipped)){continue;}
+            if let Some(op)=part.operand.as_ref(){render_operand_into(op,word,out)?;}else{out.push_str(part.literal);}
+        }
+        *out=canonical_alternatives(collapse_space(std::mem::take(out)));
+        out.truncate(out.trim_end().len());Some(())
+    }
+    #[test]
+    fn cached_groups_preserve_every_form() {
+        let mut expected=String::new();let mut actual=String::new();
+        for form in FORMS {for pattern in [0,u32::MAX,0x55555555,0xaaaaaaaa] {
+            let word=form.value|(!form.mask&pattern);expected.clear();actual.clear();
+            let want=reference(form,word,&mut expected);let got=render_form_into(form,word,&mut actual);
+            assert_eq!(got,want,"{} {word:08x}",form.encoding_id);
+            assert_eq!(actual,expected,"{} {word:08x}",form.encoding_id);
+        }}
+    }
 }

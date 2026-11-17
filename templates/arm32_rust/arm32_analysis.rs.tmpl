@@ -1,0 +1,177 @@
+//! Structured A32/Thumb analysis without formatting or allocation.
+use super::*;
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum Coverage { Complete, Partial }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum Location { Operand, Memory, PostIndex }
+#[derive(Clone,Copy,Debug,PartialEq)]
+pub enum Value { Register(Register), RegisterMask(u16), RegisterSequence { first:Register,count:u8,stride:u8 }, Integer(i64), Float(f64), Target(u32), Symbol(&'static str), Unknown }
+#[derive(Clone,Copy,Debug,PartialEq)]
+pub struct Component { pub symbol:&'static str,pub value:Value,pub location:Location,pub lane:Option<u32> }
+static IDENTITIES: &[(&str,&str,&str,&str)] = &[
+{{.Identities}}];
+const EMPTY:Component=Component{symbol:"",value:Value::Unknown,location:Location::Operand,lane:None};
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum IndexMode { Offset, PreIndex, PostIndex }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum BlockMode { IncrementAfter, IncrementBefore, DecrementAfter, DecrementBefore }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub struct MemoryAddress { pub alignment_bits:Option<u32>,pub base:Option<Register>,pub index:Option<Register>,pub displacement:i64,pub subtract:bool,pub shift:Shift,pub mode:IndexMode,pub writeback:bool,pub post_index:Option<i64>,pub post_register:Option<Register>,pub absolute:Option<u32>,pub block:Option<BlockMode> }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum FlowKind { Linear, Branch, Call, Return, Exception, Unknown }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum Predicate { Always, Condition(u8), RegisterZero{register:Register,nonzero:bool}, ThumbItStateRequired }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum BranchTarget { Direct(u32), Register(Register), Memory, Table { address:MemoryAddress,entry_bits:u8,base:u32,scale:u8 }, Unknown }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub struct ControlFlow { pub kind:FlowKind,pub predicate:Predicate,pub target:Option<BranchTarget>,pub fallthrough:Option<u32>,pub exchanges_instruction_set:bool,pub exception_return:bool }
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub struct Identity {pub encoding_id:&'static str,pub mnemonic:&'static str}
+#[derive(Clone,Copy,Debug,PartialEq)]
+pub struct Analysis {pub canonical:Identity,pub display:Identity,pub coverage:Coverage,components:[Component;64],count:usize,pub memory:Option<MemoryAddress>,pub control_flow:ControlFlow}
+impl Analysis {pub fn components(&self)->&[Component]{&self.components[..self.count]}}
+impl Decoded {
+    /// Stateless Thumb analysis leaves IT predication explicitly unresolved.
+    pub fn analyze(&self,address:u64)->Analysis{self.analyze_with_thumb_condition(address,None)}
+    /// Supply the effective condition from the caller's IT-state tracker; 14
+    /// means outside an IT block. Explicit branch conditions take precedence.
+    pub fn analyze_with_thumb_condition(&self,address:u64,condition:Option<u8>)->Analysis{analyze(self,address,condition)}
+    pub(super) fn analysis_integer(&self,p:&Part,value:u32)->Option<u32>{
+        let value=match p.transform {
+            Transform::ArmImmediate=>(value&255).rotate_right(((value>>8)&15)*2),
+            Transform::ThumbImmediate=>thumb_immediate(value), Transform::PlusOne=>value+1,
+            Transform::Successor=>value+1,
+            Transform::BitfieldWidth=>value.saturating_sub(self.field("lsb").unwrap_or(self.f("imm3")<<2|self.f("imm2")))+1,
+            Transform::ShiftAmount=>if value==0 && (self.field("stype").unwrap_or(self.f("op"))==1 || self.field("stype").unwrap_or(self.f("op"))==2 || self.mnemonic().starts_with("LSR") || self.mnemonic().starts_with("ASR") || self.encoding_id().ends_with("_ASR") || self.mnemonic().starts_with("PKHTB")){32}else{value},
+            Transform::RightShift=>{let raw=value|self.f("L")<<6;(1_u32<<(31-raw.max(1).leading_zeros())).saturating_mul(2).saturating_sub(raw)},
+            Transform::NarrowShift=>(8_u32<<((31-self.f("imm6").max(1).leading_zeros()).saturating_sub(3))).saturating_mul(2).saturating_sub(value),
+            Transform::LeftShift=>if self.mnemonic().starts_with("VSHLL") && self.field("size").is_some(){8<<self.f("size")}else{let raw=value|self.f("L")<<6;raw.saturating_sub(1<<(31-raw.max(1).leading_zeros()))},
+            Transform::FractionBits=>if self.field("sx").is_some(){(if self.f("sx")==0{16_u32}else{32}).saturating_sub(self.f("imm4")<<1|self.f("i"))}else{64-value},
+            Transform::FloatImmediate|Transform::SimdImmediate=>return None, Transform::Plain=>value,
+        };Some(value.wrapping_mul(p.scale))
+    }
+}
+pub(super) fn value(d:&Decoded,p:&Part,address:u64)->Value{
+    if let Some(r)=d.scalar_register(p){return Value::Register(r)}
+    if !p.symbol.contains('<') && p.bits.is_empty() && p.values.is_empty(){return Value::Symbol(p.symbol)}
+    if p.symbol.contains("registers") {
+        let Some(mask)=d.register_mask(p)else{return Value::Unknown};
+        return if mask==0{Value::Unknown}else{Value::RegisterMask(mask as u16)}
+    }
+    if p.symbol=="<single_register_list>"{return Value::RegisterMask(1_u16.checked_shl(d.f("Rt")).unwrap_or(0))}
+    if matches!(p.symbol,"<list>"|"<dreglist>"|"<sreglist>"){
+        let Some((first,count,stride))=d.register_sequence(p)else{return Value::Unknown};
+        if count==0 || count>32 || match first{Register::D(n)|Register::S(n)=>u32::from(n)+(count-1)*stride>=32,_=>true}{return Value::Unknown}return Value::RegisterSequence{first,count:count as u8,stride:stride as u8}
+    }
+    if p.symbol=="<label>"{
+        if let Some(t)=d.branch_target(address){return Value::Target(t)}
+        // Literal loads and ADR use the aligned architectural PC.
+        let pc=(address as u32).wrapping_add(if d.mode==Mode::Arm{8}else{4})&!3;
+        let raw=d.value(p);let imm=if d.mnemonic().starts_with("ADR"){
+            if d.mode==Mode::Arm{(raw&255).rotate_right(((raw>>8)&15)*2)}else if d.length==2{raw*4}else{raw}
+        }else if d.mode==Mode::Thumb && d.length==2{raw*4}else{raw*p.scale};
+        let subtract=d.field("U")==Some(0)||matches!(d.encoding_id(),"ADR_A2"|"ADR_T2");
+        return Value::Target(if subtract{pc.wrapping_sub(imm)}else{pc.wrapping_add(imm)})
+    }
+    if let Some(row)=p.values.iter().find(|row|row.checks.iter().all(|c|extract(d.raw(),c.bits)&c.mask==c.value)){
+        return if matches!(row.text,"reserved"|"unallocated"|"undefined"|"unpredictable"){Value::Unknown}else{row.text.strip_prefix('#').unwrap_or(row.text).parse::<i64>().ok().map_or(Value::Symbol(row.text),Value::Integer)}
+    }
+    if p.symbol=="<index>"{return Value::Integer(i64::from(d.lane_index()))}
+    if p.symbol=="<size>"{return Value::Integer(i64::from(d.element_size()))}
+    match p.transform {
+        Transform::FloatImmediate=>Value::Float(float_immediate(d.f("imm4H")<<4|d.f("imm4L"))),
+        Transform::SimdImmediate=>{let imm=d.f("i")<<7|d.f("imm3")<<4|d.f("imm4");if d.f("cmode")==15 && d.f("op")==0{Value::Float(float_immediate(imm))}else{Value::Integer(simd_immediate(d.f("cmode"),d.f("op"),imm) as i64)}},
+        _ if !p.bits.is_empty() || p.symbol.starts_with("<imm") || matches!(p.symbol,"<const>"|"<amount>"|"<lsb>"|"<width>")=>d.analysis_integer(p,d.value(p)).map_or(Value::Unknown,|v|Value::Integer(i64::from(v))),
+        _=>Value::Unknown,
+    }
+}
+fn offset_part(p:&Part)->bool{!matches!(p.symbol,"<shift>"|"<type>"|"<amount>"|"<align>"|"<size>"|"<index>")}
+fn alignment_bits(d:&Decoded)->Option<u32>{d.alignment_bits()}
+fn exception_return(name:&str)->bool{matches!(name,"ERET"|"RFE"|"RFEDA"|"RFEDB"|"RFEIA"|"RFEIB")}
+pub fn analyze(d:&Decoded,address:u64,thumb_condition:Option<u8>)->Analysis{
+    let (_,canonical,canonical_mnemonic,_)=IDENTITIES.binary_search_by_key(&d.encoding_id(),|e|e.0).ok().map(|i|IDENTITIES[i]).unwrap_or((d.encoding_id(),d.encoding_id(),d.mnemonic(),d.mnemonic()));
+    let mut out=Analysis{canonical:Identity{encoding_id:canonical,mnemonic:canonical_mnemonic},display:Identity{encoding_id:d.encoding_id(),mnemonic:d.mnemonic()},coverage:Coverage::Complete,components:[EMPTY;64],count:0,memory:None,control_flow:ControlFlow{kind:FlowKind::Unknown,predicate:Predicate::Always,target:None,fallthrough:None,exchanges_instruction_set:false,exception_return:false}};
+    if canonical_mnemonic.is_empty(){out.coverage=Coverage::Partial}
+    let mut location=Location::Operand;let mut explicit_writeback=false;
+    for p in d.form().parts{
+        if p.prefix.contains('[') && !p.symbol.contains("index"){
+            location=Location::Memory;out.memory=Some(MemoryAddress{alignment_bits:None,base:if p.prefix.contains("SP"){Some(Register::Gpr(13))}else if p.prefix.contains("PC"){Some(Register::Gpr(15))}else{None},index:None,displacement:0,subtract:d.field("U")==Some(0),shift:Shift::None,mode:IndexMode::Offset,writeback:false,post_index:None,post_register:None,absolute:None,block:None});
+        }
+        if p.prefix.contains(']') && out.memory.is_some(){location=Location::PostIndex}
+        if p.symbol=="!" && d.writeback(){explicit_writeback=true}
+        if matches!(p.symbol,"<c>"|"<q>"|"!"|"+/-"|"+"){continue}
+        let v=value(d,p,address);
+        if p.symbol=="<label>" && (d.mnemonic().starts_with("LDR") || d.mnemonic().starts_with("VLDR") || d.mnemonic().starts_with("PLD") || d.mnemonic().starts_with("PLI")) {
+            if let Value::Target(target)=v {let pc=(address as u32).wrapping_add(if d.mode==Mode::Arm{8}else{4})&!3;out.memory=Some(MemoryAddress{alignment_bits:None,base:Some(Register::Gpr(15)),index:None,displacement:i64::from(target.wrapping_sub(pc) as i32),subtract:false,shift:Shift::None,mode:IndexMode::Offset,writeback:false,post_index:None,post_register:None,absolute:Some(target),block:None});}
+        }
+        if v==Value::Unknown{out.coverage=Coverage::Partial}
+        if let Some(m)=out.memory.as_mut(){match (location,v){
+            (Location::Memory,Value::Register(r)) if m.base.is_none()=>m.base=Some(r),
+            (Location::Memory,Value::Register(r))=>m.index=Some(r),
+            // Shift selectors/amounts and alignment requirements are not offsets.
+            (Location::Memory,Value::Integer(v)) if m.index.is_none() && offset_part(p)=>m.displacement=if m.subtract{-v}else{v},
+            (Location::PostIndex,Value::Register(r))=>m.post_register=Some(r),
+            (Location::PostIndex,Value::Integer(v)) if m.post_register.is_none() && offset_part(p)=>m.post_index=Some(if m.subtract{-v}else{v}),_=>{}
+        }}
+        if out.count==64{out.coverage=Coverage::Partial;break}
+        out.components[out.count]=Component{symbol:p.symbol,value:v,location,lane:if p.symbol.contains("[x]") || p.symbol=="<list>"&&d.field("index_align").is_some(){Some(d.lane_index())}else{None}};out.count+=1;
+    }
+    if out.memory.is_none(){
+        let name=d.mnemonic();let push=name.starts_with("PUSH")||name.starts_with("VPUSH");let pop=name.starts_with("POP")||name.starts_with("VPOP");
+        if push||pop||["LDM","STM","VLDM","VSTM","FLDM","FSTM"].iter().any(|prefix|name.starts_with(prefix)){
+            let base=if push||pop{Some(Register::Gpr(13))}else{d.field("Rn").map(|n|Register::Gpr(n as u8))};
+            let mut count=0;let mut width=4;
+            for c in out.components(){match c.value{Value::RegisterMask(mask)=>count+=mask.count_ones(),Value::RegisterSequence{first,count:n,..}=>{count+=u32::from(n);if matches!(first,Register::D(_)){width=8}},_=>{}}}
+            let before=push||!pop&&d.field("P")==Some(1);let add=pop||!push&&d.field("U").unwrap_or(1)!=0;
+            let block=match (before,add){(false,true)=>BlockMode::IncrementAfter,(true,true)=>BlockMode::IncrementBefore,(false,false)=>BlockMode::DecrementAfter,(true,false)=>BlockMode::DecrementBefore};
+            let displacement=if add{if before{width}else{0}}else if before{-i64::from(count)*width}else{-i64::from(count.saturating_sub(1))*width};
+            let writeback=push||pop||d.writeback()||d.form().suffix.contains('!')||d.form().parts.iter().any(|p|p.prefix.contains('!'));
+            out.memory=Some(MemoryAddress{alignment_bits:None,base,index:None,displacement,subtract:!add,shift:Shift::None,mode:if writeback{if before{IndexMode::PreIndex}else{IndexMode::PostIndex}}else{IndexMode::Offset},writeback,post_index:if writeback{Some(i64::from(count)*width*if add{1}else{-1})}else{None},post_register:None,absolute:None,block:Some(block)});
+            if count==0||base.is_none(){out.coverage=Coverage::Partial}
+        }else if exception_return(name) && name!="ERET"{
+            let id=d.encoding_id();let before=name.ends_with("DB")||name.ends_with("IB")||id=="RFE_T1_AS";
+            let add=!(name.ends_with("DA")||name.ends_with("DB")||id=="RFE_T1_AS");
+            let block=match (before,add){(false,true)=>BlockMode::IncrementAfter,(true,true)=>BlockMode::IncrementBefore,(false,false)=>BlockMode::DecrementAfter,(true,false)=>BlockMode::DecrementBefore};
+            let writeback=d.f("W")!=0;
+            out.memory=Some(MemoryAddress{alignment_bits:None,base:d.field("Rn").map(|n|Register::Gpr(n as u8)),index:None,displacement:if add{if before{4}else{0}}else if before{-8}else{-4},subtract:!add,shift:Shift::None,mode:if writeback{if before{IndexMode::PreIndex}else{IndexMode::PostIndex}}else{IndexMode::Offset},writeback,post_index:if writeback{Some(if add{8}else{-8})}else{None},post_register:None,absolute:None,block:Some(block)});
+            if out.memory.is_some_and(|m|m.base.is_none()){out.coverage=Coverage::Partial}
+        }
+    }
+    if let Some(m)=out.memory.as_mut(){
+        if m.block.is_none(){m.mode=if location==Location::PostIndex && (m.post_index.is_some()||m.post_register.is_some()) || d.field("P")==Some(0){IndexMode::PostIndex}else if explicit_writeback || d.f("W")!=0 || d.form().suffix.contains('!'){IndexMode::PreIndex}else{IndexMode::Offset};
+        m.writeback=m.mode!=IndexMode::Offset;}
+        m.alignment_bits=alignment_bits(d);
+        if m.index.is_some()||m.post_register.is_some(){let n=d.shift_amount().or(d.field("imm2")).unwrap_or(0);m.shift=if d.mnemonic()=="TBH"{Shift::Lsl(1)}else{match d.field("stype").unwrap_or(0){0=>Shift::Lsl(n),1=>Shift::Lsr(if n==0{32}else{n}),2=>Shift::Asr(if n==0{32}else{n}),_ if n==0=>Shift::Rrx,_=>Shift::Ror(n)}}}
+    }
+    out.control_flow=flow(d,address,thumb_condition,&out);
+    if out.control_flow.predicate==Predicate::ThumbItStateRequired||out.control_flow.kind==FlowKind::Unknown{out.coverage=Coverage::Partial}
+    out
+}
+fn flow(d:&Decoded,address:u64,thumb_condition:Option<u8>,out:&Analysis)->ControlFlow{
+    let name=d.mnemonic().trim_end_matches('{');let direct=d.branch_target(address).map(BranchTarget::Direct);
+    let c=d.field("cond").filter(|&c|c<14).map(|c|c as u8).or(thumb_condition.filter(|&c|c<14));
+    let predicate=if let Some(c)=c{Predicate::Condition(c)}else if d.mode==Mode::Thumb && thumb_condition.is_none(){Predicate::ThumbItStateRequired}else{Predicate::Always};
+    let next=(address as u32).wrapping_add(d.length as u32);
+    let mut f=ControlFlow{kind:FlowKind::Linear,predicate,target:None,fallthrough:Some(next),exchanges_instruction_set:false,exception_return:false};
+    if name.starts_with("CBZ")||name.starts_with("CBNZ") {f.kind=FlowKind::Branch;f.target=direct;f.predicate=Predicate::RegisterZero{register:Register::Gpr(d.f("Rn") as u8),nonzero:name.starts_with("CBNZ")};return f}
+    if matches!(name,"TBB"|"TBH"){
+        f.kind=FlowKind::Branch;f.target=out.memory.map(|memory|BranchTarget::Table{address:memory,entry_bits:if name=="TBH"{16}else{8},base:(address as u32).wrapping_add(4),scale:2});
+        if f.predicate==Predicate::Always{f.fallthrough=None}return f
+    }
+    if name=="B"||name.starts_with("B{")||matches!(name,"BL"|"BLX"|"BX"|"BXJ"){
+        f.kind=if name.starts_with("BL"){FlowKind::Call}else{FlowKind::Branch};f.exchanges_instruction_set=matches!(name,"BX"|"BXJ"|"BLX");
+        f.target=direct.or_else(||d.field("Rm").map(|n|BranchTarget::Register(Register::Gpr(n as u8))));
+        if name=="BX" && d.field("Rm")==Some(14){f.kind=FlowKind::Return}
+        if f.kind!=FlowKind::Call && f.predicate==Predicate::Always{f.fallthrough=None}
+    }else if exception_return(name)||matches!(name,"SVC"|"HVC"|"SMC"|"BKPT"|"UDF"){
+        f.exception_return=exception_return(name);f.exchanges_instruction_set=f.exception_return;
+        f.kind=if f.exception_return{FlowKind::Return}else{FlowKind::Exception};f.target=Some(if f.exception_return && name!="ERET"{BranchTarget::Memory}else{BranchTarget::Unknown});f.fallthrough=if f.predicate==Predicate::Always{None}else{Some(next)}
+    }else if out.components().iter().any(|c|matches!(c.value,Value::RegisterMask(mask) if mask&0x8000!=0)) && (name.starts_with("POP")||name.starts_with("LDM")){
+        f.kind=FlowKind::Return;f.target=Some(BranchTarget::Memory);if f.predicate==Predicate::Always{f.fallthrough=None}
+    }else if out.components().first().is_some_and(|c|c.value==Value::Register(Register::Gpr(15))){
+        // Destination-PC effects require instruction semantics. Do not call a
+        // potential data-processing transfer linear merely from its spelling.
+        f.kind=FlowKind::Unknown;f.target=Some(BranchTarget::Unknown)
+    }
+    f
+}

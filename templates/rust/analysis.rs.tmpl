@@ -1,0 +1,231 @@
+//! Allocation-free structured A64 operands, identities and control flow.
+//!
+//! Components retain Arm's operand symbols and order. Memory components are
+//! grouped by `memory_id` and `location`; modifiers, arrangements, lanes and register
+//! lists remain explicit components rather than losing information in text.
+//! `Partial` means at least one component or control-flow fact is unresolved.
+use super::*;
+use crate::decoders::{decode, Decoded};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Coverage { Complete, Partial }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RegisterRole { General, StackPointer, Zero, Vector, Predicate, PredicateCounter, Tile }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Register { pub number: u8, pub width: Option<u16>, pub role: RegisterRole, pub class: &'static str }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Location { Operand, Memory, PostIndex, RegisterList(u8) }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Value { Register(Register), Integer(i128), FloatBits(u64), Symbol(&'static str), Target { displacement: i128, target: Option<u64> }, Unknown }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PredicateMode { Zeroing, Merging }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Component { pub symbol: &'static str, pub class: &'static str, pub value: Value, pub location: Location, pub memory_id: Option<u8>, pub writeback: bool, pub attached_to: Option<u8>, pub arrangement: Option<&'static str>, pub lane: Option<i128>, pub predicate_mode: Option<PredicateMode> }
+const CAPACITY:usize={{.Capacity}};
+const EMPTY: Component = Component { symbol: "", class: "", value: Value::Unknown, location: Location::Operand, memory_id:None, writeback:false, attached_to:None, arrangement:None, lane:None, predicate_mode:None };
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IndexMode { Offset, PreIndex, PostIndex,
+    /// Instruction-defined variable-length pointer updates, as in MOPS.
+    Updating }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AddressScale { Bytes, VectorLength, PredicateLength }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Memory {
+    /// Zero-based address identity shared by its components.
+    pub id: u8,
+    pub base: Option<Register>, pub index: Option<Register>, pub displacement: i128,
+    pub mode: IndexMode, pub writeback: bool, pub modifier: Option<&'static str>, pub amount: Option<i128>,
+    pub post_index: Option<Value>, pub scale:AddressScale,
+}
+const EMPTY_MEMORY:Memory=Memory{id:0,base:None,index:None,displacement:0,mode:IndexMode::Offset,writeback:false,modifier:None,amount:None,post_index:None,scale:AddressScale::Bytes};
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FlowKind { Linear, Branch, Call, Return, Exception, Unknown }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Predicate { Always, Condition(u8), RegisterZero { register: Register, nonzero: bool }, RegisterBit { register: Register, bit: u8, nonzero: bool }, RegisterCompare { left: Register, right: CompareOperand, width: u8, signed: bool, relation: CompareRelation }, Unknown }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompareOperand { Register(Register), Immediate(u64) }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompareRelation { Equal, NotEqual, LessThan, GreaterThan, GreaterOrEqual }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BranchTarget { Direct(Option<u64>), Register(Register), Implicit, Unknown }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ControlFlow { pub kind: FlowKind, pub predicate: Predicate, pub target: Option<BranchTarget>, pub fallthrough: Option<u64> }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Identity { pub encoding_id: &'static str, pub mnemonic: &'static str }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RegisterList {pub id:u8,pub first:Register,pub count:u8,pub stride:u8}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Analysis {
+    pub canonical: Identity, pub display: Identity, pub coverage: Coverage,
+    components: [Component; CAPACITY], count: usize, list_ranges:u32,
+    /// Convenience projection, present only when there is exactly one address.
+    pub memory: Option<Memory>, memories:[Memory;CAPACITY], memory_count:usize, pub control_flow: ControlFlow,
+}
+impl Analysis {
+    pub fn components(&self)->&[Component]{&self.components[..self.count]}
+    /// Structured bracketed addresses, in source order, with stable identities.
+    pub fn memory_addresses(&self)->&[Memory]{&self.memories[..self.memory_count]}
+    pub fn memory_address(&self,id:u8)->Option<&Memory>{self.memory_addresses().get(usize::from(id))}
+    /// Enumerate register-list groups, expanding source range notation into a
+    /// first/count/stride descriptor without materializing its members.
+    pub fn register_lists(&self)->impl Iterator<Item=RegisterList>+'_ {(1..32).filter_map(|id|self.register_list(id))}
+    pub fn register_list(&self,id:u8)->Option<RegisterList>{
+        let mut regs=self.components().iter().filter_map(|c|if c.location==Location::RegisterList(id){if let Value::Register(r)=c.value{Some(r)}else{None}}else{None});
+        let first=regs.next()?;let mut last=first;let mut count=1u8;let mut stride=1;
+        for r in regs{if r.class!=first.class{return None}if count==1{stride=r.number.wrapping_sub(first.number)&31}else if r.number.wrapping_sub(last.number)&31!=stride{return None}last=r;count+=1}
+        if self.list_ranges&(1u32<<id)!=0{count=(last.number.wrapping_sub(first.number)&31)+1;stride=1}
+        Some(RegisterList{id,first,count,stride})
+    }
+}
+static IDENTITIES: &[(&str,&str,&str,&str)] = &[
+{{.Identities}}];
+{{.Buckets}}
+
+fn register(class: &'static str, n: i128) -> Option<Register> {
+    use RegisterRole::*;
+    let (width, role, max) = match class {
+        "gpr32" => (Some(32), if n==31 {Zero}else{General},31), "gpr64" => (Some(64),if n==31 {Zero}else{General},31),
+        "gpr32sp" => (Some(32),if n==31 {StackPointer}else{General},31), "gpr64sp" => (Some(64),if n==31 {StackPointer}else{General},31),
+        "simdb" => (Some(8),Vector,31), "simdh" => (Some(16),Vector,31), "simds" => (Some(32),Vector,31),
+        "simdd" => (Some(64),Vector,31), "simdq" | "simdvec" => (Some(128),Vector,31), "svez" => (None,Vector,31),
+        "svep" => (None,Predicate,15), "svepn" => (None,PredicateCounter,15), "smetile" => (None,Tile,15), _ => return None,
+    };
+    (n>=0 && n<=max).then_some(Register {number:n as u8,width,role,class})
+}
+fn symbolic(symbol:&'static str)->Value {
+    let numeric=symbol.strip_prefix('#').unwrap_or(symbol);
+    let parsed=if let Some(hex)=numeric.strip_prefix("0x"){i128::from_str_radix(hex,16).ok()}else{numeric.parse::<i128>().ok()};
+    parsed.map_or(Value::Symbol(symbol),Value::Integer)
+}
+fn scalar(op: &OperandDef, word: u32, address: u64) -> Value {
+    use assembler::*;
+    let value = match op.kind {
+        Kind::Reg => dec_reg(op,word), Kind::Num => dec_num(op,word), Kind::Derived => Some(dec_derived(op,word)),
+        Kind::Formula => dec_formula(op,word), Kind::LogicalImm => dec_logical_imm(op,word).map(|v|v.0),
+        Kind::BitfieldWidth => dec_bitfield_width(op,word), Kind::ByteMaskImm => dec_byte_mask(op,word),
+        Kind::MoveWideImm => dec_move_wide(op,word).map(|v|v.0), Kind::ElementIndex => dec_element_index(op,word),
+        Kind::TileMask => dec_tile_mask(op,word), Kind::SysReg => dec_sysreg(op,word),
+        Kind::FpImm => return dec_fp_imm(op,word).map_or(Value::Unknown,|v|Value::FloatBits(v as u64)),
+        Kind::Literal => return symbolic(op.literal),
+        Kind::Table => return op.rows.iter().find(|row|row_matches(row,op.cols,word,op.xor)).map_or(Value::Unknown,|r|if numeric_placeholder(r.symbol){Value::Integer(raw_value(op,word) as i128)}else{symbolic(r.symbol)}),
+    };
+    let Some(value)=value else{return Value::Unknown};
+    if let Some(reg)=register(op.class,value) {return Value::Register(reg)}
+    if op.class=="label" {
+        let base = if op.scale==4096 {address & !4095} else {address};
+        return Value::Target {displacement:value,target:i64::try_from(value).ok().and_then(|offset|base.checked_add_signed(offset))};
+    }
+    Value::Integer(value)
+}
+
+/// Analyze without rendering, parsing assembly text, heap allocation or lazy caches.
+/// Unsupported metadata stays explicit as `Unknown` and `Partial`.
+pub fn analyze(word: u32, address: u64) -> Option<Analysis> {
+    let decoded=decode(word).ok()?;
+    analyze_decoded(&decoded,address)
+}
+pub(super) fn selected_form(word:u32)->Option<&'static Form>{
+    let bucket=(word>>20) as usize;
+    BUCKET_FORMS[BUCKETS[bucket] as usize..BUCKETS[bucket+1] as usize].iter()
+        .map(|&index| &FORMS[index as usize]).find(|form| form_matches(form,word))
+}
+fn analyze_decoded(decoded:&Decoded,address:u64)->Option<Analysis>{
+    let word=decoded.raw;
+    let best=selected_form(word);
+    let (_,canonical,mnemonic,_)=IDENTITIES.binary_search_by_key(&decoded.encoding_id,|e|e.0).ok().map(|i|IDENTITIES[i])?;
+    let mut out=Analysis {canonical:Identity{encoding_id:canonical,mnemonic},display:Identity{encoding_id:best.map_or(decoded.encoding_id,|f|f.encoding_id),mnemonic:best.and_then(|f|IDENTITIES.binary_search_by_key(&f.encoding_id,|e|e.0).ok()).map_or(decoded.asm_mnemonic,|i|IDENTITIES[i].3)},coverage:Coverage::Complete,components:[EMPTY;CAPACITY],count:0,list_ranges:0,memory:None,memories:[EMPTY_MEMORY;CAPACITY],memory_count:0,control_flow:ControlFlow{kind:FlowKind::Unknown,predicate:Predicate::Unknown,target:None,fallthrough:None}};
+    if mnemonic.is_empty(){out.coverage=Coverage::Partial}
+    let Some(form)=best else{out.coverage=Coverage::Partial;out.control_flow=flow(decoded,address,&out);return Some(out)};
+    let mut active_memory:Option<usize>=None;
+    let mut location=Location::Operand; let mut list=0u8; let mut lane=false; let mut lane_owner:Option<usize>=None;let mut lane_dynamic=false; let mut bank=None; let mut last_register:Option<usize>=None;
+    'parts: for (part_index,part) in form.parts.iter().enumerate() {
+        if part.operand.is_none() {
+            if let Some(m)=active_memory.map(|i|&mut out.memories[i]){
+                if part.literal.contains("MUL VL"){m.scale=AddressScale::VectorLength}else if part.literal.contains("MUL PL"){m.scale=AddressScale::PredicateLength}
+                if location==Location::Memory && m.index.is_some(){for token in part.literal.split(|c:char|!c.is_ascii_alphabetic()){if ["LSL","LSR","ASR","ROR","SXTW","SXTX","UXTW","UXTX"].iter().any(|s|token.eq_ignore_ascii_case(s)){m.modifier=Some(token)}}}
+            }
+            if let Some(index)=last_register {if part.literal.contains("/Z") || part.literal.contains("/z"){out.components[index].predicate_mode=Some(PredicateMode::Zeroing)}else if part.literal.contains("/M") || part.literal.contains("/m"){out.components[index].predicate_mode=Some(PredicateMode::Merging)}}
+            for ch in part.literal.chars() {match ch {
+                '[' if form.parts[part_index+1..].iter().find_map(|p|p.operand.as_ref()).is_some_and(|op|matches!(op.class,"gpr64sp"|"gpr32sp"|"gpr64"|"svez")) => {
+                    if out.memory_count==CAPACITY || out.memory_count>u8::MAX as usize{out.coverage=Coverage::Partial;break 'parts}
+                    let id=out.memory_count;out.memories[id]=Memory{id:id as u8,..EMPTY_MEMORY};out.memory_count+=1;active_memory=Some(id);location=Location::Memory;
+                },
+                '['=>{lane=true;lane_owner=last_register;lane_dynamic=false}, ']' if lane=>{lane=false;lane_owner=None;lane_dynamic=false}, ']' if active_memory.is_some()=>location=Location::PostIndex,
+                '!' => {
+                    if location==Location::PostIndex {if let Some(i)=active_memory {let m=&mut out.memories[i];m.mode=if decoded.class=="memcms"{IndexMode::Updating}else{IndexMode::PreIndex};m.writeback=true;}location=Location::Operand;}
+                    if let Some(i)=last_register{out.components[i].writeback=true;}
+                },
+                '{' => {list=list.saturating_add(1);location=Location::RegisterList(list)},
+                '}' => location=Location::Operand, '-' if matches!(location,Location::RegisterList(_))=>out.list_ranges|=1u32.checked_shl(u32::from(list)).unwrap_or(0), _=>{}
+            }}
+            continue
+        }
+        let op=part.operand.as_ref()?;
+        if word & op.when_mask != op.when_value {continue}
+        let mut value=scalar(op,word,address);
+        if let Value::Symbol(symbol)=value {bank=match symbol {"B"|"b"=>Some("simdb"),"H"|"h"=>Some("simdh"),"S"|"s"=>Some("simds"),"D"|"d"=>Some("simdd"),"Q"|"q"=>Some("simdq"),"V"|"v"=>Some("simdvec"),"Z"|"z"=>Some("svez"),"W"|"w"=>Some("gpr32"),"X"|"x"=>Some("gpr64"),_=>None};if symbol.contains('<'){value=Value::Unknown}}
+        if op.class.is_empty() {if let (Some(class),Value::Integer(n))=(bank.take(),value){value=register(class,n).map_or(Value::Unknown,Value::Register)}}
+        if value==Value::Unknown {out.coverage=Coverage::Partial}
+        if let Some(m)=active_memory.map(|i|&mut out.memories[i]) {match location {
+            Location::Memory => match value {
+                Value::Register(r) if m.base.is_none()=>m.base=Some(r), Value::Register(r)=>{if m.index.is_some(){out.coverage=Coverage::Partial}m.index=Some(r)},
+                Value::Integer(n) if m.index.is_some()=>m.amount=Some(n), Value::Integer(n)=>m.displacement=n,
+                Value::Symbol(s)=>m.modifier=Some(s), _=>{}
+            },
+            Location::PostIndex=>{m.mode=IndexMode::PostIndex;m.writeback=true;m.post_index=Some(value)}, _=>{}
+        }}
+        if out.count==out.components.len(){out.coverage=Coverage::Partial;break}
+        let mut attached_to=None;
+        if let Some(index)=last_register {
+            if op.class=="arrangement" {if let Value::Symbol(symbol)=value{out.components[index].arrangement=Some(symbol);attached_to=Some(index as u8)}}
+            if lane {
+                if let Some(owner)=lane_owner {
+                    attached_to=Some(owner as u8);
+                    if matches!(value,Value::Register(_)){lane_dynamic=true;out.coverage=Coverage::Partial}
+                    if let Value::Integer(n)=value {if !lane_dynamic{
+                        let group=out.components[owner].location;
+                        if matches!(group,Location::RegisterList(_)){for component in &mut out.components[..out.count]{if component.location==group && matches!(component.value,Value::Register(_)){component.lane=Some(n)}}}
+                        else{out.components[owner].lane=Some(n)}
+                    }}
+                }
+            }
+        }
+        out.components[out.count]=Component{symbol:op.symbol,class:op.class,value,location,memory_id:if matches!(location,Location::Memory|Location::PostIndex){active_memory.map(|i|i as u8)}else{None},writeback:false,attached_to,arrangement:None,lane:None,predicate_mode:None};
+        if matches!(value,Value::Register(_)){last_register=Some(out.count)}
+        out.count+=1;
+    }
+    if out.memory_addresses().iter().any(|m|m.base.is_none()){out.coverage=Coverage::Partial}
+    out.memory=if out.memory_count==1{Some(out.memories[0])}else{None};
+    if (1..=list).any(|id|out.register_list(id).is_none()){out.coverage=Coverage::Partial}
+    out.control_flow=flow(decoded,address,&out);
+    if out.control_flow.kind==FlowKind::Unknown {out.coverage=Coverage::Partial}
+    Some(out)
+}
+impl Decoded { pub fn analyze(&self,address:u64)->Option<Analysis>{analyze_decoded(self,address)} }
+fn flow(decoded:&Decoded,address:u64,out:&Analysis)->ControlFlow {
+    let name=out.canonical.mnemonic;
+    let next=address.checked_add(4);
+    let regs=||out.components().iter().filter_map(|c|if let Value::Register(r)=c.value{Some(r)}else{None});
+    let direct=out.components().iter().find_map(|c|if let Value::Target{target,..}=c.value{Some(BranchTarget::Direct(target))}else{None});
+    let cond=decoded.field("cond").map(|c|c as u8);
+    let mut f=ControlFlow{kind:FlowKind::Linear,predicate:Predicate::Always,target:None,fallthrough:next};
+    if matches!(decoded.class,"compbranch_regs"|"compbranch_regs2"|"compbranch_imm") {
+        let w=decoded.raw;let cc=(w>>21)&7;let immediate=decoded.class=="compbranch_imm";
+        let width=if decoded.class=="compbranch_regs2"{8<<((w>>14)&1)}else{32<<((w>>31)&1)};
+        let reg=|number:u32|Register{number:number as u8,width:Some(u16::from(width)),role:if number==31{RegisterRole::Zero}else{RegisterRole::General},class:if width==64{"gpr64"}else{"gpr32"}};
+        let relation=match cc{0|2=>CompareRelation::GreaterThan,1|3 if immediate=>CompareRelation::LessThan,1|3=>CompareRelation::GreaterOrEqual,6=>CompareRelation::Equal,7=>CompareRelation::NotEqual,_=>{f.kind=FlowKind::Unknown;f.predicate=Predicate::Unknown;return f}};
+        let right=if immediate{CompareOperand::Immediate(u64::from((w>>15)&63))}else{CompareOperand::Register(reg((w>>16)&31))};
+        f.kind=FlowKind::Branch;f.predicate=Predicate::RegisterCompare{left:reg(w&31),right,width,signed:cc<2,relation};
+        f.target=direct.or(Some(BranchTarget::Unknown));return f;
+    }
+    if matches!(name,"B"|"B."|"B.cond"|"BC."|"BC.cond"|"CBZ"|"CBNZ"|"TBZ"|"TBNZ"|"BL"|"BR"|"BRAA"|"BRAB"|"BRAAZ"|"BRABZ"|"BLR"|"BLRAA"|"BLRAB"|"BLRAAZ"|"BLRABZ"|"RET"|"RETAA"|"RETAB"|"ERET"|"ERETAA"|"ERETAB"|"DRPS") {
+        f.kind=if name.starts_with("BL"){FlowKind::Call}else if name.starts_with("RET")||name.starts_with("ERET")||name=="DRPS"{FlowKind::Return}else{FlowKind::Branch};
+        f.target=direct.or_else(||regs().next().map(BranchTarget::Register)).or(Some(if f.kind==FlowKind::Return{BranchTarget::Implicit}else{BranchTarget::Unknown}));
+        f.predicate=if let Some(c)=cond{Predicate::Condition(c)}else if matches!(name,"CBZ"|"CBNZ"){regs().next().map_or(Predicate::Unknown,|register|Predicate::RegisterZero{register,nonzero:name=="CBNZ"})}
+            else if matches!(name,"TBZ"|"TBNZ"){let bit=out.components().iter().find_map(|c|if let Value::Integer(v)=c.value{u8::try_from(v).ok()}else{None});match (regs().next(),bit){(Some(register),Some(bit))=>Predicate::RegisterBit{register,bit,nonzero:name=="TBNZ"},_=>Predicate::Unknown}}
+            else{Predicate::Always};
+        f.fallthrough=if f.kind==FlowKind::Call || !matches!(f.predicate,Predicate::Always|Predicate::Condition(14..=15)){next}else{None};
+    } else if matches!(name,"SVC"|"HVC"|"SMC"|"BRK"|"HLT"|"UDF"|"DCPS1"|"DCPS2"|"DCPS3"){f.kind=FlowKind::Exception;f.target=Some(BranchTarget::Unknown);f.fallthrough=None}
+    else if decoded.class.contains("branch") {f.kind=FlowKind::Unknown;f.predicate=Predicate::Unknown;f.target=Some(BranchTarget::Unknown);f.fallthrough=None}
+    f
+}

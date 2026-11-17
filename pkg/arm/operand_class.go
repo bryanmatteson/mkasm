@@ -545,6 +545,16 @@ func sameFieldSet(a, b []string) bool {
 	return len(seen) == 0
 }
 
+// numericFieldSigned describes the encoded field, rather than the range of the
+// displayed operand. For example, CMPBR's imms1 is -1..62, but its imm6 field
+// is unsigned 0..63 and the decoder subtracts one after extracting the bits.
+func numericFieldSigned(lo, bias, scale int64) bool {
+	if scale < 1 {
+		scale = 1
+	}
+	return lo < 0 && lo/scale < bias
+}
+
 // classifyRelation reads the relation ARM states between the value written in
 // assembly and the value the field holds.
 //

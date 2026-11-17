@@ -7,6 +7,7 @@ pub enum EncodeError {
     Overflow { encoding: String, field: String, value: u64, width: u32 },
     PinnedBits { encoding: String, field: String, value: u64, mask: u32, free: u32 },
     NoVariableFields(String),
+    AllocationConstraint(String),
 }
 
 impl std::fmt::Display for EncodeError {
@@ -22,6 +23,7 @@ impl std::fmt::Display for EncodeError {
                 "{encoding}.{field} value {value} conflicts with bits the encoding pins (field mask {mask:#010x}, variable {free:#010x})"
             ),
             Self::NoVariableFields(id) => write!(f, "{id}: no variable fields"),
+            Self::AllocationConstraint(id) => write!(f, "{id}: fields violate the encoding's allocation constraints"),
         }
     }
 }
@@ -55,10 +57,7 @@ pub fn encode_fixed(encoding_id: &str) -> Result<u32, EncodeError> {
 pub fn encode_with_fields(encoding_id: &str, fields: &[(&str, u64)]) -> Result<u32, EncodeError> {
     let mut w = encode_fixed(encoding_id)?;
     let defs = fields_for(encoding_id);
-    if defs.is_empty() {
-        if fields.is_empty() {
-            return Ok(w);
-        }
+    if defs.is_empty() && !fields.is_empty() {
         return Err(EncodeError::NoVariableFields(encoding_id.to_string()));
     }
     for &(name, val) in fields {
@@ -98,6 +97,9 @@ pub fn encode_with_fields(encoding_id: &str, fields: &[(&str, u64)]) -> Result<u
         }
         w = (w & !d.free) | (placed & d.free);
     }
+    if !matches_encoding_constraints(encoding_id, w) {
+        return Err(EncodeError::AllocationConstraint(encoding_id.to_string()));
+    }
     Ok(w)
 }
 
@@ -110,6 +112,11 @@ fn fields_for(id: &str) -> &'static [(&'static str, FieldLayout)] {
         Ok(i) => FIELDS[i].1,
         Err(_) => &[],
     }
+}
+
+/// Variable fields accepted by the checked encoder for this encoding.
+pub fn encoding_field_names(id: &str) -> impl Iterator<Item = &'static str> {
+    fields_for(id).iter().map(|(name, _)| *name)
 }
 
 /// Instruction class for an encoding ID, if known.

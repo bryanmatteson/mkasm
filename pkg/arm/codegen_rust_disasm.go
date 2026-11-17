@@ -143,6 +143,10 @@ func emitRustDisasmForm(form *DisasmForm, entry CatalogEntry) string {
 	for i, item := range form.Forbidden {
 		forbidden[i] = fmt.Sprintf("Forbidden { mask: 0x%08X, value: 0x%08X }", item.Mask, item.Value)
 	}
+	anyOf := make([]string, len(form.AnyOf))
+	for i, item := range form.AnyOf {
+		anyOf[i] = fmt.Sprintf("Forbidden { mask: 0x%08X, value: 0x%08X }", item.Mask, item.Value)
+	}
 	parents := make([]string, 0, len(form.GroupParent))
 	for group, parent := range form.GroupParent {
 		parents = append(parents, fmt.Sprintf("(%d, %d)", group, parent))
@@ -155,10 +159,10 @@ func emitRustDisasmForm(form *DisasmForm, entry CatalogEntry) string {
 		}
 	}
 	sort.Strings(required)
-	return fmt.Sprintf("Form { mask: 0x%08X, value: 0x%08X, encoding_id: %s, alias: %t, constraint_mask: 0x%08X, constraint_value: 0x%08X, equalities: %s, inequalities: %s, one_hot: %s, forbidden: %s, move_wide_guard: %s, logical_guard: %s, bitfield_guard: %s, sve_mask: %s, parts: %s, parents: %s, required: %s }",
+	return fmt.Sprintf("Form { mask: 0x%08X, value: 0x%08X, encoding_id: %s, alias: %t, constraint_mask: 0x%08X, constraint_value: 0x%08X, equalities: %s, inequalities: %s, one_hot: %s, forbidden: %s, any_of: %s, move_wide_guard: %s, logical_guard: %s, bitfield_guard: %s, sve_mask: %s, parts: %s, parents: %s, required: %s }",
 		entry.Mask, entry.Value, rustStringLiteral(form.EncodingID), entry.AliasOf != "",
 		form.ConstraintMask, form.ConstraintValue, rustSlice(equalities), rustSlice(inequalities),
-		rustSlice(oneHot), rustSlice(forbidden), emitRustMoveWideGuard(form.MoveWideZeroGuard),
+		rustSlice(oneHot), rustSlice(forbidden), rustSlice(anyOf), emitRustMoveWideGuard(form.MoveWideZeroGuard),
 		emitRustLogicalGuard(form.LogicalMoveGuard), emitRustBitfieldGuard(form.BitfieldGuard),
 		emitRustOptionalPart(form.SVEMoveMaskField),
 		rustSlice(parts), rustSlice(parents), rustSlice(required))

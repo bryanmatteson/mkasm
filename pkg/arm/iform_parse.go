@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -47,11 +48,13 @@ type ParsedIForm struct {
 	// Explanations is ARM's operand documentation for this instruction page:
 	// field bindings and enumerated value tables. Not filtered by encoding —
 	// use ExplanationsFor.
-	Explanations []AsmExplanation
-	BitDiffs     string
-	Boxes        []RegBox
-	Pseudocode   []string
-	Features     []string
+	Explanations             []AsmExplanation
+	BitDiffs                 string
+	Boxes                    []RegBox
+	Pseudocode               []string
+	Features                 []string
+	FeatureAlternatives      []string
+	FeatureAlternativeGroups [][]string
 	// IsAlias is true when instructionsection@type="alias".
 	IsAlias bool
 	// AliasOf is the canonical EncodingID when known (from asmtemplate href fragment).
@@ -314,16 +317,21 @@ func parseIFormShared(
 		asmVerbatim       strings.Builder
 		textVerbatim      strings.Builder
 		outsideITSelected bool
+		selectedITOnly    bool
+		asmITOnly         bool
 
-		diagram      []RegBox // regdiagram currently being read
-		iclassBase   []RegBox // regdiagram of the enclosing iclass
-		lastDiagram  []RegBox // fallback when encodingID is not found
-		encOverrides []RegBox // per-encoding override boxes for encodingID
-		matched      bool
-		iclassSerial int
-		ownerIClass  int
-		iclassISA    string
-		iclassWidth  int
+		diagram          []RegBox // regdiagram currently being read
+		iclassBase       []RegBox // regdiagram of the enclosing iclass
+		lastDiagram      []RegBox // fallback when encodingID is not found
+		encOverrides     []RegBox // per-encoding override boxes for encodingID
+		matched          bool
+		iclassSerial     int
+		ownerIClass      int
+		classFeatures    = make(map[int]map[int][]string)
+		encodingFeatures = make(map[int][]string)
+		variantGroup     int
+		iclassISA        string
+		iclassWidth      int
 	)
 
 	elementText := func() string {
@@ -369,6 +377,7 @@ func parseIFormShared(
 				inEncoding = encodingID == "" || encName == encodingID
 				if inEncoding {
 					outsideITSelected = false
+					selectedITOnly = false
 					out.InstructionSet = iclassISA
 					out.Width = iclassWidth
 					out.EncodingName = encName
@@ -438,14 +447,35 @@ func parseIFormShared(
 						applyDocvar(out, attr(t, "key"), attr(t, "value"))
 					}
 				}
+			case "arch_variants":
+				variantGroup++
 			case "arch_variant":
 				if feat := attr(t, "feature"); feat != "" {
-					out.Features = append(out.Features, feat)
+					if hasAncestor(pathStack, "encoding") {
+						if inEncoding {
+							encodingFeatures[variantGroup] = append(encodingFeatures[variantGroup], feat)
+						}
+					} else if inIClass(pathStack) {
+						if classFeatures[iclassSerial] == nil {
+							classFeatures[iclassSerial] = make(map[int][]string)
+						}
+						classFeatures[iclassSerial][variantGroup] = append(classFeatures[iclassSerial][variantGroup], feat)
+					} else {
+						if classFeatures[0] == nil {
+							classFeatures[0] = make(map[int][]string)
+						}
+						classFeatures[0][variantGroup] = append(classFeatures[0][variantGroup], feat)
+					}
 				}
 			case "asmtemplate":
 				asmVerbatim.Reset()
-				// Outside an IT block is the stateless Thumb spelling.
-				if inEncoding && iclassISA == "T32" && !outsideITSelected && strings.HasPrefix(attr(t, "comment"), "Outside IT block") {
+				comment := strings.ToLower(attr(t, "comment"))
+				asmITOnly = strings.HasPrefix(comment, "inside it block") || strings.HasPrefix(comment, "initblock()")
+				// Prefer a stateless spelling over an IT-only spelling. An
+				// unqualified template already covers the whole encoding: later
+				// outside-IT examples can omit shifts or specialize an immediate
+				// to zero and must not replace that general operand model.
+				if inEncoding && iclassISA == "T32" && selectedITOnly && !outsideITSelected && strings.HasPrefix(comment, "outside it block") {
 					outsideITSelected = true
 					out.AsmTemplate = ""
 					out.AsmOperands = nil
@@ -507,6 +537,7 @@ func parseIFormShared(
 				if inEncoding && !hasAncestor(pathStack, "equivalent_to") {
 					if raw != "" && out.AsmTemplate == "" {
 						out.AsmTemplate = raw
+						selectedITOnly = asmITOnly
 						// asmLiteral holds whatever <text> followed the final
 						// operand; </a> clears it, so a template ending on an
 						// operand leaves it empty, which is correct.
@@ -611,6 +642,17 @@ func parseIFormShared(
 		out.Boxes = mergeBoxes(lastDiagram, nil)
 	case len(diagram) > 0:
 		out.Boxes = mergeBoxes(diagram, nil)
+	}
+	for _, groups := range []map[int][]string{classFeatures[0], classFeatures[ownerIClass], encodingFeatures} {
+		var keys []int
+		for key := range groups {
+			keys = append(keys, key)
+		}
+		sort.Ints(keys)
+		for _, key := range keys {
+			out.FeatureAlternativeGroups = append(out.FeatureAlternativeGroups, groups[key])
+			out.FeatureAlternatives = append(out.FeatureAlternatives, groups[key]...)
+		}
 	}
 	return out, nil
 }
@@ -757,9 +799,10 @@ func ApplyParsedIForm(instr *ir.InstructionIR, p *ParsedIForm) {
 		}
 		instr.Documentation.Pseudocode = pc
 	}
-	if len(p.Features) > 0 {
+	applyFeatureRequirements(instr, p)
+	if len(p.Features) > 0 || len(p.FeatureAlternatives) > 0 {
 		tags := make([]ir.FeatureTag, 0, len(p.Features))
-		for _, f := range p.Features {
+		for _, f := range append(append([]string(nil), p.Features...), p.FeatureAlternatives...) {
 			tags = append(tags, ir.FeatureTag{Name: f, Required: true, Description: featureDescription(f)})
 		}
 		instr.Features = mergeFeatures(instr.Features.Tags, tags)

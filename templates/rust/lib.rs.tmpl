@@ -45,17 +45,35 @@
 
 pub mod asm_support;
 pub mod decoders;
+pub mod effects;
+pub use effects::*;
 pub mod encoders;
 pub mod encodings;
 pub mod formatters;
 pub mod insns;
 pub mod raw;
 pub mod registry;
+pub mod semantics;
+pub mod recipes;
+pub mod requirements;
+pub use requirements::for_encoding as requirements_for;
+
+impl decoders::Decoded {
+    pub fn requirements(&self) -> &'static requirements::Requirements { requirements_for(self.encoding_id) }
+    pub fn evaluate_requirements(&self, features: &[&str], mode: &str) -> requirements::Evaluation { self.requirements().evaluate(features, mode, &|name| self.field(name)) }
+}
 
 pub use asm_support::*;
 pub use decoders::{decode, Decoded, DecodeError};
 pub use encoders::{encode_fixed, encode_with_fields, EncodeError};
-pub use formatters::{format, FormatError};
+pub use formatters::{format, format_into, FormatError};
+pub use formatters::references::{AddressReference, AddressReferenceKind, EncodedBits, RelocateError, RelocatedBlock, address_references, rewrite_reference, relocate, relocate_into, relocate_block, relocate_block_into};
+pub use formatters::assembler;
+pub use formatters::analysis;
+pub use formatters::assembler::{
+    assemble, assemble_at, describe, parse_register, AssembleError, ClassDomain, Described, Domain, Hole, Mismatch, OperandClass, OperandSpan,
+    OperandValue, Position, Template,
+};
 pub use encodings::{ENCODING_COUNT, TYPED_ENCODING_COUNT};
 pub use insns::*;
 pub use raw::{RawEncoding, RawField, RAW};
@@ -63,3 +81,5 @@ pub use registry::{lookup, Instruction, ALL, INSTRUCTION_COUNT};
 
 #[cfg(test)]
 mod insns_test;
+
+{{template "number_text" .}}

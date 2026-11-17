@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/bryanmatteson/mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/semantics"
 	"github.com/bryanmatteson/mkasm/templates"
 )
 
@@ -31,7 +32,24 @@ func (ap *ARMParser) generateARM32Rust(instructions []*ir.InstructionIR) error {
 	if err := writeLicense(ap.config.OutputDirectory); err != nil {
 		return err
 	}
+	if err := semantics.WriteRust(src); err != nil {
+		return err
+	}
+	if err := execTmplWrite(t, "recipes.rs.tmpl", filepath.Join(src, "recipes.rs"), nil); err != nil {
+		return err
+	}
 	all := BuildCatalog(instructions)
+	if len(all.Entries) > int(^uint16(0)) {
+		return fmt.Errorf("arm32 formatter: %d forms exceed u16 index capacity", len(all.Entries))
+	}
+	formIndex := make(map[string]int, len(all.Entries))
+	for i, entry := range all.Entries {
+		formIndex[entry.EncodingID] = i
+	}
+	var formIndices strings.Builder
+	if err := writeRustRequirements(src, all); err != nil {
+		return err
+	}
 	enc := struct{ FixedTable, FieldsTable, ClassTable string }{emitRustFixedTable(all), emitRustFieldsTable(all), emitRustClassTable(all)}
 	if err := execTmplWrite(t, "encoders.rs.tmpl", filepath.Join(src, "encoders.rs"), enc); err != nil {
 		return err
@@ -50,7 +68,13 @@ func (ap *ARMParser) generateARM32Rust(instructions []*ir.InstructionIR) error {
 				selected = append(selected, insn)
 			}
 		}
-		data, err := buildRustDecoderData(BuildCatalog(selected))
+		catalog := BuildCatalog(selected)
+		fmt.Fprintf(&formIndices, "static %s_FORM_INDICES:&[u16]=&[", strings.ToUpper(bank))
+		for _, entry := range catalog.Entries {
+			fmt.Fprintf(&formIndices, "%d,", formIndex[entry.EncodingID])
+		}
+		formIndices.WriteString("];\n")
+		data, err := buildRustDecoderData(catalog)
 		if err != nil {
 			return fmt.Errorf("arm32 %s: %w", bank, err)
 		}
@@ -59,17 +83,57 @@ func (ap *ARMParser) generateARM32Rust(instructions []*ir.InstructionIR) error {
 		}
 	}
 	var forms strings.Builder
+	optionalGroups := 0
+	// Width qualification is only useful when the same source family has
+	// a narrow spelling. LLVM rejects .w on many inherently wide forms.
+	narrowForms := make(map[string]bool)
+	for _, instruction := range instructions {
+		if instruction.InstructionSet == "T32" && instruction.Encoding.Width == 16 {
+			narrowForms[instruction.IFormFile+"|"+instruction.AsmMnemonic] = true
+		}
+	}
 	for _, entry := range all.Entries {
 		p := ap.loadIForm(&ir.InstructionIR{IFormFile: entry.IFormFile, EncodingID: entry.EncodingID})
 		if p == nil {
 			return fmt.Errorf("missing form %s", entry.EncodingID)
 		}
-		form, err := arm32PrintForm(entry, p)
+		groups := strings.Count(p.AsmSuffix, "{")
+		for _, operand := range p.AsmOperands {
+			groups += strings.Count(operand.Prefix, "{")
+		}
+		optionalGroups = max(optionalGroups, groups)
+		wide := narrowForms[entry.IFormFile+"|"+entry.AsmMnemonic]
+		// These forms already acquire MOVW/ADDW/SUBW spellings below.
+		switch entry.EncodingID {
+		case "MOV_i_T2", "PUSH_STR_i_T4_pre", "POP_LDR_i_T4_post":
+			// Alias pages can point at a different source family. MOV's
+			// modified immediate also needs disambiguation from MOVW.
+			wide = true
+		case "MOV_i_T3", "ADD_i_T4", "ADD_SP_i_T4", "SUB_i_T4", "SUB_SP_i_T3":
+			wide = false
+		case "SUBS_PC_T5_AS":
+			// The exception-return form shares SUB's page, but cannot
+			// use its narrow register/immediate syntax or .w qualifier.
+			wide = false
+		}
+		// Signed, pre-index and post-index immediate addresses have no
+		// narrow counterpart; their explicit operands determine the width.
+		if strings.HasPrefix(entry.AsmMnemonic, "LDR") || strings.HasPrefix(entry.AsmMnemonic, "STR") {
+			for _, field := range entry.Fields {
+				if field.Name == "P" {
+					wide = false
+				}
+			}
+		}
+		form, err := arm32PrintForm(entry, p, wide)
 		if err != nil {
 			return fmt.Errorf("arm32 formatter %s: %w", entry.EncodingID, err)
 		}
 		forms.WriteString(form)
 		forms.WriteString(",\n")
+	}
+	if err := execTmplWrite(t, "references.rs.tmpl", filepath.Join(src, "references.rs"), nil); err != nil {
+		return err
 	}
 	golden := false
 	for _, entry := range all.Entries {
@@ -77,10 +141,18 @@ func (ap *ARMParser) generateARM32Rust(instructions []*ir.InstructionIR) error {
 			golden = true
 		}
 	}
+	if err := execTmplWrite(t, "arm32_analysis.rs.tmpl", filepath.Join(src, "analysis.rs"), buildRustAnalysisData(all)); err != nil {
+		return err
+	}
+	if err := writeRustEffects(t, src, true); err != nil {
+		return err
+	}
 	return execTmplWrite(t, "arm32_lib.rs.tmpl", filepath.Join(src, "lib.rs"), struct {
-		Forms       string
-		GoldenTests bool
-	}{forms.String(), golden})
+		Forms          string
+		FormIndices    string
+		GoldenTests    bool
+		OptionalGroups int
+	}{forms.String(), formIndices.String(), golden, optionalGroups})
 }
 
 func arm32AllocationConstraints(instr *ir.InstructionIR, p *ParsedIForm) {
@@ -139,7 +211,8 @@ func arm32AllocationConstraints(instr *ir.InstructionIR, p *ParsedIForm) {
 
 var arm32UndefinedRE = regexp.MustCompile(`(?m)^if\s+([^\n;]+?)\s+then\s+Undefined\(\);`)
 var arm32SliceRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)(?:[<\[]([0-9]+)(?::([0-9]+))?[>\]])?$`)
-var arm32ScaleRE = regexp.MustCompile(`(?:<imm>|<label>|immediate)[ /]+([248]|16|32|64)(?:\D|$)`)
+var arm32ScaleRE = regexp.MustCompile(`(?:<imm[0-9]*>|<label>|immediate)[ /]+([248]|16|32|64)(?:\D|$)`)
+var arm32MultipleScaleRE = regexp.MustCompile(`multiples? of ([248]|16|32|64)(?:\D|$)`)
 var arm32SymbolRE = regexp.MustCompile(`<[^>]+>`)
 
 func arm32Slices(names []string, fields []CatalogField) (string, int, bool) {
@@ -178,7 +251,7 @@ func arm32Slices(names []string, fields []CatalogField) (string, int, bool) {
 	return "&[" + strings.Join(parts, ",") + "]", width, true
 }
 
-func arm32PrintForm(entry CatalogEntry, p *ParsedIForm) (string, error) {
+func arm32PrintForm(entry CatalogEntry, p *ParsedIForm, wide bool) (string, error) {
 	exps := ExplanationsFor(p.Explanations, entry.EncodingID)
 	var parts []string
 	// Some AArch32 pages put a documented placeholder inside <text> rather
@@ -201,6 +274,16 @@ func arm32PrintForm(entry CatalogEntry, p *ParsedIForm) (string, error) {
 		names := ex.Fields
 		if len(names) == 0 && op.Field != "" {
 			names = []string{op.Field}
+		}
+		// Some narrow Thumb explanations name only the low register field;
+		// the diagram and decode pseudocode carry its high bit separately.
+		if symbol == "<Rdm>" && len(names) == 1 && names[0] == "Rdm" {
+			for _, field := range entry.Fields {
+				if field.Name == "DM" {
+					names = []string{"DM", "Rdm"}
+					break
+				}
+			}
 		}
 		bits, _, _ := arm32Slices(names, entry.Fields)
 		var rows []string
@@ -235,6 +318,10 @@ func arm32PrintForm(entry CatalogEntry, p *ParsedIForm) (string, error) {
 		scale := 1
 		if m := arm32ScaleRE.FindStringSubmatch(ex.Prose); m != nil {
 			scale, _ = strconv.Atoi(m[1])
+		} else if strings.HasPrefix(symbol, "<imm") {
+			if m := arm32MultipleScaleRE.FindStringSubmatch(strings.ToLower(ex.Prose)); m != nil {
+				scale, _ = strconv.Atoi(m[1])
+			}
 		}
 		transform := "Plain"
 		prose := strings.ToLower(ex.Prose)
@@ -275,5 +362,5 @@ func arm32PrintForm(entry CatalogEntry, p *ParsedIForm) (string, error) {
 		}
 		parts = append(parts, fmt.Sprintf("Part { prefix: %s, symbol: %s, bits: %s, values: &[%s], scale: %d, transform: Transform::%s }", rustStringLiteral(op.Prefix), rustStringLiteral(symbol), bits, strings.Join(rows, ","), scale, transform))
 	}
-	return fmt.Sprintf("Form { id: %s, parts: &[%s], suffix: %s, width: %d, thumb: %t, mask: 0x%x, value: 0x%x }", rustStringLiteral(entry.EncodingID), strings.Join(parts, ","), rustStringLiteral(p.AsmSuffix), p.Width, p.InstructionSet == "T32", entry.Mask, entry.Value), nil
+	return fmt.Sprintf("Form { id: %s, parts: &[%s], suffix: %s, width: %d, thumb: %t, wide: %t, mask: 0x%x, value: 0x%x }", rustStringLiteral(entry.EncodingID), strings.Join(parts, ","), rustStringLiteral(p.AsmSuffix), p.Width, p.InstructionSet == "T32", wide, entry.Mask, entry.Value), nil
 }

@@ -152,6 +152,8 @@ type ModeVariant struct {
 // makes the crate complete: each of ARM's encodings has one named function that
 // sets exactly its settable fields over its fixed word.
 type ExactEncoding struct {
+	Constraints *ir.BitDiffNode
+
 	// Fn is the Rust function name, derived from the ARM encoding id.
 	Fn         string
 	EncodingID string
@@ -188,6 +190,8 @@ type AsmSurface struct {
 
 // RawEncoding is an encoding exposed only through the field-level exact API.
 type RawEncoding struct {
+	Constraints *ir.BitDiffNode
+
 	EncodingID string
 	Mnemonic   string
 	AsmSyntax  string
@@ -304,7 +308,7 @@ func BuildAsmSurface(instrs []*ir.InstructionIR, load func(*ir.InstructionIR) *P
 		s.Exact = append(s.Exact, ExactEncoding{
 			Fn: fn, EncodingID: instr.EncodingID, Mnemonic: mnem,
 			AsmSyntax: asm, FixedWord: fw, Pattern: instr.BitPattern,
-			Fields: rawFields(instr), FixedLegal: ir.MatchWord(instr, fw), AliasOf: instr.AliasOf,
+			Fields: rawFields(instr), Constraints: instr.BitDiffsTree, FixedLegal: ir.MatchWord(instr, fw), AliasOf: instr.AliasOf,
 		})
 	}
 
@@ -599,13 +603,14 @@ func sameEnumTable(a, b *EnumSpec) bool {
 
 func rawOf(instr *ir.InstructionIR, asm string, fw uint32, reason string) RawEncoding {
 	return RawEncoding{
-		EncodingID: instr.EncodingID,
-		Mnemonic:   instr.Mnemonic,
-		AsmSyntax:  asm,
-		FixedWord:  fw,
-		Pattern:    instr.BitPattern,
-		Fields:     rawFields(instr),
-		Reason:     reason,
+		Constraints: instr.BitDiffsTree,
+		EncodingID:  instr.EncodingID,
+		Mnemonic:    instr.Mnemonic,
+		AsmSyntax:   asm,
+		FixedWord:   fw,
+		Pattern:     instr.BitPattern,
+		Fields:      rawFields(instr),
+		Reason:      reason,
 	}
 }
 
@@ -994,7 +999,7 @@ func placementFor(
 	fixedMask, fixedValue uint32,
 ) (*Placement, error) {
 	pl := &Placement{
-		Param: expr, Scale: prm.Scale, Signed: prm.Lo < 0,
+		Param: expr, Scale: prm.Scale, Signed: numericFieldSigned(prm.Lo, prm.Bias, prm.Scale),
 		Lo: prm.Lo, Hi: prm.Hi, HasRange: prm.HasRange,
 		Bias:    prm.Bias,
 		Negate:  prm.Negate,

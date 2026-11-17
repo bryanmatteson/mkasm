@@ -1,0 +1,2890 @@
+//! Audited A64 scalar, fixed-width SIMD and bounded SVE families.
+//! Typed FP operations delegate architectural numeric execution to the consumer.
+//! This is not a pseudocode interpreter.
+use crate::semantics::*;
+use BinaryOp as B;
+use UnaryOp as U;
+fn c(w: u8, v: u64) -> Expr {
+    Expr::constant(w, v)
+}
+fn bin(op: B, a: Expr, b: Expr) -> Expr {
+    Expr::binary(op, a, b)
+}
+fn inv(a: Expr) -> Expr {
+    Expr::unary(U::Not, a)
+}
+fn flag(i: u16) -> Expr {
+    Expr::register(register("a64.nzcv", i, 1, 1))
+}
+fn read(n: u32, w: u8, sp: bool) -> Expr {
+    if n == 31 && !sp {
+        c(w, 0)
+    } else {
+        Expr::register(register(
+            if n == 31 { "a64.sp" } else { "a64.gpr" },
+            if n == 31 { 0 } else { n as u16 },
+            w,
+            64,
+        ))
+    }
+}
+fn write(r: &mut Recipe, n: u32, w: u8, sp: bool, v: Expr) {
+    if n != 31 || sp {
+        r.write(
+            register(
+                if n == 31 { "a64.sp" } else { "a64.gpr" },
+                if n == 31 { 0 } else { n as u16 },
+                w,
+                64,
+            ),
+            WritePolicy::ZeroUpper,
+            v,
+        )
+    }
+}
+fn setflag(r: &mut Recipe, i: u16, v: Expr) {
+    r.write(register("a64.nzcv", i, 1, 1), WritePolicy::ZeroUpper, v)
+}
+fn nz(r: &mut Recipe, v: Expr) {
+    setflag(r, 0, Expr::extract(v.clone(), v.ty.width - 1, 1));
+    setflag(r, 1, bin(B::Eq, v.clone(), c(v.ty.width, 0)))
+}
+fn arithmetic(
+    r: &mut Recipe,
+    a: Expr,
+    b: Expr,
+    sub: bool,
+    carry: Option<Expr>,
+    flags: bool,
+) -> Expr {
+    let w = a.ty.width;
+    let a = r.bind(a);
+    let b = r.bind(b);
+    let ci = carry.unwrap_or_else(|| c(1, 0));
+    let ci = r.bind(ci);
+    let v = r.bind(bin(
+        if sub { B::Sub } else { B::Add },
+        bin(if sub { B::Sub } else { B::Add }, a.clone(), b.clone()),
+        Expr::cast(ci.clone(), w, false),
+    ));
+    if flags {
+        nz(r, v.clone());
+        setflag(
+            r,
+            2,
+            if sub {
+                inv(Expr::sub_borrow(a.clone(), b.clone(), ci))
+            } else {
+                Expr::add_carry(a.clone(), b.clone(), ci)
+            },
+        );
+        setflag(r, 3, Expr::overflow(sub, a, b, v.clone()))
+    }
+    v
+}
+fn condition(code: u32) -> Expr {
+    let n = flag(0);
+    let z = flag(1);
+    let carry = flag(2);
+    let v = flag(3);
+    let eq = bin(B::Eq, n.clone(), v);
+    let base = match code >> 1 {
+        0 => z,
+        1 => carry,
+        2 => n,
+        3 => flag(3),
+        4 => bin(B::And, carry, inv(z)),
+        5 => eq,
+        6 => bin(B::And, eq, inv(z)),
+        _ => c(1, 1),
+    };
+    if code & 1 != 0 && code != 15 {
+        inv(base)
+    } else {
+        base
+    }
+}
+fn sign(v: u64, b: u32) -> u64 {
+    (((v << (64 - b)) as i64) >> (64 - b)) as u64
+}
+fn shifted(v: Expr, kind: u32, n: u32) -> Expr {
+    let w = v.ty.width;
+    bin(
+        match kind {
+            0 => B::Shl,
+            1 => B::Lsr,
+            2 => B::Asr,
+            _ => B::Ror,
+        },
+        v,
+        c(w, n as u64),
+    )
+}
+fn bitmask(w: u8, n: u32, imms: u32, immr: u32) -> Option<u64> {
+    let x = (n << 6) | (!imms & 63);
+    if x == 0 {
+        return None;
+    }
+    let len = 31 - x.leading_zeros();
+    if len < 1 {
+        return None;
+    }
+    let size = 1u32 << len;
+    if size > w as u32 {
+        return None;
+    }
+    let s = imms & (size - 1);
+    if s == size - 1 {
+        return None;
+    }
+    let ones = mask((s + 1) as u8);
+    let r = immr & (size - 1);
+    let element = if r == 0 {
+        ones
+    } else {
+        ((ones >> r) | (ones << (size - r))) & mask(size as u8)
+    };
+    let mut out = 0;
+    for i in (0..w as u32).step_by(size as usize) {
+        out |= element << i
+    }
+    Some(out)
+}
+fn reverse_bytes(r: &mut Recipe, value: Expr, group: u8) -> Expr {
+    let w = value.ty.width;
+    let value = r.bind(value);
+    let mut out = c(w, 0);
+    for part in 0..w / (group * 8) {
+        let offset = part * group * 8;
+        let bytes = Expr::extract(value.clone(), offset, group * 8);
+        let reversed = Expr::unary(U::ReverseBytes, bytes);
+        out = bin(
+            B::Or,
+            out,
+            shifted(Expr::cast(reversed, w, false), 0, offset as u32),
+        );
+    }
+    out
+}
+fn vector_chunk(n: u32, chunk: u16) -> Expr {
+    Expr::register(register("a64.vector64", n as u16 * 32 + chunk, 64, 64))
+}
+fn write_vector_chunk(r: &mut Recipe, n: u32, chunk: u16, value: Expr) {
+    let value = r.bind(value);
+    r.write(
+        register("a64.vector64", n as u16 * 32 + chunk, 64, 64),
+        WritePolicy::ZeroUpper,
+        value,
+    );
+}
+fn fp_control(r: &mut Recipe) -> Expr {
+    r.bind(Expr::register(register("a64.fpcr", 0, 32, 32)))
+}
+fn fp_status(r: &mut Recipe) -> Expr {
+    r.bind(Expr::register(register("a64.fpsr", 0, 32, 32)))
+}
+fn fp_input(r: &mut Recipe, n: u32, width: u8) -> Expr {
+    r.bind(Expr::extract(vector_chunk(n, 0), 0, width))
+}
+// Each source and each projection is captured before architectural writes.
+// The FP engine owns rounding, NaN/flush rules, sticky status and exceptions.
+fn fp_step(
+    r: &mut Recipe,
+    operation: FloatOperation,
+    width: u8,
+    inputs: Vec<Expr>,
+    control: Expr,
+    status: Expr,
+) -> (Expr, Expr, Expr) {
+    let expression = FloatExpression {
+        operation,
+        environment: FloatEnvironment::A64,
+        width,
+        inputs,
+        control: Box::new(control),
+        status: Box::new(status),
+        projection: FloatProjection::Value,
+    };
+    let value = r.bind(Expr::float(expression.clone()));
+    let next = r.bind(Expr::float(FloatExpression {
+        projection: FloatProjection::Status,
+        ..expression.clone()
+    }));
+    let trapped = r.bind(Expr::float(FloatExpression {
+        projection: FloatProjection::Trapped,
+        ..expression
+    }));
+    (value, next, trapped)
+}
+fn fp_finish(r: &mut Recipe, status: Expr, trapped: Expr) {
+    r.write(
+        register("a64.fpsr", 0, 32, 32),
+        WritePolicy::ZeroUpper,
+        status,
+    );
+    r.effects.push(Effect::Trap {
+        kind: TrapKind::FloatingPoint,
+        condition: trapped,
+    });
+}
+// Scalar binary arithmetic merges from Vn; one-source arithmetic merges from
+// Vd. FPCR's canonical NEP bit includes the consumer's AFP/profile admission.
+fn fp_scalar_write(r: &mut Recipe, rd: u32, width: u8, value: Expr, merge: Option<(Expr, u32)>) {
+    let (low, high) = if let Some((control, source)) = merge {
+        let merging = Expr::extract(control, 2, 1);
+        // A 64-bit result overwrites the entire low chunk. Do not make its
+        // definedness depend on an unavailable incoming chunk through AND 0.
+        let low = if width == 64 { c(64, 0) } else {
+            Expr::select(
+                merging.clone(),
+                bin(B::And, vector_chunk(source, 0), c(64, !mask(width))),
+                c(64, 0),
+            )
+        };
+        let high = Expr::select(merging, vector_chunk(source, 1), c(64, 0));
+        (low, high)
+    } else {
+        (c(64, 0), c(64, 0))
+    };
+    let low = r.bind(bin(B::Or, low, Expr::cast(value, 64, false)));
+    let high = r.bind(high);
+    write_vector_chunk(r, rd, 0, low);
+    write_vector_chunk(r, rd, 1, high);
+}
+fn fp_width(word: u32) -> Option<u8> {
+    match (word >> 22) & 3 {
+        0 => Some(32),
+        1 => Some(64),
+        3 => Some(16),
+        _ => None,
+    }
+}
+fn fp_immediate(width: u8, imm: u32) -> u64 {
+    let e = if width == 16 {
+        5
+    } else if width == 32 {
+        8
+    } else {
+        11
+    };
+    let f = width - e - 1;
+    let b = (imm >> 6) & 1;
+    let exponent = ((b ^ 1) << (e - 1))
+        | (if b != 0 { ((1 << (e - 3)) - 1) << 2 } else { 0 })
+        | ((imm >> 4) & 3);
+    (((imm >> 7) as u64) << (width - 1))
+        | ((exponent as u64) << f)
+        | (((imm & 15) as u64) << (f - 4))
+}
+fn fp_chain(
+    r: &mut Recipe,
+    operation: FloatOperation,
+    width: u8,
+    inputs: Vec<Expr>,
+    control: &Expr,
+    status: &mut Expr,
+    trapped: &mut Expr,
+) -> Expr {
+    let (value, next, exception) =
+        fp_step(r, operation, width, inputs, control.clone(), status.clone());
+    *status = r.bind(Expr::select(trapped.clone(), status.clone(), next));
+    *trapped = r.bind(bin(B::Or, trapped.clone(), exception));
+    value
+}
+fn fp_lane(r: &mut Recipe, n: u32, lane: u8, width: u8) -> Expr {
+    let bit = lane as u16 * width as u16;
+    r.bind(Expr::extract(
+        vector_chunk(n, bit / 64),
+        (bit % 64) as u8,
+        width,
+    ))
+}
+fn fp_pack(r: &mut Recipe, rd: u32, width: u8, values: Vec<Expr>) {
+    let mut chunks = [c(64, 0), c(64, 0)];
+    for (lane, value) in values.into_iter().enumerate() {
+        let bit = lane * width as usize;
+        chunks[bit / 64] = bin(
+            B::Or,
+            chunks[bit / 64].clone(),
+            shifted(Expr::cast(value, 64, false), 0, (bit % 64) as u32),
+        );
+    }
+    for (chunk, value) in chunks.into_iter().enumerate() {
+        write_vector_chunk(r, rd, chunk as u16, value);
+    }
+}
+fn fp_reduce(
+    r: &mut Recipe,
+    operation: FloatOperation,
+    width: u8,
+    values: &[Expr],
+    control: &Expr,
+    status: &mut Expr,
+    trapped: &mut Expr,
+) -> Expr {
+    if values.len() == 1 {
+        return values[0].clone();
+    }
+    // Arm FPReduce evaluates the high subtree before the low subtree, but
+    // passes (low,high) to the final primitive. Preserve NaN and trap order.
+    let half = values.len() / 2;
+    let hi = fp_reduce(
+        r,
+        operation,
+        width,
+        &values[half..],
+        control,
+        status,
+        trapped,
+    );
+    let lo = fp_reduce(
+        r,
+        operation,
+        width,
+        &values[..half],
+        control,
+        status,
+        trapped,
+    );
+    fp_chain(r, operation, width, vec![lo, hi], control, status, trapped)
+}
+fn fp_vector_extra(word: u32, address: u64) -> Option<Recipe> {
+    let mut r = Recipe::new(address.wrapping_add(4), 64);
+    let unsupported = || {
+        Recipe::unsupported(
+            "A64 SIMD FP constrained selector has no exact recipe",
+            address.wrapping_add(4),
+            64,
+        )
+    };
+    let rd = word & 31;
+    let rn = (word >> 5) & 31;
+    let rm = (word >> 16) & 31;
+    let scalar = word & (1 << 28) != 0;
+    let normalized = word & !(1 << 28);
+    let base = normalized & !(1 << 29);
+    let h = base & 0xbffffc00;
+    let s = base & 0xbfbffc00;
+    let conversions = [
+        (0x0e79d800, 0x0e21d800, 0),
+        (0x0e79a800, 0x0e21a800, 1),
+        (0x0e79c800, 0x0e21c800, 2),
+        (0x0ef9a800, 0x0ea1a800, 3),
+        (0x0e79b800, 0x0e21b800, 4),
+        (0x0ef9b800, 0x0ea1b800, 5),
+    ];
+    let conversion = conversions
+        .iter()
+        .find(|(half, wide, _)| h == *half || s == *wide);
+    let fixed = matches!(base & 0xbf80fc00, 0x0f00e400 | 0x0f00fc00);
+    let round_h = normalized & 0xbffffc00;
+    let round_s = normalized & 0xbfbffc00;
+    let rounds = [
+        (0x0e798800, 0x0e218800, FloatRounding::NearestEven, false),
+        (
+            0x0ef98800,
+            0x0ea18800,
+            FloatRounding::PositiveInfinity,
+            false,
+        ),
+        (
+            0x0e799800,
+            0x0e219800,
+            FloatRounding::NegativeInfinity,
+            false,
+        ),
+        (0x0ef99800, 0x0ea19800, FloatRounding::Zero, false),
+        (0x2e798800, 0x2e218800, FloatRounding::NearestAway, false),
+        (0x2e799800, 0x2e219800, FloatRounding::Environment, true),
+        (0x2ef99800, 0x2ea19800, FloatRounding::Environment, false),
+    ];
+    let round = rounds
+        .iter()
+        .find(|(half, wide, _, _)| round_h == *half || round_s == *wide);
+    if conversion.is_some() || fixed || round.is_some() {
+        if scalar && (word & (1 << 30) == 0 || round.is_some()) {
+            return Some(unsupported());
+        }
+        let (width, operation) = if fixed {
+            let imm = ((word >> 16) & 127) as u8;
+            if imm < 16 {
+                return Some(unsupported());
+            }
+            let width = if imm >= 64 {
+                64
+            } else if imm >= 32 {
+                32
+            } else {
+                16
+            };
+            let signed = word & (1 << 29) == 0;
+            let fractional_bits = 2 * width - imm;
+            let operation = if word & 0x1800 == 0 {
+                FloatOperation::FromInteger {
+                    source_width: width,
+                    signed,
+                    fractional_bits,
+                }
+            } else {
+                FloatOperation::ToInteger {
+                    source_width: width,
+                    signed,
+                    fractional_bits,
+                    rounding: FloatRounding::Zero,
+                }
+            };
+            (width, operation)
+        } else if let Some((half, _, kind)) = conversion {
+            let width = if h == *half {
+                16
+            } else {
+                32 << ((word >> 22) & 1)
+            };
+            let signed = word & (1 << 29) == 0;
+            let operation = if *kind == 0 {
+                FloatOperation::FromInteger {
+                    source_width: width,
+                    signed,
+                    fractional_bits: 0,
+                }
+            } else {
+                FloatOperation::ToInteger {
+                    source_width: width,
+                    signed,
+                    fractional_bits: 0,
+                    rounding: match kind {
+                        1 => FloatRounding::NearestEven,
+                        2 => FloatRounding::NearestAway,
+                        3 => FloatRounding::PositiveInfinity,
+                        4 => FloatRounding::NegativeInfinity,
+                        _ => FloatRounding::Zero,
+                    },
+                }
+            };
+            (width, operation)
+        } else {
+            let (half, _, rounding, exact) = round.unwrap();
+            (
+                if round_h == *half {
+                    16
+                } else {
+                    32 << ((word >> 22) & 1)
+                },
+                FloatOperation::RoundToIntegral {
+                    rounding: *rounding,
+                    exact: *exact,
+                },
+            )
+        };
+        let bits = if word & (1 << 30) != 0 { 128 } else { 64 };
+        if !scalar && width == 64 && bits == 64 {
+            return Some(unsupported());
+        }
+        let lanes = if scalar { 1 } else { bits / width };
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        for lane in 0..lanes {
+            let input = fp_lane(&mut r, rn, lane, width);
+            values.push(fp_chain(
+                &mut r,
+                operation,
+                width,
+                vec![input],
+                &control,
+                &mut status,
+                &mut trapped,
+            ));
+        }
+        fp_finish(&mut r, status, trapped);
+        if scalar {
+            fp_scalar_write(&mut r, rd, width, values.remove(0), Some((control, rd)));
+        } else {
+            fp_pack(&mut r, rd, width, values);
+        }
+        return Some(r);
+    }
+    // Widening reads the selected source half; narrowing inserts the selected
+    // destination half. FCVTXN's round-to-odd is a native conversion mode.
+    let precision = word & 0xbfbffc00;
+    let odd_scalar = word & 0xfffffc00 == 0x7e616800;
+    let odd_vector = word & 0xbffffc00 == 0x2e616800;
+    if !scalar && matches!(precision, 0x0e217800 | 0x0e216800) || odd_scalar || odd_vector {
+        let widening = precision == 0x0e217800 && !odd_scalar && !odd_vector;
+        let odd = odd_scalar || odd_vector;
+        let narrow = if odd { 32 } else { 16 << ((word >> 22) & 1) };
+        let width = if widening { 2 * narrow } else { narrow };
+        let source_width = if widening { narrow } else { 2 * narrow };
+        let lanes = if odd_scalar { 1 } else { 64 / narrow };
+        let part = ((word >> 30) & 1) as u16;
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        for lane in 0..lanes {
+            let source_lane = if widening {
+                lane + part as u8 * (64 / source_width)
+            } else {
+                lane
+            };
+            let input = fp_lane(&mut r, rn, source_lane, source_width);
+            values.push(fp_chain(
+                &mut r,
+                FloatOperation::Convert {
+                    source_width,
+                    round_to_odd: odd,
+                },
+                width,
+                vec![input],
+                &control,
+                &mut status,
+                &mut trapped,
+            ));
+        }
+        fp_finish(&mut r, status, trapped);
+        if odd_scalar {
+            fp_scalar_write(&mut r, rd, width, values.remove(0), Some((control, rd)));
+        } else if widening {
+            fp_pack(&mut r, rd, width, values);
+        } else {
+            let mut value = c(64, 0);
+            for (lane, x) in values.into_iter().enumerate() {
+                value = bin(
+                    B::Or,
+                    value,
+                    shifted(Expr::cast(x, 64, false), 0, lane as u32 * width as u32),
+                );
+            }
+            write_vector_chunk(&mut r, rd, part, value);
+            if part == 0 {
+                write_vector_chunk(&mut r, rd, 1, c(64, 0));
+            }
+        }
+        return Some(r);
+    }
+    let compare_h = normalized & 0xbfe0fc00;
+    let compare_s = normalized & 0xbfa0fc00;
+    // kind: EQ, GE, GT, absolute GE, absolute GT.
+    let compares = [
+        (0x0e402400, 0x0e20e400, 0),
+        (0x2e402400, 0x2e20e400, 1),
+        (0x2ec02400, 0x2ea0e400, 2),
+        (0x2e402c00, 0x2e20ec00, 3),
+        (0x2ec02c00, 0x2ea0ec00, 4),
+    ];
+    let compare = compares
+        .iter()
+        .find(|(half, wide, _)| compare_h == *half || compare_s == *wide);
+    let zero_h = normalized & 0xbffffc00;
+    let zero_s = normalized & 0xbfbffc00;
+    // EQ, GE, GT, LE and LT against zero. These never merge upper bits.
+    let zeros = [
+        (0x0ef8d800, 0x0ea0d800, 0),
+        (0x2ef8c800, 0x2ea0c800, 1),
+        (0x0ef8c800, 0x0ea0c800, 2),
+        (0x2ef8d800, 0x2ea0d800, 5),
+        (0x0ef8e800, 0x0ea0e800, 6),
+    ];
+    let zero = zeros
+        .iter()
+        .find(|(half, wide, _)| zero_h == *half || zero_s == *wide);
+    if compare.is_some() || zero.is_some() {
+        if scalar && word & (1 << 30) == 0 {
+            return Some(unsupported());
+        }
+        let (half, _, kind) = compare.or(zero).unwrap();
+        let width =
+            if (compare.is_some() && compare_h == *half) || (zero.is_some() && zero_h == *half) {
+                16
+            } else {
+                32 << ((word >> 22) & 1)
+            };
+        let bits = if word & (1 << 30) != 0 { 128 } else { 64 };
+        if !scalar && width == 64 && bits == 64 {
+            return Some(unsupported());
+        }
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        for lane in 0..if scalar { 1 } else { bits / width } {
+            let mut a = fp_lane(&mut r, rn, lane, width);
+            let mut b = if zero.is_some() {
+                c(width, 0)
+            } else {
+                fp_lane(&mut r, rm, lane, width)
+            };
+            if *kind == 3 || *kind == 4 {
+                a = r.bind(bin(B::And, a, c(width, mask(width - 1))));
+                b = r.bind(bin(B::And, b, c(width, mask(width - 1))));
+            }
+            if *kind >= 5 {
+                std::mem::swap(&mut a, &mut b);
+            }
+            let flags = fp_chain(
+                &mut r,
+                FloatOperation::Compare {
+                    source_width: width,
+                    signal_all_nans: *kind != 0,
+                },
+                4,
+                vec![a, b],
+                &control,
+                &mut status,
+                &mut trapped,
+            );
+            let eq = Expr::extract(flags.clone(), 2, 1);
+            let ge = bin(
+                B::And,
+                Expr::extract(flags.clone(), 1, 1),
+                inv(Expr::extract(flags, 0, 1)),
+            );
+            let test = if *kind == 0 {
+                eq
+            } else if matches!(*kind, 1 | 3 | 5) {
+                ge
+            } else {
+                bin(B::And, ge, inv(eq))
+            };
+            values.push(r.bind(Expr::select(test, c(width, mask(width)), c(width, 0))));
+        }
+        fp_finish(&mut r, status, trapped);
+        if scalar {
+            fp_scalar_write(
+                &mut r,
+                rd,
+                width,
+                values.remove(0),
+                if zero.is_some() {
+                    None
+                } else {
+                    Some((control, rm))
+                },
+            );
+        } else {
+            fp_pack(&mut r, rd, width, values);
+        }
+        return Some(r);
+    }
+    let indexed_h = normalized & 0xbfc0f400;
+    let indexed_s = normalized & 0xbf80f400;
+    let indexed = [
+        (0x0f009000, 0x0f809000, 0),
+        (0x0f001000, 0x0f801000, 1),
+        (0x0f005000, 0x0f805000, 2),
+    ];
+    if let Some((half, _, kind)) = indexed
+        .iter()
+        .find(|(half, wide, _)| indexed_h == *half || indexed_s == *wide)
+    {
+        if scalar && word & (1 << 30) == 0 {
+            return Some(unsupported());
+        }
+        let width = if indexed_h == *half {
+            16
+        } else {
+            32 << ((word >> 22) & 1)
+        };
+        let high = ((word >> 11) & 1) as u8;
+        let low = ((word >> 21) & 1) as u8;
+        if width == 64 && low != 0 {
+            return Some(unsupported());
+        }
+        let index = if width == 16 {
+            high * 4 + low * 2 + ((word >> 20) & 1) as u8
+        } else if width == 32 {
+            high * 2 + low
+        } else {
+            high
+        };
+        let source = if width == 16 { rm & 15 } else { rm };
+        let bits = if word & (1 << 30) != 0 { 128 } else { 64 };
+        if !scalar && width == 64 && bits == 64 {
+            return Some(unsupported());
+        }
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        let indexed = fp_lane(&mut r, source, index, width);
+        let operation = if *kind == 0 {
+            FloatOperation::Multiply
+        } else {
+            FloatOperation::FusedMultiplyAdd {
+                negate_product: *kind == 2,
+                negate_addend: false,
+            }
+        };
+        for lane in 0..if scalar { 1 } else { bits / width } {
+            let a = fp_lane(&mut r, rn, lane, width);
+            let inputs = if *kind == 0 {
+                vec![a, indexed.clone()]
+            } else {
+                let addend = fp_lane(&mut r, rd, lane, width);
+                vec![addend, a, indexed.clone()]
+            };
+            values.push(fp_chain(
+                &mut r,
+                operation,
+                width,
+                inputs,
+                &control,
+                &mut status,
+                &mut trapped,
+            ));
+        }
+        fp_finish(&mut r, status, trapped);
+        if scalar {
+            fp_scalar_write(
+                &mut r,
+                rd,
+                width,
+                values.remove(0),
+                Some((control, if *kind == 0 { rn } else { rd })),
+            );
+        } else {
+            fp_pack(&mut r, rd, width, values);
+        }
+        return Some(r);
+    }
+    let pair_h = word & 0xfffffc00;
+    let pair_s = word & 0xffbffc00;
+    let scalar_pairs = [
+        (0x5e30d800, 0x7e30d800, 0),
+        (0x5e30f800, 0x7e30f800, 1),
+        (0x5eb0f800, 0x7eb0f800, 2),
+        (0x5e30c800, 0x7e30c800, 3),
+        (0x5eb0c800, 0x7eb0c800, 4),
+    ];
+    if let Some((half, _, kind)) = scalar_pairs
+        .iter()
+        .find(|(half, wide, _)| pair_h == *half || pair_s == *wide)
+    {
+        let width = if pair_h == *half {
+            16
+        } else {
+            32 << ((word >> 22) & 1)
+        };
+        let operation = if *kind == 0 {
+            FloatOperation::Add
+        } else {
+            FloatOperation::MinMax {
+                minimum: matches!(*kind, 2 | 4),
+                numeric: *kind >= 3,
+            }
+        };
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let a = fp_lane(&mut r, rn, 0, width);
+        let b = fp_lane(&mut r, rn, 1, width);
+        let value = fp_chain(
+            &mut r,
+            operation,
+            width,
+            vec![a, b],
+            &control,
+            &mut status,
+            &mut trapped,
+        );
+        fp_finish(&mut r, status, trapped);
+        fp_scalar_write(&mut r, rd, width, value, None);
+        return Some(r);
+    }
+    let pair_h = word & 0xbfe0fc00;
+    let pair_s = word & 0xbfa0fc00;
+    let vector_pairs = [
+        (0x2e401400, 0x2e20d400, 0),
+        (0x2e403400, 0x2e20f400, 1),
+        (0x2ec03400, 0x2ea0f400, 2),
+        (0x2e400400, 0x2e20c400, 3),
+        (0x2ec00400, 0x2ea0c400, 4),
+    ];
+    if let Some((half, _, kind)) = vector_pairs
+        .iter()
+        .find(|(half, wide, _)| pair_h == *half || pair_s == *wide)
+    {
+        let width = if pair_h == *half {
+            16
+        } else {
+            32 << ((word >> 22) & 1)
+        };
+        let bits = if word & (1 << 30) != 0 { 128 } else { 64 };
+        if width == 64 && bits == 64 {
+            return Some(unsupported());
+        }
+        let operation = if *kind == 0 {
+            FloatOperation::Add
+        } else {
+            FloatOperation::MinMax {
+                minimum: matches!(*kind, 2 | 4),
+                numeric: *kind >= 3,
+            }
+        };
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        for source in [rn, rm] {
+            for pair in 0..bits / width / 2 {
+                let a = fp_lane(&mut r, source, pair * 2, width);
+                let b = fp_lane(&mut r, source, pair * 2 + 1, width);
+                values.push(fp_chain(
+                    &mut r,
+                    operation,
+                    width,
+                    vec![a, b],
+                    &control,
+                    &mut status,
+                    &mut trapped,
+                ));
+            }
+        }
+        fp_finish(&mut r, status, trapped);
+        fp_pack(&mut r, rd, width, values);
+        return Some(r);
+    }
+    let reduce_h = word & 0xbffffc00;
+    let reduce_s = word & 0xfffffc00;
+    let reductions = [
+        (0x0e30f800, 0x6e30f800, 1),
+        (0x0eb0f800, 0x6eb0f800, 2),
+        (0x0e30c800, 0x6e30c800, 3),
+        (0x0eb0c800, 0x6eb0c800, 4),
+    ];
+    if let Some((half, _, kind)) = reductions
+        .iter()
+        .find(|(half, wide, _)| reduce_h == *half || reduce_s == *wide)
+    {
+        let width = if reduce_h == *half { 16 } else { 32 };
+        let bits = if word & (1 << 30) != 0 { 128 } else { 64 };
+        let operation = FloatOperation::MinMax {
+            minimum: matches!(*kind, 2 | 4),
+            numeric: *kind >= 3,
+        };
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut inputs = vec![];
+        for lane in 0..bits / width {
+            inputs.push(fp_lane(&mut r, rn, lane, width));
+        }
+        let result = fp_reduce(
+            &mut r,
+            operation,
+            width,
+            &inputs,
+            &control,
+            &mut status,
+            &mut trapped,
+        );
+        fp_finish(&mut r, status, trapped);
+        fp_scalar_write(&mut r, rd, width, result, None);
+        return Some(r);
+    }
+    None
+}
+fn fp_load_span(r: &mut Recipe, address: Expr, width: u16, endian: Endian) -> Vec<Expr> {
+    if width <= 64 {
+        vec![r.bind(Expr::load(Memory {kind: Default::default(), privilege: Default::default(),
+            address: Box::new(address),
+            width: width as u8,
+            endian,
+        }))]
+    } else {
+        r.load_wide(WideMemory {kind: Default::default(), privilege: Default::default(),
+            address: Box::new(address),
+            width,
+            endian,
+        })
+    }
+}
+fn fp_store_span(r: &mut Recipe, address: Expr, width: u16, chunks: Vec<Expr>, endian: Endian) {
+    if width <= 64 {
+        r.effects.push(Effect::Store {
+            memory: Memory {kind: Default::default(), privilege: Default::default(),
+                address: Box::new(address),
+                width: width as u8,
+                endian,
+            },
+            value: chunks[0].clone(),
+        });
+    } else {
+        r.store_wide(
+            WideMemory {kind: Default::default(), privilege: Default::default(),
+                address: Box::new(address),
+                width,
+                endian,
+            },
+            chunks,
+        );
+    }
+}
+fn fp_memory_single(
+    r: &mut Recipe,
+    rt: u32,
+    width: u16,
+    address: Expr,
+    load: bool,
+    endian: Endian,
+) {
+    if load {
+        let chunks = fp_load_span(r, address, width, endian);
+        let low = r.bind(Expr::cast(chunks[0].clone(), 64, false));
+        let high = if width == 128 {
+            r.bind(chunks[1].clone())
+        } else {
+            c(64, 0)
+        };
+        write_vector_chunk(r, rt, 0, low);
+        write_vector_chunk(r, rt, 1, high);
+    } else {
+        let mut chunks = vec![r.bind(Expr::extract(vector_chunk(rt, 0), 0, width.min(64) as u8))];
+        if width == 128 {
+            chunks.push(r.bind(vector_chunk(rt, 1)));
+        }
+        fp_store_span(r, address, width, chunks, endian);
+    }
+}
+fn fp_memory(word: u32, address: u64, endian: Endian) -> Option<Recipe> {
+    let mut r = Recipe::new(address.wrapping_add(4), 64);
+    let unsupported = || {
+        Recipe::unsupported(
+            "A64 SIMD memory reserved or constrained selector",
+            address.wrapping_add(4),
+            64,
+        )
+    };
+    let rt = word & 31;
+    let rn = (word >> 5) & 31;
+    if word & 0x3e000000 == 0x2c000000 {
+        let opc = word >> 30;
+        let load = word & (1 << 22) != 0;
+        let mode = (word >> 23) & 3;
+        let rt2 = (word >> 10) & 31;
+        if opc == 3 || load && rt == rt2 {
+            return Some(unsupported());
+        }
+        let width = 32u16 << opc;
+        let offset = sign(((word >> 15) & 127) as u64, 7).wrapping_mul(u64::from(width / 8));
+        let base = read(rn, 64, true);
+        let next = bin(B::Add, base.clone(), c(64, offset));
+        let first = if mode == 1 { base } else { next.clone() };
+        if load {
+            let chunks = fp_load_span(&mut r, first, 2 * width, endian);
+            for (i, dest) in [rt, rt2].into_iter().enumerate() {
+                let i = if endian == Endian::Little { i } else { 1 - i };
+                let low = if width == 32 {
+                    Expr::cast(
+                        Expr::extract(chunks[0].clone(), i as u8 * 32, 32),
+                        64,
+                        false,
+                    )
+                } else {
+                    chunks[i * width as usize / 64].clone()
+                };
+                let high = if width == 128 {
+                    chunks[i * 2 + 1].clone()
+                } else {
+                    c(64, 0)
+                };
+                write_vector_chunk(&mut r, dest, 0, low);
+                write_vector_chunk(&mut r, dest, 1, high);
+            }
+        } else {
+            let sources = if endian == Endian::Little {
+                [rt, rt2]
+            } else {
+                [rt2, rt]
+            };
+            let chunks = if width == 32 {
+                let a = Expr::cast(Expr::extract(vector_chunk(sources[0], 0), 0, 32), 64, false);
+                let b = shifted(
+                    Expr::cast(Expr::extract(vector_chunk(sources[1], 0), 0, 32), 64, false),
+                    0,
+                    32,
+                );
+                vec![r.bind(bin(B::Or, a, b))]
+            } else {
+                let mut chunks = vec![];
+                for source in sources {
+                    for chunk in 0..width / 64 {
+                        chunks.push(r.bind(vector_chunk(source, chunk)));
+                    }
+                }
+                chunks
+            };
+            fp_store_span(&mut r, first, 2 * width, chunks, endian);
+        }
+        // Base GPR/SP and data vector registers are different banks. Equal
+        // register numbers do not create a writeback overlap constraint.
+        if mode == 1 || mode == 3 {
+            let value = r.bind(next);
+            write(&mut r, rn, 64, true, value);
+        }
+        return Some(r);
+    }
+    if word & 0x3f000000 == 0x1c000000 {
+        let opc = word >> 30;
+        if opc == 3 {
+            return Some(unsupported());
+        }
+        let width = 32u16 << opc;
+        let target = address.wrapping_add(sign((((word >> 5) & 0x7ffff) << 2) as u64, 21));
+        fp_memory_single(&mut r, rt, width, c(64, target), true, endian);
+        return Some(r);
+    }
+    let unsigned = word & 0x3f000000 == 0x3d000000;
+    let unscaled = word & 0x3f200000 == 0x3c000000;
+    let indexed = word & 0x3f200c00 == 0x3c200800;
+    if unsigned || unscaled || indexed {
+        let size = word >> 30;
+        let opc = (word >> 22) & 3;
+        if opc >= 2 && size != 0 {
+            return Some(unsupported());
+        }
+        let scale = if opc >= 2 { 4 } else { size };
+        let width = 8u16 << scale;
+        let load = opc & 1 != 0;
+        let base = read(rn, 64, true);
+        let (effective, writeback) = if unsigned {
+            (
+                bin(B::Add, base, c(64, u64::from((word >> 10) & 4095) << scale)),
+                None,
+            )
+        } else if unscaled {
+            let mode = (word >> 10) & 3;
+            if mode == 2 {
+                return Some(unsupported());
+            }
+            let next = bin(
+                B::Add,
+                base.clone(),
+                c(64, sign(((word >> 12) & 511) as u64, 9)),
+            );
+            (
+                if mode == 1 { base } else { next.clone() },
+                if mode == 1 || mode == 3 {
+                    Some(next)
+                } else {
+                    None
+                },
+            )
+        } else {
+            let option = (word >> 13) & 7;
+            if ![2, 3, 6, 7].contains(&option) {
+                return Some(unsupported());
+            }
+            let index = Expr::cast(
+                read(
+                    (word >> 16) & 31,
+                    if option & 1 == 0 { 32 } else { 64 },
+                    false,
+                ),
+                64,
+                option & 4 != 0,
+            );
+            let index = if word & (1 << 12) != 0 {
+                shifted(index, 0, scale)
+            } else {
+                index
+            };
+            (bin(B::Add, base, index), None)
+        };
+        fp_memory_single(&mut r, rt, width, effective, load, endian);
+        if let Some(next) = writeback {
+            let value = r.bind(next);
+            write(&mut r, rn, 64, true, value);
+        }
+        return Some(r);
+    }
+    None
+}
+fn fp_classic_context(r: &mut Recipe, control: &Expr, extra: u64) {
+    // These typed primitives currently implement the classic architectural
+    // domain. Enhanced AH/FIZ/AHP/RPRES and EBF dot behavior is never guessed.
+    let allowed = bin(
+        B::Eq,
+        bin(B::And, control.clone(), c(32, 0x04000003 | extra)),
+        c(32, 0),
+    );
+    r.bind(Expr::require_context(
+        allowed,
+        "A64 FP primitive requires classic AH/FIZ/AHP and standard BF16 context",
+    ));
+}
+fn fp_special(word: u32, address: u64) -> Option<Recipe> {
+    let mut r = Recipe::new(address.wrapping_add(4), 64);
+    let unsupported = || {
+        Recipe::unsupported(
+            "A64 special FP constrained selector",
+            address.wrapping_add(4),
+            64,
+        )
+    };
+    let rd = word & 31;
+    let rn = (word >> 5) & 31;
+    let rm = (word >> 16) & 31;
+    let scalar = word & (1 << 28) != 0;
+    let normalized = word & !(1 << 28);
+    let h = normalized & 0xbffffc00;
+    let s = normalized & 0xbfbffc00;
+    let unary = [
+        (0x0ef9d800, 0x0ea1d800, FloatOperation::ReciprocalEstimate),
+        (
+            0x2ef9d800,
+            0x2ea1d800,
+            FloatOperation::ReciprocalSquareRootEstimate,
+        ),
+        (0x0ef9f800, 0x0ea1f800, FloatOperation::ReciprocalExponent),
+    ];
+    let unary = unary
+        .iter()
+        .find(|(half, wide, _)| h == *half || s == *wide);
+    let bh = normalized & 0xbfe0fc00;
+    let bs = normalized & 0xbfa0fc00;
+    let binary = [
+        (0x0e403c00, 0x0e20fc00, FloatOperation::ReciprocalStep),
+        (
+            0x0ec03c00,
+            0x0ea0fc00,
+            FloatOperation::ReciprocalSquareRootStep,
+        ),
+        (0x0e401c00, 0x0e20dc00, FloatOperation::MultiplyExtended),
+    ];
+    let binary = binary
+        .iter()
+        .find(|(half, wide, _)| bh == *half || bs == *wide);
+    let ih = normalized & 0xbfc0f400;
+    let is = normalized & 0xbf80f400;
+    let indexed = ih == 0x2f009000 || is == 0x2f809000;
+    if unary.is_some() || binary.is_some() || indexed {
+        if scalar && word & (1 << 30) == 0 {
+            return Some(unsupported());
+        }
+        let (width, operation) = if let Some((half, _, op)) = unary {
+            (
+                if h == *half {
+                    16
+                } else {
+                    32 << ((word >> 22) & 1)
+                },
+                *op,
+            )
+        } else if let Some((half, _, op)) = binary {
+            (
+                if bh == *half {
+                    16
+                } else {
+                    32 << ((word >> 22) & 1)
+                },
+                *op,
+            )
+        } else {
+            (
+                if ih == 0x2f009000 {
+                    16
+                } else {
+                    32 << ((word >> 22) & 1)
+                },
+                FloatOperation::MultiplyExtended,
+            )
+        };
+        if operation == FloatOperation::ReciprocalExponent && !scalar {
+            return Some(unsupported());
+        }
+        let bits = if word & (1 << 30) != 0 { 128 } else { 64 };
+        if !scalar && width == 64 && bits == 64 {
+            return Some(unsupported());
+        }
+        let control = fp_control(&mut r);
+        fp_classic_context(&mut r, &control, 0);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        let element = if indexed {
+            let high = ((word >> 11) & 1) as u8;
+            let low = ((word >> 21) & 1) as u8;
+            if width == 64 && low != 0 {
+                return Some(unsupported());
+            }
+            let index = if width == 16 {
+                high * 4 + low * 2 + ((word >> 20) & 1) as u8
+            } else if width == 32 {
+                high * 2 + low
+            } else {
+                high
+            };
+            Some(fp_lane(
+                &mut r,
+                if width == 16 { rm & 15 } else { rm },
+                index,
+                width,
+            ))
+        } else {
+            None
+        };
+        for lane in 0..if scalar { 1 } else { bits / width } {
+            let a = fp_lane(&mut r, rn, lane, width);
+            let inputs = if unary.is_some() {
+                vec![a]
+            } else {
+                let b = if let Some(element) = &element {
+                    element.clone()
+                } else {
+                    fp_lane(&mut r, rm, lane, width)
+                };
+                vec![a, b]
+            };
+            values.push(fp_chain(
+                &mut r,
+                operation,
+                width,
+                inputs,
+                &control,
+                &mut status,
+                &mut trapped,
+            ));
+        }
+        fp_finish(&mut r, status, trapped);
+        if scalar {
+            fp_scalar_write(
+                &mut r,
+                rd,
+                width,
+                values.remove(0),
+                Some((control, if unary.is_some() { rd } else { rn })),
+            );
+        } else {
+            fp_pack(&mut r, rd, width, values);
+        }
+        return Some(r);
+    }
+    let bf_scalar = word & 0xfffffc00 == 0x1e634000;
+    let bf_narrow = word & 0xbffffc00 == 0x0ea16800;
+    if bf_scalar || bf_narrow {
+        let control = fp_control(&mut r);
+        fp_classic_context(&mut r, &control, 0);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        for lane in 0..if bf_scalar { 1 } else { 4 } {
+            let input = fp_lane(&mut r, rn, lane, 32);
+            values.push(fp_chain(
+                &mut r,
+                FloatOperation::ToBFloat16,
+                16,
+                vec![input],
+                &control,
+                &mut status,
+                &mut trapped,
+            ));
+        }
+        fp_finish(&mut r, status, trapped);
+        if bf_scalar {
+            fp_scalar_write(&mut r, rd, 16, values.remove(0), Some((control, rd)));
+        } else {
+            let mut value = c(64, 0);
+            for (lane, x) in values.into_iter().enumerate() {
+                value = bin(
+                    B::Or,
+                    value,
+                    shifted(Expr::cast(x, 64, false), 0, lane as u32 * 16),
+                );
+            }
+            let part = ((word >> 30) & 1) as u16;
+            write_vector_chunk(&mut r, rd, part, value);
+            if part == 0 {
+                write_vector_chunk(&mut r, rd, 1, c(64, 0));
+            }
+        }
+        return Some(r);
+    }
+    let dot = word & 0xbfe0fc00 == 0x2e40fc00;
+    let indexed_dot = word & 0xbfc0f400 == 0x0f40f000;
+    if dot || indexed_dot {
+        let control = fp_control(&mut r);
+        fp_classic_context(&mut r, &control, 1 << 13);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut values = vec![];
+        let lanes = if word & (1 << 30) != 0 { 4 } else { 2 };
+        let index = (((word >> 11) & 1) * 2 + ((word >> 21) & 1)) as u8;
+        let indexed_pair = if indexed_dot {
+            Some((
+                fp_lane(&mut r, rm, index * 2, 16),
+                fp_lane(&mut r, rm, index * 2 + 1, 16),
+            ))
+        } else {
+            None
+        };
+        for lane in 0..lanes {
+            let acc = fp_lane(&mut r, rd, lane, 32);
+            let a0 = fp_lane(&mut r, rn, lane * 2, 16);
+            let a1 = fp_lane(&mut r, rn, lane * 2 + 1, 16);
+            let (b0, b1) = if let Some(pair) = &indexed_pair {
+                pair.clone()
+            } else {
+                (
+                    fp_lane(&mut r, rm, lane * 2, 16),
+                    fp_lane(&mut r, rm, lane * 2 + 1, 16),
+                )
+            };
+            values.push(fp_chain(
+                &mut r,
+                FloatOperation::BFloatDotAdd,
+                32,
+                vec![acc, a0, a1, b0, b1],
+                &control,
+                &mut status,
+                &mut trapped,
+            ));
+        }
+        fp_finish(&mut r, status, trapped);
+        fp_pack(&mut r, rd, 32, values);
+        return Some(r);
+    }
+    None
+}
+fn memory(
+    r: &mut Recipe,
+    endian: Endian,
+    word: u32,
+    w: u8,
+    size: u8,
+    opc: u32,
+    address: Expr,
+    rn: u32,
+    writeback: Option<Expr>,
+) -> bool {
+    let rt = word & 31;
+    let bits = 8u8 << size;
+    if opc > 1 && (size == 3 || (opc == 3 && size == 2)) {
+        return false;
+    }
+    if writeback.is_some() && rn != 31 && rn == rt {
+        return false;
+    }
+    let address = r.bind(address);
+    let m = Memory {kind: Default::default(), privilege: Default::default(),
+        address: Box::new(address),
+        width: bits,
+        endian,
+    };
+    if opc == 0 {
+        let v = r.bind(read(rt, bits, false));
+        r.effects.push(Effect::Store {
+            memory: m,
+            value: v,
+        })
+    } else {
+        let value = r.bind(Expr::load(m));
+        let dest = if opc == 2 {
+            64
+        } else if opc == 3 {
+            32
+        } else {
+            w
+        };
+        write(r, rt, dest, false, Expr::cast(value, dest, opc >= 2))
+    }
+    if let Some(next) = writeback {
+        let next = r.bind(next);
+        write(r, rn, 64, true, next)
+    }
+    true
+}
+/// Extract a recipe from a decoded A64 instruction. Unsupported families never
+/// expose a guessed transition. The raw-word entry point is useful to adapters
+/// which have independently established instruction validity.
+pub fn for_word(word: u32, address: u64) -> Recipe {
+    for_word_with_endian(word, address, Endian::Little)
+}
+/// Extract a recipe with explicit data endianness. Pair accesses retain their
+/// original width and map whole elements to registers in address order.
+pub fn for_word_with_endian(word: u32, address: u64, endian: Endian) -> Recipe {
+    for_word_with_context(
+        word,
+        address,
+        RecipeContext {
+            vector_length: 128,
+            streaming_vector_length: None,
+            endian,
+        },
+    )
+}
+/// Explicit CurrentVL, independently configured SVL, and data byte order. Invalid contexts produce an
+/// Unsupported recipe without architectural effects.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RecipeContext {
+    pub vector_length: u16,
+    /// None selects the same length as CurrentVL. SME uses SVL even outside streaming mode.
+    pub streaming_vector_length: Option<u16>,
+    pub endian: Endian,
+}
+impl Default for RecipeContext {
+    fn default() -> Self {
+        Self {
+            vector_length: 128,
+            streaming_vector_length: None,
+            endian: Endian::Little,
+        }
+    }
+}
+impl RecipeContext {
+    pub fn streaming_vector_length(self) -> u16 {
+        self.streaming_vector_length.unwrap_or(self.vector_length)
+    }
+    pub fn valid(self) -> bool {
+        let valid = |length: u16| matches!(length, 128 | 256 | 512 | 1024 | 2048);
+        valid(self.vector_length) && valid(self.streaming_vector_length())
+    }
+}
+pub fn for_word_with_vector_length(word: u32, address: u64, vector_length: u16) -> Recipe {
+    for_word_with_context(
+        word,
+        address,
+        RecipeContext {
+            vector_length,
+            streaming_vector_length: None,
+            endian: Endian::Little,
+        },
+    )
+}
+pub fn for_word_with_context(word: u32, address: u64, context: RecipeContext) -> Recipe {
+    if !context.valid() {
+        return Recipe::unsupported(
+            "A64 VL and SVL must be 128, 256, 512, 1024 or 2048",
+            address.wrapping_add(4),
+            64,
+        );
+    }
+    if let Some(recipe) = arm64_sve_lookup::sme(word, address, context.streaming_vector_length()) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sme_bfloat::a64(word, address, context.streaming_vector_length()) {
+        return recipe;
+    }
+    if let Some(recipe)=arm64_sve_bfloat_arithmetic::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_sve_float_misc::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_float_quad_reduce::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_group_convert::a64(word,address,context.vector_length,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_group_bfloat::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_group_integer::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_group_float::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_za_partial::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_za_dot::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_za_half_widening::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_za_outer::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_za_fused::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_sme_state::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_za_integer::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_za_addsub::a64(word,address,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_float_lane_ops::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_sve_float_matrix::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_fixed_half_matrix::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_fixed_fp8::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_fp8_matrix::a64(word,address,context.vector_length,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_fp8_dot::a64(word,address,context.vector_length,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe)=arm64_fp8_widening::a64(word,address,context.vector_length,context.streaming_vector_length()){return recipe;}
+    if let Some(recipe) = arm64_bfloat_widening::a64(word, address, context.vector_length, context.streaming_vector_length()) { return recipe; }
+    if let Some(recipe) = arm64_fp8::scalable(word, address, context.vector_length, context.streaming_vector_length()) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_fp8::a64(word, address, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_float_classic::a64(word, address, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sme::a64_group_memory(word, address, context.vector_length, context.endian) {
+        return recipe;
+    }
+    if let Some(sme) = arm64_sme::a64_with_endian(word, address, context.streaming_vector_length(), context.endian) {
+        return sme;
+    }
+    if let Some(recipe) = arm64_sve_crypto_group::a64(word, address, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sve_crypto::a64(word, address, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sve_counter::a64(word, address, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sve_misc::a64(word, address, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sve_replicate::a64(word, address, context.endian, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sve_structured::a64(word, address, context.endian, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sve_nontemporal::a64(word, address, context.endian, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe) = arm64_sve_fault::a64(word, address, context.endian, context.vector_length) {
+        return recipe;
+    }
+    if let Some(recipe)=arm64_sve_final_data::a64(word,address,context.vector_length){return recipe;}
+    if let Some(recipe)=arm64_sve_ordinary::a64(word,address,context.endian,context.vector_length){return recipe;}
+    if let Some(sve) = arm64_sve_memory::a64(word, address, context.endian, context.vector_length) {
+        return sve;
+    }
+    if let Some(predicate) = arm64_sve_predicate_extra::a64(word, address, context.vector_length) {
+        return predicate;
+    }
+    if let Some(integer) = arm64_sve_integer_extra::a64(word, address, context.vector_length) {
+        return integer;
+    }
+    if let Some(pair) = arm64_sve_pair_arithmetic::a64(word, address, context.vector_length) {
+        return pair;
+    }
+    if let Some(expansion) = arm64_sve_expand::a64(word, address, context.vector_length) {
+        return expansion;
+    }
+    if let Some(predicate) = arm64_sve_while_extra::a64(word, address, context.vector_length) {
+        return predicate;
+    }
+    if let Some(estimate) = arm64_sve_integer_estimate::a64(word, address, context.vector_length) {
+        return estimate;
+    }
+    if let Some(integer) = arm64_sve_indexed_integer::a64(word, address, context.vector_length) {
+        return integer;
+    }
+    if let Some(lookup) = arm64_sve_lookup::a64(word, address, context.vector_length) {
+        return lookup;
+    }
+    if let Some(transfer) = arm64_sve_transfer::a64(word, address, context.vector_length) {
+        return transfer;
+    }
+    if let Some(reduction) = arm64_sve_quad_reduce::a64(word, address, context.vector_length) {
+        return reduction;
+    }
+    if let Some(permutation) = arm64_sve_quad_permute::a64(word, address, context.vector_length) {
+        return permutation;
+    }
+    if let Some(predicate) = arm64_sve_predicate_rearrange::a64(word, address, context.vector_length) {
+        return predicate;
+    }
+    if let Some(sve) = arm64_sve::a64(word, address, context.endian, context.vector_length) {
+        return sve;
+    }
+    let mut recipe = for_word_base(word, address, context.endian);
+    if recipe.support == Support::Full && context.vector_length > 128 {
+        let mut vectors = vec![];
+        for effect in &recipe.effects {
+            if let Effect::WriteRegister { destination, .. } = effect {
+                if destination.register.bank == "a64.vector64" {
+                    let index = destination.register.index / 32;
+                    if !vectors.contains(&index) {
+                        vectors.push(index);
+                    }
+                }
+            }
+        }
+        for vector in vectors {
+            for chunk in 2..context.vector_length / 64 {
+                recipe.write(
+                    register("a64.vector64", vector * 32 + chunk, 64, 64),
+                    WritePolicy::ZeroUpper,
+                    c(64, 0),
+                );
+            }
+        }
+    }
+    recipe
+}
+fn for_word_base(word: u32, address: u64, endian: Endian) -> Recipe {
+    if let Some(pointer) = arm64_pointer::a64_with_endian(word, address, endian) {
+        return pointer;
+    }
+    let mut r = Recipe::new(address.wrapping_add(4), 64);
+    let w = if word >> 31 != 0 { 64 } else { 32 };
+    let rd = word & 31;
+    let rn = (word >> 5) & 31;
+    let rm = (word >> 16) & 31;
+    let unsupported = || {
+        Recipe::unsupported(
+            "A64 family or constrained form has no audited semantic recipe",
+            address.wrapping_add(4),
+            64,
+        )
+    };
+    // Prefetch operations are architectural hints. Choose the permitted
+    // ignored-hint behavior in this data/state model, including unallocated
+    // PRFOP values and RPRFM's NOP fallback. Address calculation has no visible
+    // result, so unavailable address registers and memory are not consumed.
+    if word & 0xffc00000 == 0xf9800000
+        || word & 0xff000000 == 0xd8000000
+        || word & 0xffe04c00 == 0xf8a04800
+        || word & 0xffe00c00 == 0xf8800000
+    {
+        return r;
+    }
+    if let Some(system) = system::a64(word, address) {
+        return system;
+    }
+    if let Some(block) = arm64_ls64::a64(word,address,endian) {return block;}
+    if let Some(mops) = arm64_mops::a64(word, address, endian) {return mops;}
+    if let Some(tags) = arm64_tags::a64(word, address, endian) {return tags;}
+    if let Some(rcw) = arm64_rcw::a64(word, address, endian) {return rcw;}
+    if let Some(lsui) = arm64_lsui::a64(word, address, endian) {return lsui;}
+    if let Some(gcs) = arm64_gcs_stack::a64(word,address,endian) { return gcs; }
+    if let Some(gcs) = arm64_gcs_memory::a64(word,address,endian) { return gcs; }
+    if let Some(ordered) = arm64_ordered::a64(word, address, endian) {
+        return ordered;
+    }
+    if let Some(recipe)=arm64_lsfe::a64(word,address,endian){return recipe;}
+    if let Some(atomic) = arm64_atomics::a64(word, address, endian) {
+        return atomic;
+    }
+    if let Some(integer) = arm64_integer::a64(word, address) {
+        return integer;
+    }
+    if let Some(crypto) = arm64_crypto::a64(word, address) {
+        return crypto;
+    }
+    if let Some(misc) = arm64_misc::a64(word, address) {
+        return misc;
+    }
+    if let Some(integer) = arm64_simd_integer_extra::a64(word, address) {
+        return integer;
+    }
+    if let Some(float) = arm64_float_misc::a64(word, address) {
+        return float;
+    }
+    if let Some(memory) = arm64_memory::a64(word, address, endian) {
+        return memory;
+    }
+    if word == 0xd503201f {
+        return r;
+    }
+    if let Some(bfloat) = arm64_float_extra::fixed_bfloat(word, address) {
+        return bfloat;
+    }
+    if let Some(special) = fp_special(word, address) {
+        return special;
+    }
+    if let Some(vector) = fp_vector_extra(word, address) {
+        return vector;
+    }
+    if let Some(memory) = fp_memory(word, address, endian) {
+        return memory;
+    }
+    // Scalar fused arithmetic: sign changes are part of the typed FP
+    // operation, preserving AH/NaN semantics and a single final rounding.
+    if word & 0xff000000 == 0x1f000000 {
+        let width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let ra = (word >> 10) & 31;
+        let control = fp_control(&mut r);
+        let status = fp_status(&mut r);
+        let addend = fp_input(&mut r, ra, width);
+        let a = fp_input(&mut r, rn, width);
+        let b = fp_input(&mut r, rm, width);
+        let negate_addend = word & (1 << 21) != 0;
+        let operation = FloatOperation::FusedMultiplyAdd {
+            negate_product: negate_addend ^ (word & (1 << 15) != 0),
+            negate_addend,
+        };
+        let (value, status, trapped) = fp_step(
+            &mut r,
+            operation,
+            width,
+            vec![addend, a, b],
+            control.clone(),
+            status,
+        );
+        fp_finish(&mut r, status, trapped);
+        fp_scalar_write(&mut r, rd, width, value, Some((control, ra)));
+        return r;
+    }
+    let fp_compare = word & 0xff20fc07 == 0x1e202000;
+    let fp_cond_compare = word & 0xff200c00 == 0x1e200400;
+    if fp_compare || fp_cond_compare {
+        let width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let control = fp_control(&mut r);
+        let incoming = fp_status(&mut r);
+        let active = r.bind(if fp_cond_compare {
+            condition((word >> 12) & 15)
+        } else {
+            c(1, 1)
+        });
+        let a = fp_input(&mut r, rn, width);
+        let b = if fp_compare && word & 8 != 0 {
+            c(width, 0)
+        } else {
+            fp_input(&mut r, rm, width)
+        };
+        let operation = FloatOperation::Compare {
+            source_width: width,
+            signal_all_nans: word & 16 != 0,
+        };
+        let (flags, status, trapped) =
+            fp_step(&mut r, operation, 4, vec![a, b], control, incoming.clone());
+        let status = r.bind(Expr::select(active.clone(), status, incoming));
+        let trapped = r.bind(bin(B::And, active.clone(), trapped));
+        let flags = r.bind(Expr::select(active, flags, c(4, (word & 15) as u64)));
+        fp_finish(&mut r, status, trapped);
+        for index in 0..4 {
+            setflag(
+                &mut r,
+                index,
+                Expr::extract(flags.clone(), 3 - index as u8, 1),
+            );
+        }
+        return r;
+    }
+    if word & 0xff3e7c00 == 0x1e224000 {
+        let source_width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let width = match fp_width(((word >> 15) & 3) << 22) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        if width == source_width {
+            return unsupported();
+        }
+        let control = fp_control(&mut r);
+        let status = fp_status(&mut r);
+        let a = fp_input(&mut r, rn, source_width);
+        let (value, status, trapped) = fp_step(
+            &mut r,
+            FloatOperation::Convert {
+                source_width,
+                round_to_odd: false,
+            },
+            width,
+            vec![a],
+            control.clone(),
+            status,
+        );
+        fp_finish(&mut r, status, trapped);
+        fp_scalar_write(&mut r, rd, width, value, Some((control, rd)));
+        return r;
+    }
+    let conversion = word & 0x7f3ffc00;
+    let fixed_conversion = word & 0x7f3f0000;
+    let from_integer = matches!(conversion, 0x1e220000 | 0x1e230000);
+    // FPRCVT keeps both operands in scalar SIMD&FP registers; these
+    // encodings deliberately exclude equal source/destination widths.
+    let simd_from_integer = matches!(conversion, 0x1e3c0000 | 0x1e3d0000);
+    let simd_to_integer = matches!(conversion,
+        0x1e2a0000 | 0x1e2b0000 | 0x1e320000 | 0x1e330000 |
+        0x1e340000 | 0x1e350000 | 0x1e360000 | 0x1e370000 |
+        0x1e3a0000 | 0x1e3b0000);
+    let to_integer = [
+        0x1e200000, 0x1e210000, 0x1e240000, 0x1e250000, 0x1e280000, 0x1e290000, 0x1e300000,
+        0x1e310000, 0x1e380000, 0x1e390000,
+    ]
+    .contains(&conversion);
+    let fixed = [0x1e020000, 0x1e030000, 0x1e180000, 0x1e190000].contains(&fixed_conversion);
+    if from_integer || to_integer || simd_from_integer || simd_to_integer || fixed {
+        let float_width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let integer_width = if word >> 31 != 0 { 64 } else { 32 };
+        if (simd_from_integer || simd_to_integer) && integer_width == float_width {
+            return unsupported();
+        }
+        let scale = ((word >> 10) & 63) as u8;
+        if fixed && integer_width == 32 && scale < 32 {
+            return unsupported();
+        }
+        let fractional_bits = if fixed { 64 - scale } else { 0 };
+        let signed = word & (1 << 16) == 0;
+        let from = from_integer || simd_from_integer || (fixed && fixed_conversion & 0x00180000 == 0);
+        let control = fp_control(&mut r);
+        let status = fp_status(&mut r);
+        let (operation, width, input) = if from {
+            (
+                FloatOperation::FromInteger {
+                    source_width: integer_width,
+                    signed,
+                    fractional_bits,
+                },
+                float_width,
+                if simd_from_integer { fp_input(&mut r, rn, integer_width) }
+                else { r.bind(read(rn, integer_width, false)) },
+            )
+        } else {
+            let rounding = if simd_to_integer {
+                match conversion & !0x10000 {
+                    0x1e2a0000 => FloatRounding::NearestEven,
+                    0x1e320000 => FloatRounding::PositiveInfinity,
+                    0x1e340000 => FloatRounding::NegativeInfinity,
+                    0x1e360000 => FloatRounding::Zero,
+                    0x1e3a0000 => FloatRounding::NearestAway,
+                    _ => return unsupported(),
+                }
+            } else if fixed {
+                FloatRounding::Zero
+            } else if conversion & (1 << 18) != 0 {
+                FloatRounding::NearestAway
+            } else {
+                match (word >> 19) & 3 {
+                    0 => FloatRounding::NearestEven,
+                    1 => FloatRounding::PositiveInfinity,
+                    2 => FloatRounding::NegativeInfinity,
+                    _ => FloatRounding::Zero,
+                }
+            };
+            (
+                FloatOperation::ToInteger {
+                    source_width: float_width,
+                    signed,
+                    fractional_bits,
+                    rounding,
+                },
+                integer_width,
+                fp_input(&mut r, rn, float_width),
+            )
+        };
+        let (value, status, trapped) = fp_step(
+            &mut r,
+            operation,
+            width,
+            vec![input],
+            control.clone(),
+            status,
+        );
+        fp_finish(&mut r, status, trapped);
+        if from || simd_to_integer {
+            fp_scalar_write(&mut r, rd, width, value, Some((control, rd)));
+        } else {
+            write(&mut r, rd, width, false, value);
+        }
+        return r;
+    }
+    let fp_round = word & 0xff3ffc00;
+    if [
+        0x1e244000, 0x1e24c000, 0x1e254000, 0x1e25c000, 0x1e264000, 0x1e274000, 0x1e27c000,
+    ]
+    .contains(&fp_round)
+    {
+        let width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let rounding = match fp_round {
+            0x1e244000 => FloatRounding::NearestEven,
+            0x1e24c000 => FloatRounding::PositiveInfinity,
+            0x1e254000 => FloatRounding::NegativeInfinity,
+            0x1e25c000 => FloatRounding::Zero,
+            0x1e264000 => FloatRounding::NearestAway,
+            _ => FloatRounding::Environment,
+        };
+        let control = fp_control(&mut r);
+        let status = fp_status(&mut r);
+        let input = fp_input(&mut r, rn, width);
+        let (value, status, trapped) = fp_step(
+            &mut r,
+            FloatOperation::RoundToIntegral {
+                rounding,
+                exact: fp_round == 0x1e274000,
+            },
+            width,
+            vec![input],
+            control.clone(),
+            status,
+        );
+        fp_finish(&mut r, status, trapped);
+        fp_scalar_write(&mut r, rd, width, value, Some((control, rd)));
+        return r;
+    }
+    let scalar_fp = word & 0xff20fc00;
+    let scalar_sqrt = word & 0xff3ffc00 == 0x1e21c000;
+    if [
+        0x1e202800, 0x1e203800, 0x1e200800, 0x1e201800, 0x1e204800, 0x1e205800, 0x1e206800,
+        0x1e207800, 0x1e208800,
+    ]
+    .contains(&scalar_fp)
+        || scalar_sqrt
+    {
+        let width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let control = fp_control(&mut r);
+        let status = fp_status(&mut r);
+        let a = fp_input(&mut r, rn, width);
+        let operation = if scalar_sqrt {
+            FloatOperation::SquareRoot
+        } else {
+            match scalar_fp {
+                0x1e202800 => FloatOperation::Add,
+                0x1e203800 => FloatOperation::Subtract,
+                0x1e200800 | 0x1e208800 => FloatOperation::Multiply,
+                0x1e201800 => FloatOperation::Divide,
+                _ => FloatOperation::MinMax {
+                    minimum: scalar_fp & 0x1000 != 0,
+                    numeric: scalar_fp & 0x2000 != 0,
+                },
+            }
+        };
+        let inputs = if scalar_sqrt {
+            vec![a]
+        } else {
+            let b = fp_input(&mut r, rm, width);
+            vec![a, b]
+        };
+        let (value, status, trapped) =
+            fp_step(&mut r, operation, width, inputs, control.clone(), status);
+        // FNMUL rounds the product first, then applies FPNeg. With AFP.AH
+        // enabled a NaN retains its sign; finite values and infinities flip.
+        let value = if scalar_fp == 0x1e208800 {
+            let fraction_bits = match width { 16 => 10, 32 => 23, _ => 52 };
+            let exponent_mask = mask(width - fraction_bits - 1) << fraction_bits;
+            let nan = bin(B::And,
+                bin(B::Eq, bin(B::And, value.clone(), c(width, exponent_mask)), c(width, exponent_mask)),
+                Expr::unary(UnaryOp::Not, bin(B::Eq, bin(B::And, value.clone(), c(width, mask(fraction_bits))), c(width, 0))));
+            let keep_sign = bin(B::And, Expr::extract(control.clone(), 1, 1), nan);
+            r.bind(Expr::select(keep_sign, value.clone(), bin(B::Xor, value, c(width, 1u64 << (width - 1)))))
+        } else { value };
+        fp_finish(&mut r, status, trapped);
+        fp_scalar_write(
+            &mut r,
+            rd,
+            width,
+            value,
+            Some((control, if scalar_sqrt { rd } else { rn })),
+        );
+        return r;
+    }
+    // The exact half and single/double vector opcodes do not admit indexed,
+    // reduction, reciprocal or scalar Advanced SIMD forms.
+    let half_fp = word & 0xbfe0fc00;
+    let wide_fp = word & 0xbfa0fc00;
+    let half_sqrt = word & 0xbffffc00 == 0x2ef9f800;
+    let wide_sqrt = word & 0xbfbffc00 == 0x2ea1f800;
+    if [
+        0x0e401400, 0x0ec01400, 0x2e401c00, 0x2e403c00, 0x0e403400, 0x0ec03400, 0x0e400400,
+        0x0ec00400, 0x0e400c00, 0x0ec00c00,
+    ]
+    .contains(&half_fp)
+        || [
+            0x0e20d400, 0x0ea0d400, 0x2e20dc00, 0x2e20fc00, 0x0e20f400, 0x0ea0f400, 0x0e20c400,
+            0x0ea0c400, 0x0e20cc00, 0x0ea0cc00,
+        ]
+        .contains(&wide_fp)
+        || half_sqrt
+        || wide_sqrt
+    {
+        let half = half_sqrt
+            || [
+                0x0e401400, 0x0ec01400, 0x2e401c00, 0x2e403c00, 0x0e403400, 0x0ec03400, 0x0e400400,
+                0x0ec00400, 0x0e400c00, 0x0ec00c00,
+            ]
+            .contains(&half_fp);
+        let width = if half { 16 } else { 32 << ((word >> 22) & 1) };
+        let chunks = if word & (1 << 30) != 0 { 2 } else { 1 };
+        if width == 64 && chunks == 1 {
+            return unsupported();
+        }
+        let sqrt = half_sqrt || wide_sqrt;
+        let fused = if half {
+            matches!(half_fp, 0x0e400c00 | 0x0ec00c00)
+        } else {
+            matches!(wide_fp, 0x0e20cc00 | 0x0ea0cc00)
+        };
+        let minmax = if half {
+            matches!(half_fp, 0x0e403400 | 0x0ec03400 | 0x0e400400 | 0x0ec00400)
+        } else {
+            matches!(wide_fp, 0x0e20f400 | 0x0ea0f400 | 0x0e20c400 | 0x0ea0c400)
+        };
+        let operation = if fused {
+            FloatOperation::FusedMultiplyAdd {
+                negate_product: word & (1 << 23) != 0,
+                negate_addend: false,
+            }
+        } else if minmax {
+            FloatOperation::MinMax {
+                minimum: word & (1 << 23) != 0,
+                numeric: word & (1 << 12) == 0,
+            }
+        } else if sqrt {
+            FloatOperation::SquareRoot
+        } else if matches!(half_fp, 0x0e401400) || wide_fp == 0x0e20d400 {
+            FloatOperation::Add
+        } else if matches!(half_fp, 0x0ec01400) || wide_fp == 0x0ea0d400 {
+            FloatOperation::Subtract
+        } else if matches!(half_fp, 0x2e401c00) || wide_fp == 0x2e20dc00 {
+            FloatOperation::Multiply
+        } else {
+            FloatOperation::Divide
+        };
+        let control = fp_control(&mut r);
+        let mut status = fp_status(&mut r);
+        let mut trapped = c(1, 0);
+        let mut results = vec![];
+        for chunk in 0..chunks {
+            let a = r.bind(vector_chunk(rn, chunk));
+            let b = if sqrt {
+                None
+            } else {
+                Some(r.bind(vector_chunk(rm, chunk)))
+            };
+            let addend = if fused {
+                Some(r.bind(vector_chunk(rd, chunk)))
+            } else {
+                None
+            };
+            let mut result = c(64, 0);
+            for lane in 0..64 / width {
+                let a = r.bind(Expr::extract(a.clone(), lane * width, width));
+                let inputs = if let Some(b) = &b {
+                    let b = r.bind(Expr::extract(b.clone(), lane * width, width));
+                    if let Some(addend) = &addend {
+                        let addend = r.bind(Expr::extract(addend.clone(), lane * width, width));
+                        vec![addend, a, b]
+                    } else {
+                        vec![a, b]
+                    }
+                } else {
+                    vec![a]
+                };
+                let (value, next, exception) = fp_step(
+                    &mut r,
+                    operation,
+                    width,
+                    inputs,
+                    control.clone(),
+                    status.clone(),
+                );
+                // Stop accumulating architectural status after the first trap.
+                status = r.bind(Expr::select(trapped.clone(), status, next));
+                trapped = r.bind(bin(B::Or, trapped, exception));
+                result = bin(
+                    B::Or,
+                    result,
+                    shifted(Expr::cast(value, 64, false), 0, (lane * width) as u32),
+                );
+            }
+            results.push(r.bind(result));
+        }
+        fp_finish(&mut r, status, trapped);
+        for chunk in 0..2 {
+            write_vector_chunk(
+                &mut r,
+                rd,
+                chunk,
+                results
+                    .get(chunk as usize)
+                    .cloned()
+                    .unwrap_or_else(|| c(64, 0)),
+            );
+        }
+        return r;
+    }
+    let fp_unary = word & 0xff3ffc00;
+    if fp_unary == 0x1e204000 {
+        let width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let source = fp_input(&mut r, rn, width);
+        fp_scalar_write(&mut r, rd, width, source, None);
+        return r;
+    }
+    if word & 0xff201fe0 == 0x1e201000 {
+        let width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        fp_scalar_write(
+            &mut r,
+            rd,
+            width,
+            c(width, fp_immediate(width, (word >> 13) & 255)),
+            None,
+        );
+        return r;
+    }
+    if word & 0xff200c00 == 0x1e200c00 {
+        let width = match fp_width(word) {
+            Some(width) => width,
+            None => return unsupported(),
+        };
+        let a = fp_input(&mut r, rn, width);
+        let b = fp_input(&mut r, rm, width);
+        let value = r.bind(Expr::select(condition((word >> 12) & 15), a, b));
+        fp_scalar_write(&mut r, rd, width, value, None);
+        return r;
+    }
+    let fp_transport = word & 0xfffffc00;
+    if [
+        0x1e260000, 0x1e270000, 0x9e660000, 0x9e670000, 0x1ee60000, 0x1ee70000, 0x9ee60000,
+        0x9ee70000, 0x9eae0000, 0x9eaf0000,
+    ]
+    .contains(&fp_transport)
+    {
+        let part = if word & (1 << 19) != 0 { 1 } else { 0 };
+        let width = if part == 1 {
+            64
+        } else {
+            fp_width(word).unwrap()
+        };
+        let integer_width = if word >> 31 != 0 { 64 } else { 32 };
+        if word & (1 << 16) == 0 {
+            let value = r.bind(Expr::cast(
+                Expr::extract(vector_chunk(rn, part), 0, width),
+                integer_width,
+                false,
+            ));
+            write(&mut r, rd, integer_width, false, value);
+        } else {
+            let value = r.bind(Expr::cast(read(rn, integer_width, false), width, false));
+            if part == 1 {
+                write_vector_chunk(&mut r, rd, 1, value);
+            } else {
+                fp_scalar_write(&mut r, rd, width, value, None);
+            }
+        }
+        return r;
+    }
+    if word & 0x1f800000 == 0x11000000 {
+        let sub = word & (1 << 30) != 0;
+        let flags = word & (1 << 29) != 0;
+        let b = c(
+            w,
+            (((word >> 10) & 4095) as u64) << if word & (1 << 22) != 0 { 12 } else { 0 },
+        );
+        let v = arithmetic(&mut r, read(rn, w, true), b, sub, None, flags);
+        write(&mut r, rd, w, !flags, v);
+        return r;
+    }
+    if word & 0x1f200000 == 0x0b000000 {
+        let kind = (word >> 22) & 3;
+        let amount = (word >> 10) & 63;
+        if kind == 3 || amount >= w as u32 {
+            return unsupported();
+        }
+        let flags = word & (1 << 29) != 0;
+        let v = arithmetic(
+            &mut r,
+            read(rn, w, false),
+            shifted(read(rm, w, false), kind, amount),
+            word & (1 << 30) != 0,
+            None,
+            flags,
+        );
+        write(&mut r, rd, w, false, v);
+        return r;
+    }
+    if word & 0x1fe00000 == 0x0b200000 {
+        let option = (word >> 13) & 7;
+        let shift = (word >> 10) & 7;
+        if shift > 4 {
+            return unsupported();
+        }
+        let bits = [8, 16, 32, 64][(option & 3) as usize];
+        if bits == 64 && w == 32 {
+            return unsupported();
+        }
+        let v = read(rm, bits, false);
+        let b = shifted(Expr::cast(v, w, option & 4 != 0), 0, shift);
+        let flags = word & (1 << 29) != 0;
+        let v = arithmetic(
+            &mut r,
+            read(rn, w, true),
+            b,
+            word & (1 << 30) != 0,
+            None,
+            flags,
+        );
+        write(&mut r, rd, w, !flags, v);
+        return r;
+    }
+    if word & 0x1fe0fc00 == 0x1a000000 {
+        let sub = word & (1 << 30) != 0;
+        let v = arithmetic(
+            &mut r,
+            read(rn, w, false),
+            read(rm, w, false),
+            sub,
+            Some(if sub { inv(flag(2)) } else { flag(2) }),
+            word & (1 << 29) != 0,
+        );
+        write(&mut r, rd, w, false, v);
+        return r;
+    }
+    if word & 0x1f000000 == 0x0a000000 || word & 0x1f800000 == 0x12000000 {
+        let opc = (word >> 29) & 3;
+        let b = if word & 0x1f000000 == 0x0a000000 {
+            let n = (word >> 10) & 63;
+            if n >= w as u32 {
+                return unsupported();
+            }
+            let b = shifted(read(rm, w, false), (word >> 22) & 3, n);
+            if word & (1 << 21) != 0 {
+                inv(b)
+            } else {
+                b
+            }
+        } else {
+            if w == 32 && word & (1 << 22) != 0 {
+                return unsupported();
+            }
+            match bitmask(w, (word >> 22) & 1, (word >> 10) & 63, (word >> 16) & 63) {
+                Some(v) => c(w, v),
+                None => return unsupported(),
+            }
+        };
+        let v = r.bind(bin(
+            match opc {
+                0 | 3 => B::And,
+                1 => B::Or,
+                _ => B::Xor,
+            },
+            read(rn, w, false),
+            b,
+        ));
+        if opc == 3 {
+            nz(&mut r, v.clone());
+            setflag(&mut r, 2, c(1, 0));
+            setflag(&mut r, 3, c(1, 0))
+        }
+        let sp = word & 0x1f800000 == 0x12000000 && opc != 3;
+        write(&mut r, rd, w, sp, v);
+        return r;
+    }
+    if word & 0x1f800000 == 0x12800000 {
+        let opc = (word >> 29) & 3;
+        let shift = ((word >> 21) & 3) * 16;
+        if opc == 1 || shift >= w as u32 {
+            return unsupported();
+        }
+        let imm = (((word >> 5) & 65535) as u64) << shift;
+        let v = match opc {
+            0 => c(w, !imm),
+            2 => c(w, imm),
+            _ => bin(
+                B::Or,
+                bin(B::And, read(rd, w, false), c(w, !(65535u64 << shift))),
+                c(w, imm),
+            ),
+        };
+        let v = r.bind(v);
+        write(&mut r, rd, w, false, v);
+        return r;
+    }
+    if word & 0x1f800000 == 0x13000000 {
+        let opc = (word >> 29) & 3;
+        let immr = (word >> 16) & 63;
+        let imms = (word >> 10) & 63;
+        if ((word >> 22) & 1) != (w == 64) as u32 || immr >= w as u32 || imms >= w as u32 {
+            return unsupported();
+        }
+        if opc == 3 {
+            return unsupported();
+        }
+        let source = read(rn, w, false);
+        let (bits, offset, source_offset) = if immr <= imms {
+            ((imms - immr + 1) as u8, 0, immr as u8)
+        } else {
+            ((imms + 1) as u8, (w as u32 - immr) as u8, 0)
+        };
+        let field = Expr::extract(source, source_offset, bits);
+        let field = shifted(Expr::cast(field, w, opc == 0), 0, offset as u32);
+        let value = if opc == 1 {
+            let written = mask(bits) << offset;
+            bin(
+                B::Or,
+                bin(B::And, read(rd, w, false), c(w, !written)),
+                field,
+            )
+        } else {
+            field
+        };
+        let value = r.bind(value);
+        write(&mut r, rd, w, false, value);
+        return r;
+    }
+    if word & 0x7fa00000 == 0x13800000 {
+        let amount = (word >> 10) & 63;
+        if ((word >> 22) & 1) != (w == 64) as u32 || amount >= w as u32 {
+            return unsupported();
+        }
+        let value = if amount == 0 {
+            read(rm, w, false)
+        } else {
+            bin(
+                B::Or,
+                shifted(read(rm, w, false), 1, amount),
+                shifted(read(rn, w, false), 0, w as u32 - amount),
+            )
+        };
+        let value = r.bind(value);
+        write(&mut r, rd, w, false, value);
+        return r;
+    }
+    // Exact ordinary one-source encodings; CRC, pointer authentication and
+    // later one-source extensions do not share these qualified opcode values.
+    let unary = word & 0x7ffffc00;
+    if [
+        0x5ac00000, 0x5ac00400, 0x5ac00800, 0x5ac00c00, 0x5ac01000, 0x5ac01400,
+    ]
+    .contains(&unary)
+    {
+        if unary == 0x5ac00c00 && w != 64 {
+            return unsupported();
+        }
+        let source = read(rn, w, false);
+        let value = match unary {
+            0x5ac00000 => Expr::unary(U::ReverseBits, source),
+            0x5ac00400 => reverse_bytes(&mut r, source, 2),
+            0x5ac00800 => reverse_bytes(&mut r, source, 4),
+            0x5ac00c00 => reverse_bytes(&mut r, source, 8),
+            0x5ac01000 => Expr::unary(U::CountLeadingZeros, source),
+            _ => {
+                let sign = shifted(source.clone(), 2, w as u32 - 1);
+                let count = Expr::unary(U::CountLeadingZeros, bin(B::Xor, source, sign));
+                bin(B::Sub, count, c(w, 1))
+            }
+        };
+        let value = r.bind(value);
+        write(&mut r, rd, w, false, value);
+        return r;
+    }
+    if word & 0x7fe00000 == 0x1b000000 {
+        let product = bin(B::Mul, read(rn, w, false), read(rm, w, false));
+        let value = r.bind(bin(
+            if word & (1 << 15) == 0 {
+                B::Add
+            } else {
+                B::Sub
+            },
+            read((word >> 10) & 31, w, false),
+            product,
+        ));
+        write(&mut r, rd, w, false, value);
+        return r;
+    }
+    if matches!(word & 0xffe00000, 0x9b200000 | 0x9ba00000) {
+        let signed = word & (1 << 23) == 0;
+        let product = bin(
+            B::Mul,
+            Expr::cast(read(rn, 32, false), 64, signed),
+            Expr::cast(read(rm, 32, false), 64, signed),
+        );
+        let value = r.bind(bin(
+            if word & (1 << 15) == 0 {
+                B::Add
+            } else {
+                B::Sub
+            },
+            read((word >> 10) & 31, 64, false),
+            product,
+        ));
+        write(&mut r, rd, 64, false, value);
+        return r;
+    }
+    if matches!(word & 0xffe0fc00, 0x9b407c00 | 0x9bc07c00) {
+        let value = r.bind(bin(
+            if word & (1 << 23) == 0 {
+                B::SignedMultiplyHigh
+            } else {
+                B::UnsignedMultiplyHigh
+            },
+            read(rn, 64, false),
+            read(rm, 64, false),
+        ));
+        write(&mut r, rd, 64, false, value);
+        return r;
+    }
+    if matches!(word & 0x7fe0fc00, 0x1ac00800 | 0x1ac00c00) {
+        let value = r.bind(bin(
+            if word & (1 << 10) != 0 {
+                B::Sdiv
+            } else {
+                B::Udiv
+            },
+            read(rn, w, false),
+            read(rm, w, false),
+        ));
+        write(&mut r, rd, w, false, value);
+        return r;
+    }
+    // Conditional compare evaluates its condition from the incoming NZCV,
+    // then selects either arithmetic flags or the encoded fallback literal.
+    if word & 0x3fe00410 == 0x3a400000 {
+        let active = r.bind(condition((word >> 12) & 15));
+        let a = r.bind(read(rn, w, false));
+        let b = r.bind(if word & (1 << 11) == 0 {
+            read(rm, w, false)
+        } else {
+            c(w, rm as u64)
+        });
+        let sub = word & (1 << 30) != 0;
+        let value = arithmetic(&mut r, a.clone(), b.clone(), sub, None, false);
+        let flags = [
+            Expr::extract(value.clone(), w - 1, 1),
+            bin(B::Eq, value.clone(), c(w, 0)),
+            if sub {
+                inv(Expr::sub_borrow(a.clone(), b.clone(), c(1, 0)))
+            } else {
+                Expr::add_carry(a.clone(), b.clone(), c(1, 0))
+            },
+            Expr::overflow(sub, a, b, value),
+        ];
+        for (i, value) in flags.into_iter().enumerate() {
+            setflag(
+                &mut r,
+                i as u16,
+                Expr::select(active.clone(), value, c(1, ((word >> (3 - i)) & 1) as u64)),
+            );
+        }
+        return r;
+    }
+    if word & 0x7fe0f000 == 0x1ac02000 {
+        let kind = (word >> 10) & 3;
+        let count = bin(B::And, read(rm, w, false), c(w, w as u64 - 1));
+        let v = r.bind(bin(
+            [B::Shl, B::Lsr, B::Asr, B::Ror][kind as usize],
+            read(rn, w, false),
+            count,
+        ));
+        write(&mut r, rd, w, false, v);
+        return r;
+    }
+    if word & 0x3fe00800 == 0x1a800000 {
+        let b = read(rm, w, false);
+        let b = match ((word >> 30) & 1, (word >> 10) & 1) {
+            (0, 0) => b,
+            (0, 1) => bin(B::Add, b, c(w, 1)),
+            (1, 0) => inv(b),
+            _ => Expr::unary(U::Neg, b),
+        };
+        let v = r.bind(Expr::select(
+            condition((word >> 12) & 15),
+            read(rn, w, false),
+            b,
+        ));
+        write(&mut r, rd, w, false, v);
+        return r;
+    }
+    if word & 0x1f000000 == 0x10000000 {
+        let off = sign(
+            (((word >> 5) & 0x7ffff) << 2 | ((word >> 29) & 3)) as u64,
+            21,
+        );
+        let page = word >> 31 != 0;
+        let v = c(
+            64,
+            if page {
+                (address & !4095).wrapping_add(off << 12)
+            } else {
+                address.wrapping_add(off)
+            },
+        );
+        write(&mut r, rd, 64, false, v);
+        return r;
+    }
+    if word & 0x3e000000 == 0x28000000 {
+        let opc = word >> 30;
+        let load = word & (1 << 22) != 0;
+        let mode = (word >> 23) & 3;
+        let wb = mode == 1 || mode == 3;
+        let rt2 = (word >> 10) & 31;
+        if opc == 3
+            || (opc == 1 && (!load || mode == 0))
+            || (load && rd == rt2)
+            || (wb && rn != 31 && (rn == rd || rn == rt2))
+        {
+            return unsupported();
+        }
+        let size = if opc == 2 { 3 } else { 2 };
+        let bits = if opc == 2 { 64 } else { 32 };
+        let base = r.bind(read(rn, 64, true));
+        let next = r.bind(bin(
+            B::Add,
+            base.clone(),
+            c(64, sign(((word >> 15) & 127) as u64, 7) << size),
+        ));
+        let first = r.bind(if mode == 1 { base } else { next.clone() });
+        let second = bin(B::Add, first.clone(), c(64, (bits / 8) as u64));
+        let access = if !load {
+            0
+        } else if opc == 1 {
+            2
+        } else {
+            1
+        };
+        if !memory(&mut r, endian, word, bits, size, access, first, rn, None)
+            || !memory(
+                &mut r,
+                endian,
+                (word & !31) | rt2,
+                bits,
+                size,
+                access,
+                second,
+                rn,
+                None,
+            )
+        {
+            return unsupported();
+        }
+        if wb {
+            write(&mut r, rn, 64, true, next);
+        }
+        return r;
+    }
+    if word & 0x3b000000 == 0x39000000 && word & (1 << 26) == 0 {
+        let size = (word >> 30) as u8;
+        let opc = (word >> 22) & 3;
+        let a = bin(
+            B::Add,
+            read(rn, 64, true),
+            c(64, (((word >> 10) & 4095) as u64) << size),
+        );
+        if memory(
+            &mut r,
+            endian,
+            word,
+            if size == 3 { 64 } else { 32 },
+            size,
+            opc,
+            a,
+            rn,
+            None,
+        ) {
+            return r;
+        }
+        return unsupported();
+    }
+    if word & 0x3b200000 == 0x38000000 && word & (1 << 26) == 0 {
+        let mode = (word >> 10) & 3;
+        let size = (word >> 30) as u8;
+        let base = read(rn, 64, true);
+        let next = bin(
+            B::Add,
+            base.clone(),
+            c(64, sign(((word >> 12) & 511) as u64, 9)),
+        );
+        let a = if mode == 1 { base } else { next.clone() };
+        if memory(
+            &mut r,
+            endian,
+            word,
+            if size == 3 { 64 } else { 32 },
+            size,
+            (word >> 22) & 3,
+            a,
+            rn,
+            if mode == 1 || mode == 3 {
+                Some(next)
+            } else {
+                None
+            },
+        ) {
+            return r;
+        }
+        return unsupported();
+    }
+    if word & 0x3b200c00 == 0x38200800 && word & (1 << 26) == 0 {
+        let size = (word >> 30) as u8;
+        let option = (word >> 13) & 7;
+        if ![2, 3, 6, 7].contains(&option) {
+            return unsupported();
+        }
+        let off = Expr::cast(
+            read(rm, if option & 1 == 0 { 32 } else { 64 }, false),
+            64,
+            option & 4 != 0,
+        );
+        let off = shifted(
+            off,
+            0,
+            if word & (1 << 12) != 0 {
+                size as u32
+            } else {
+                0
+            },
+        );
+        let a = bin(B::Add, read(rn, 64, true), off);
+        if memory(
+            &mut r,
+            endian,
+            word,
+            if size == 3 { 64 } else { 32 },
+            size,
+            (word >> 22) & 3,
+            a,
+            rn,
+            None,
+        ) {
+            return r;
+        }
+        return unsupported();
+    }
+    if word & 0x3b000000 == 0x18000000 && word & (1 << 26) == 0 {
+        let opc = word >> 30;
+        if opc == 3 {
+            return unsupported();
+        }
+        let bits = if opc == 1 { 64 } else { 32 };
+        let value = r.bind(Expr::load(Memory {kind: Default::default(), privilege: Default::default(),
+            address: Box::new(c(
+                64,
+                address.wrapping_add(sign((((word >> 5) & 0x7ffff) << 2) as u64, 21)),
+            )),
+            width: bits,
+            endian,
+        }));
+        write(
+            &mut r,
+            rd,
+            if opc == 0 { 32 } else { 64 },
+            false,
+            Expr::cast(value, if opc == 0 { 32 } else { 64 }, opc == 2),
+        );
+        return r;
+    }
+    let vector_logic = word & 0xbfe0fc00;
+    if [
+        0x0e201c00, 0x0e601c00, 0x0ea01c00, 0x0ee01c00, 0x2e201c00, 0x2e601c00, 0x2ea01c00,
+        0x2ee01c00,
+    ]
+    .contains(&vector_logic)
+    {
+        let chunks = if word & (1 << 30) != 0 { 2 } else { 1 };
+        for chunk in 0..2 {
+            let value = if chunk >= chunks {
+                c(64, 0)
+            } else {
+                let a = vector_chunk(rn, chunk);
+                let b = vector_chunk(rm, chunk);
+                match vector_logic {
+                    0x0e201c00 => bin(B::And, a, b),
+                    0x0e601c00 => bin(B::And, a, inv(b)),
+                    0x0ea01c00 => bin(B::Or, a, b),
+                    0x0ee01c00 => bin(B::Or, a, inv(b)),
+                    0x2e201c00 => bin(B::Xor, a, b),
+                    0x2e601c00 => {
+                        let d = vector_chunk(rd, chunk);
+                        bin(B::Or, bin(B::And, d.clone(), a), bin(B::And, inv(d), b))
+                    }
+                    0x2ea01c00 => bin(
+                        B::Or,
+                        bin(B::And, vector_chunk(rd, chunk), inv(b.clone())),
+                        bin(B::And, a, b),
+                    ),
+                    _ => bin(
+                        B::Or,
+                        bin(B::And, vector_chunk(rd, chunk), b.clone()),
+                        bin(B::And, a, inv(b)),
+                    ),
+                }
+            };
+            write_vector_chunk(&mut r, rd, chunk, value);
+        }
+        return r;
+    }
+    if word & 0xbffffc00 == 0x2e205800 {
+        for chunk in 0..2 {
+            let value = if chunk == 0 || word & (1 << 30) != 0 {
+                inv(vector_chunk(rn, chunk))
+            } else {
+                c(64, 0)
+            };
+            write_vector_chunk(&mut r, rd, chunk, value);
+        }
+        return r;
+    }
+    let scalar_neg = word & 0xfffffc00 == 0x7ee0b800;
+    if word & 0xbf3ffc00 == 0x2e20b800 || scalar_neg {
+        let bits = 8u8 << ((word >> 22) & 3);
+        if bits == 64 && word & (1 << 30) == 0 {
+            return unsupported();
+        }
+        for chunk in 0..2 {
+            let mut value = c(64, 0);
+            if chunk == 0 || (!scalar_neg && word & (1 << 30) != 0) {
+                for lane in 0..64 / bits {
+                    let part = Expr::extract(vector_chunk(rn, chunk), lane * bits, bits);
+                    let part = Expr::cast(Expr::unary(U::Neg, part), 64, false);
+                    value = bin(B::Or, value, shifted(part, 0, (lane * bits) as u32));
+                }
+            }
+            write_vector_chunk(&mut r, rd, chunk, value);
+        }
+        return r;
+    }
+    let vector_compare = word & 0xbf20fc00;
+    if [0x2e208c00, 0x0e203400, 0x0e203c00, 0x2e203400, 0x2e203c00].contains(&vector_compare) {
+        let bits = 8u8 << ((word >> 22) & 3);
+        if bits == 64 && word & (1 << 30) == 0 {
+            return unsupported();
+        }
+        for chunk in 0..2 {
+            let mut value = c(64, 0);
+            if chunk == 0 || word & (1 << 30) != 0 {
+                for lane in 0..64 / bits {
+                    let a = Expr::extract(vector_chunk(rn, chunk), lane * bits, bits);
+                    let b = Expr::extract(vector_chunk(rm, chunk), lane * bits, bits);
+                    let yes = match vector_compare {
+                        0x2e208c00 => bin(B::Eq, a, b),
+                        0x0e203400 => bin(B::Slt, b, a),
+                        0x0e203c00 => inv(bin(B::Slt, a, b)),
+                        0x2e203400 => bin(B::Ult, b, a),
+                        _ => inv(bin(B::Ult, a, b)),
+                    };
+                    let part = Expr::select(yes, c(bits, mask(bits)), c(bits, 0));
+                    value = bin(
+                        B::Or,
+                        value,
+                        shifted(Expr::cast(part, 64, false), 0, (lane * bits) as u32),
+                    );
+                }
+            }
+            write_vector_chunk(&mut r, rd, chunk, value);
+        }
+        return r;
+    }
+    if word & 0x7c000000 == 0x14000000 {
+        let call = word >> 31 != 0;
+        if call {
+            write(&mut r, 30, 64, false, c(64, address.wrapping_add(4)))
+        }
+        r.branch(
+            if call {
+                FlowKind::Call
+            } else {
+                FlowKind::Branch
+            },
+            c(1, 1),
+            c(
+                64,
+                address.wrapping_add(sign(((word & 0x3ffffff) << 2) as u64, 28)),
+            ),
+        );
+        return r;
+    }
+    // FEAT_CMPBR compares without writing NZCV. Byte/halfword operands are
+    // low GPR slices, and register 31 denotes ZR for every form.
+    let compare_immediate = word & 0x7f004000 == 0x75000000;
+    let compare_small = word & 0xff008000 == 0x74008000;
+    if compare_immediate || compare_small || word & 0x7f00c000 == 0x74000000 {
+        let cc = (word >> 21) & 7;
+        if cc == 4 || cc == 5 { return unsupported(); }
+        let width = if compare_small { 8 << ((word >> 14) & 1) } else { w };
+        let left = read(rd, width, false);
+        let right = if compare_immediate { c(width, u64::from((word >> 15) & 63)) } else { read(rm, width, false) };
+        let less = if cc < 2 { B::Slt } else { B::Ult };
+        let condition = match cc {
+            0 | 2 => bin(less, right, left),
+            1 | 3 if compare_immediate => bin(less, left, right),
+            1 | 3 => inv(bin(less, left, right)),
+            6 => bin(B::Eq, left, right),
+            7 => inv(bin(B::Eq, left, right)),
+            _ => unreachable!(),
+        };
+        r.branch(FlowKind::Branch, condition, c(64, address.wrapping_add(sign(u64::from((word >> 5) & 511) << 2, 11))));
+        return r;
+    }
+    // B.cond and FEAT_HBC BC.cond differ only in the consistency prediction
+    // hint. Architectural feature admission remains with the consumer.
+    if word & 0xff000000 == 0x54000000 {
+        r.branch(
+            FlowKind::Branch,
+            condition(word & 15),
+            c(
+                64,
+                address.wrapping_add(sign((((word >> 5) & 0x7ffff) << 2) as u64, 21)),
+            ),
+        );
+        return r;
+    }
+    if word & 0x7e000000 == 0x34000000 {
+        let zero = bin(B::Eq, read(rd, w, false), c(w, 0));
+        r.branch(
+            FlowKind::Branch,
+            if word & (1 << 24) != 0 {
+                inv(zero)
+            } else {
+                zero
+            },
+            c(
+                64,
+                address.wrapping_add(sign((((word >> 5) & 0x7ffff) << 2) as u64, 21)),
+            ),
+        );
+        return r;
+    }
+    if word & 0x7e000000 == 0x36000000 {
+        let bit = ((word >> 31) << 5) | ((word >> 19) & 31);
+        let zero = bin(
+            B::Eq,
+            Expr::extract(read(rd, 64, false), bit as u8, 1),
+            c(1, 0),
+        );
+        r.branch(
+            FlowKind::Branch,
+            if word & (1 << 24) != 0 {
+                inv(zero)
+            } else {
+                zero
+            },
+            c(
+                64,
+                address.wrapping_add(sign((((word >> 5) & 0x3fff) << 2) as u64, 16)),
+            ),
+        );
+        return r;
+    }
+    let branch = word & 0xfffffc1f;
+    if [0xd61f0000, 0xd63f0000, 0xd65f0000].contains(&branch) {
+        let target = r.bind(read(rn, 64, false));
+        if branch == 0xd63f0000 {
+            write(&mut r, 30, 64, false, c(64, address.wrapping_add(4)))
+        }
+        r.branch(
+            if branch == 0xd63f0000 {
+                FlowKind::Call
+            } else if branch == 0xd65f0000 {
+                FlowKind::Return
+            } else {
+                FlowKind::Branch
+            },
+            c(1, 1),
+            target,
+        );
+        return r;
+    }
+    unsupported()
+}
+impl crate::Decoded {
+    pub fn semantic_recipe(&self, address: u64) -> Recipe {
+        for_word(self.raw, address)
+    }
+    pub fn semantic_recipe_with_endian(&self, address: u64, endian: Endian) -> Recipe {
+        for_word_with_endian(self.raw, address, endian)
+    }
+    pub fn semantic_recipe_with_vector_length(&self, address: u64, vector_length: u16) -> Recipe {
+        for_word_with_vector_length(self.raw, address, vector_length)
+    }
+    /// Include instruction-entry BTI checks and successful BTYPE updates.
+    /// Bind the explicit fetch/control banks documented by arm64_bti.
+    pub fn semantic_recipe_with_branch_target_context(&self, address: u64, context: RecipeContext) -> Recipe {
+        arm64_bti::complete(self.raw, for_word_with_context(self.raw, address, context))
+    }
+    /// Include implicit GCS call records and checked/redirected returns.
+    pub fn semantic_recipe_with_gcs_context(&self, address: u64, context: RecipeContext) -> Recipe {
+        arm64_gcs_stack::complete(self.raw, for_word_with_context(self.raw, address, context), context.endian)
+    }
+    pub fn semantic_recipe_with_context(&self, address: u64, context: RecipeContext) -> Recipe {
+        for_word_with_context(self.raw, address, context)
+    }
+}

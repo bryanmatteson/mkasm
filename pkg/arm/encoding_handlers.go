@@ -66,12 +66,7 @@ func NewInstructionRowHandler() parse.Handler {
 				ctx.IClass = tctx.IClass
 			}
 			if av := parse.GetAttr(hctx.Element, "arch_version"); av != "" {
-				for _, part := range strings.Split(av, "||") {
-					part = strings.TrimSpace(part)
-					if part != "" {
-						ctx.Features = append(ctx.Features, part)
-					}
-				}
+				ctx.Features = append(ctx.Features, av)
 			}
 			return ctx
 		}).
@@ -96,14 +91,15 @@ func processInstructionRowStart(ctx context.Context, irctx *InstructionRowContex
 func processInstructionRowEnd(ctx context.Context, irctx *InstructionRowContext, hctx *parse.HandlerContext) (*ir.InstructionIR, error) {
 	// Create instruction IR
 	instr := &ir.InstructionIR{
-		EncodingID: irctx.EncodingID,
-		Mnemonic:   irctx.Mnemonic,
-		IClass:     irctx.IClass,
-		IFormFile:  irctx.IFormFile,
-		BitPattern: constructBitPattern(irctx.Bitfields),
-		Encoding:   constructEncodingMask(irctx.Bitfields),
+		EncodingID:   irctx.EncodingID,
+		Mnemonic:     irctx.Mnemonic,
+		IClass:       irctx.IClass,
+		IFormFile:    irctx.IFormFile,
+		BitPattern:   constructBitPattern(irctx.Bitfields),
+		Encoding:     constructEncodingMask(irctx.Bitfields),
+		Requirements: rowFeatureRequirements(irctx.Features),
 		Features: ir.FeatureSet{
-			Tags: parseFeatureTags(irctx.Features),
+			Tags: parseFeatureTags(legacyFeatureTags(irctx.Features)),
 		},
 	}
 
@@ -289,4 +285,29 @@ func parseFeatureTags(features []string) []ir.FeatureTag {
 	}
 
 	return tags
+}
+
+// Preserve the legacy tag index as annotations while the structured requirement
+// retains the actual alternatives. Tags must not be used as a conjunction.
+func legacyFeatureTags(expressions []string) []string {
+	var tags []string
+	for _, expression := range expressions {
+		for _, part := range strings.Split(expression, "||") {
+			if part = strings.TrimSpace(part); part != "" {
+				tags = append(tags, part)
+			}
+		}
+	}
+	return tags
+}
+func rowFeatureRequirements(expressions []string) ir.Requirements {
+	if len(expressions) == 0 {
+		return ir.Requirements{}
+	}
+	var args []ir.RequirementExpr
+	for _, expression := range expressions {
+		args = append(args, ir.ParseRequirementExpression(expression, false))
+	}
+	e := ir.RequirementAll(args...)
+	return ir.Requirements{Expression: &e, Source: "Arm encoding index feature expressions"}
 }

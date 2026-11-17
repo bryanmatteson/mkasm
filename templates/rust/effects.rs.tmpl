@@ -1,0 +1,113 @@
+//! Bounded architectural effect rules selected by allocated encoding bits.
+use super::decoders::Decoded;
+{{.Types}}
+fn reg(out:&mut EffectSummary,n:u32,width:u16,read:bool,write:bool,conditional:bool,sp:bool,address:bool) {
+    if n==31&&!sp{return;}
+    out.registers.push(RegisterEffect{register:RegisterSlice{bank:if n==31{"sp"}else{"gpr"},number:Some(n as u16),name:"",offset:0,width:Some(width)},read,write,conditional,implicit:false,address,write_behavior:if write{if width==32{WriteBehavior::ZeroUpper}else{WriteBehavior::Replace}}else{WriteBehavior::Unknown}});
+}
+fn nzcv(out:&mut EffectSummary,write:bool,condition:Option<u32>) {
+    for name in ["N","Z","C","V"] {
+        let read=condition.map(|c|match c>>1 {0=>name=="Z",1=>name=="C",2=>name=="N",3=>name=="V",4=>name=="C"||name=="Z",5=>name=="N"||name=="V",6=>name=="N"||name=="V"||name=="Z",_=>false}).unwrap_or(false);
+        out.flags.push(FlagEffect{name,read,action:if write{FlagAction::Write}else{FlagAction::Preserve},conditional:false});
+    }
+    out.flags_knowledge=EffectKnowledge::Complete;
+}
+impl Decoded { pub fn effects(&self)->EffectSummary { effects(self) } }
+pub fn effects(d:&Decoded)->EffectSummary {
+    let w=d.raw;let mut out=EffectSummary::default();
+    let width=if w>>31!=0{64}else{32};let rd=w&31;let rn=(w>>5)&31;let rm=(w>>16)&31;
+    let compare_immediate=w&0x7f004000==0x75000000;
+    let compare_small=w&0xff008000==0x74008000;
+    if (compare_immediate||compare_small||w&0x7f00c000==0x74000000)&&!matches!((w>>21)&7,4|5) {
+        let bits=if compare_small{8<<((w>>14)&1)}else{width};
+        reg(&mut out,rd,bits,true,false,false,false,false);
+        if !compare_immediate{reg(&mut out,rm,bits,true,false,false,false,false);}
+        nzcv(&mut out,false,None);out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;out.knowledge=EffectKnowledge::Partial;return out;
+    }
+    if w&0xff000000==0x54000000 {
+        nzcv(&mut out,false,Some(w&15));out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;out.knowledge=EffectKnowledge::Partial;return out;
+    }
+    // ADD/SUB immediate and shifted-register forms. Extended-register forms
+    // retain unknown source widths until their extension selector is modeled.
+    if w&0x1f000000==0x11000000||w&0x1f200000==0x0b000000 {
+        let immediate=w&0x1f000000==0x11000000;let flags=w&(1<<29)!=0;
+        reg(&mut out,rn,width,true,false,false,immediate,false);
+        if !immediate{reg(&mut out,rm,width,true,false,false,false,false);}
+        reg(&mut out,rd,width,false,true,false,immediate&&!flags,false);
+        nzcv(&mut out,flags,None);out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+    // Logical shifted register, including inverted inputs (BIC/ORN/EON/BICS).
+    }else if w&0x1f000000==0x0a000000 {
+        reg(&mut out,rn,width,true,false,false,false,false);reg(&mut out,rm,width,true,false,false,false,false);reg(&mut out,rd,width,false,true,false,false,false);
+        let flags=w>>29&3==3;nzcv(&mut out,flags,None);
+        if flags{for f in &mut out.flags{if matches!(f.name,"C"|"V"){f.action=FlagAction::Clear;}}}
+        out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+    // Logical immediate and move-wide forms expose exact low GPR slices.
+    }else if w&0x1f800000==0x12000000 {
+        let flags=w>>29&3==3;
+        // Logical immediates permit SP as a non-flag-setting destination;
+        // the source and the ANDS destination still interpret register 31 as ZR.
+        reg(&mut out,rn,width,true,false,false,false,false);reg(&mut out,rd,width,false,true,false,!flags,false);nzcv(&mut out,flags,None);
+        if flags{for f in &mut out.flags{if matches!(f.name,"C"|"V"){f.action=FlagAction::Clear;}}}
+        out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+    }else if w&0x1f800000==0x12800000 {
+        let opc=(w>>29)&3;
+        reg(&mut out,rd,width,false,true,false,false,false);
+        if opc==3&&rd!=31 {
+            let offset=((w>>21)&3) as u16*16;
+            if offset>0 {reg(&mut out,rd,offset,true,false,false,false,false);}
+            if offset+16<width {reg(&mut out,rd,width-offset-16,true,false,false,false,false);out.registers.last_mut().unwrap().register.offset=offset+16;}
+        }
+        nzcv(&mut out,false,None);out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+    // Conditional select has unconditional destination and conditional sources.
+    }else if w&0x1fe00000==0x1a800000 {
+        let cond=(w>>12)&15;reg(&mut out,rn,width,true,false,true,false,false);reg(&mut out,rm,width,true,false,true,false,false);reg(&mut out,rd,width,false,true,false,false,false);nzcv(&mut out,false,Some(cond));
+        out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+    // Integer unsigned immediate or unscaled/pre/post-index scalar accesses.
+    }else if w&0x3b000000==0x39000000||w&0x3b200000==0x38000000 {
+        if w&(1<<26)==0 {
+            let size=8u16<<((w>>30)&3);let opc=(w>>22)&3;
+            // PRFM occupies size=64/opc=2, and is not a load.
+            if !(size==64&&opc==2) {
+                let load=opc!=0;let access_width=if !load||opc==1{if size==64{64}else{32}}else if opc==2{64}else{32};
+                let unsigned=w&0x3b000000==0x39000000;let mode=(w>>10)&3;let wb=!unsigned&&(mode==1||mode==3);
+                reg(&mut out,rn,64,true,wb,false,true,true);reg(&mut out,rd,if load{access_width}else{size},!load,load,false,false,false);
+                out.memory.push(MemoryEffect{operand:None,read:load,write:!load,conditional:false,implicit:false,width_bits:Some(size),ordering:MemoryOrdering::Unknown,atomicity:Atomicity::Unknown,writeback:if wb{if mode==1{Writeback::After}else{Writeback::Before}}else{Writeback::None}});
+                nzcv(&mut out,false,None);out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+                if wb&&rn==rd&&rn!=31{out.registers_knowledge=EffectKnowledge::Partial;out.memory_knowledge=EffectKnowledge::Partial;for r in &mut out.registers{r.conditional=true;}for m in &mut out.memory{m.conditional=true;}}
+            }
+        }
+    // Scalar integer load/store pairs, including LDPSW and writeback.
+    }else if w&0x3e000000==0x28000000 {
+        let opc=(w>>30)&3;let load=w&(1<<22)!=0;let mode=(w>>23)&3;let wb=mode==1||mode==3;
+        if opc==0||opc==2||(opc==1&&load) {
+            let bits=if opc==2{64}else{32};let target=if opc==1{64}else{bits};let rt2=(w>>10)&31;
+            reg(&mut out,rn,64,true,wb,false,true,true);reg(&mut out,rd,target,!load,load,false,false,false);reg(&mut out,rt2,target,!load,load,false,false,false);
+            out.memory.push(MemoryEffect{operand:None,read:load,write:!load,conditional:false,implicit:false,width_bits:Some(bits*2),ordering:MemoryOrdering::Unknown,atomicity:Atomicity::Unknown,writeback:if mode==1{Writeback::After}else if mode==3{Writeback::Before}else{Writeback::None}});
+            nzcv(&mut out,false,None);out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+            // Base/writeback overlap and duplicate load destinations have
+            // independent constrained-unpredictable rules. Both may decode
+            // as a NOP, so neither category promises unconditional accesses.
+            // Register 31 is SP for the base and ZR for data, not an overlap.
+            let base_overlap=wb&&rn!=31&&(rn==rd||rn==rt2);
+            let destination_overlap=load&&rd==rt2;
+            if base_overlap||destination_overlap {
+                out.registers_knowledge=EffectKnowledge::Partial;out.memory_knowledge=EffectKnowledge::Partial;
+                for r in &mut out.registers{r.conditional=true;}
+                for m in &mut out.memory {
+                    m.conditional=true;
+                    // A load/base overlap can suppress writeback even when
+                    // the memory access executes (Constraint_WBSUPPRESS).
+                    if load&&base_overlap{m.writeback=Writeback::Unknown;}
+                }
+            }
+        }
+    // LDAR/STLR, without inventing LL/SC monitor effects for exclusives.
+    }else if w&0x3ffffc00==0x08dffc00||w&0x3ffffc00==0x089ffc00 {
+        let load=w&(1<<22)!=0;let size=8u16<<((w>>30)&3);
+        reg(&mut out,rn,64,true,false,false,true,true);reg(&mut out,rd,if load{if size==64{64}else{32}}else{size},!load,load,false,false,false);
+        out.memory.push(MemoryEffect{operand:None,read:load,write:!load,conditional:false,implicit:false,width_bits:Some(size),ordering:if load{MemoryOrdering::Acquire}else{MemoryOrdering::Release},atomicity:Atomicity::Atomic,writeback:Writeback::None});
+        nzcv(&mut out,false,None);out.registers_knowledge=EffectKnowledge::Complete;out.memory_knowledge=EffectKnowledge::Complete;
+    }
+    if out.registers_knowledge!=EffectKnowledge::Unknown||!out.memory.is_empty(){out.knowledge=EffectKnowledge::Partial;}
+    out
+}

@@ -2,6 +2,8 @@ package arm
 
 import (
 	"fmt"
+	objectapi "github.com/bryanmatteson/mkasm/pkg/object"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,11 +12,18 @@ import (
 
 	"github.com/bryanmatteson/mkasm/pkg/decoder"
 	"github.com/bryanmatteson/mkasm/pkg/ir"
+	"github.com/bryanmatteson/mkasm/pkg/semantics"
 	"github.com/bryanmatteson/mkasm/templates"
 )
 
 // GenerateRust emits a Rust crate for catalog under outputDir.
-func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
+func (cg *CodeGenerator) GenerateRust(catalog *Catalog) (generationError error) {
+	defer func() {
+		if generationError == nil {
+			generationError = objectapi.InstallRust(cg.outputDir)
+		}
+	}()
+
 	if catalog == nil || len(catalog.Entries) == 0 {
 		return fmt.Errorf("rust codegen: empty catalog")
 	}
@@ -38,6 +47,16 @@ func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
 		return err
 	}
 	if err := execTmplWrite(tmpl, "lib.rs.tmpl", filepath.Join(srcDir, "lib.rs"), nil); err != nil {
+		return err
+	}
+
+	if err := writeRustEffects(tmpl, srcDir, false); err != nil {
+		return err
+	}
+	if err := semantics.WriteRust(srcDir); err != nil {
+		return err
+	}
+	if err := execTmplWrite(tmpl, "recipes.rs.tmpl", filepath.Join(srcDir, "recipes.rs"), nil); err != nil {
 		return err
 	}
 
@@ -72,9 +91,33 @@ func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
 	if err := execTmplWrite(tmpl, "formatters.rs.tmpl", filepath.Join(srcDir, "formatters.rs"), disasmData); err != nil {
 		return err
 	}
+	if err := execTmplWrite(tmpl, "references.rs.tmpl", filepath.Join(srcDir, "references.rs"), nil); err != nil {
+		return err
+	}
+	// The text assembler inverts the formatter tables above; it adds only the
+	// operand value classes, their vocabularies and its test samples.
+	textAsmData, err := buildRustTextAsmData(disasm)
+	if err != nil {
+		return err
+	}
+	if err := execTmplWrite(tmpl, "assembler.rs.tmpl", filepath.Join(srcDir, "assembler.rs"), textAsmData); err != nil {
+		return err
+	}
+	if err := execTmplWrite(tmpl, "assembler_tests.rs.tmpl", filepath.Join(srcDir, "assembler_tests.rs"),
+		buildRustTextAsmTestData(catalog, disasm)); err != nil {
+		return err
+	}
+
+	if err := execTmplWrite(tmpl, "analysis.rs.tmpl", filepath.Join(srcDir, "analysis.rs"), buildRustAnalysisData(catalog, disasm)); err != nil {
+		return err
+	}
 
 	regData := struct{ AllTable string }{AllTable: emitRustRegistryTable(catalog)}
 	if err := execTmplWrite(tmpl, "registry.rs.tmpl", filepath.Join(srcDir, "registry.rs"), regData); err != nil {
+		return err
+	}
+
+	if err := writeRustRequirements(srcDir, catalog); err != nil {
 		return err
 	}
 
@@ -93,6 +136,16 @@ func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
 		return err
 	}
 	if err := execTmplWrite(tmpl, "decode_bench.rs.tmpl", filepath.Join(exDir, "decode_bench.rs"), cargoData); err != nil {
+		return err
+	}
+	if err := execTmplWrite(tmpl, "example_assemble.rs.tmpl", filepath.Join(exDir, "assemble.rs"), cargoData); err != nil {
+		return err
+	}
+	testDir := filepath.Join(cg.outputDir, "tests")
+	if err := os.MkdirAll(testDir, 0755); err != nil {
+		return err
+	}
+	if err := execTmplWrite(tmpl, "text_assembler_test.rs.tmpl", filepath.Join(testDir, "text_assembler.rs"), cargoData); err != nil {
 		return err
 	}
 	// Operand placement checked against LLVM's assembler. The round-trip tests
@@ -124,10 +177,6 @@ func (cg *CodeGenerator) GenerateRust(catalog *Catalog) error {
 			return err
 		}
 		if err := os.WriteFile(filepath.Join(srcDir, "insns_test.rs"), []byte(emitRustInsnTests(cg.surface)), 0644); err != nil {
-			return err
-		}
-		testDir := filepath.Join(cg.outputDir, "tests")
-		if err := os.MkdirAll(testDir, 0755); err != nil {
 			return err
 		}
 		conformance, cases := EmitRustConformanceTest(cg.arch.ArtifactName(), cg.surface)
@@ -218,6 +267,13 @@ func emitRustFieldsTable(c *Catalog) string {
 		fmt.Fprintf(&b, "    (%s, &[%s]),\n", rustStringLiteral(e.EncodingID), strings.Join(parts, ", "))
 	}
 	b.WriteString("];\n")
+	b.WriteString("#[allow(unused_parens)]\nfn matches_encoding_constraints(id: &str, w: u32) -> bool { let _ = w; match id {\n")
+	for _, e := range c.Entries {
+		if e.BitDiffs != nil {
+			fmt.Fprintf(&b, "%s => %s,\n", rustStringLiteral(e.EncodingID), bitDiffBooleanExpression(e.BitDiffs))
+		}
+	}
+	b.WriteString("_ => true,\n} }\n")
 	return b.String()
 }
 
@@ -239,8 +295,8 @@ func emitRustDecodeTable(c *Catalog) string {
 		var fields []string
 		for _, f := range e.Fields {
 			fields = append(fields, fmt.Sprintf(
-				"FieldDef { name: %s, start: %d, end: %d }",
-				rustStringLiteral(f.Name), f.Start, f.End))
+				"FieldDef { name: %s, key: %d, start: %d, end: %d }",
+				rustStringLiteral(f.Name), rustFieldKey(f.Name), f.Start, f.End))
 		}
 		fieldLit := "&[]"
 		if len(fields) > 0 {
@@ -263,10 +319,12 @@ func emitRustDecodeTable(c *Catalog) string {
 }
 
 type rustDecoderData struct {
+	Adaptive   bool
 	Table      string
 	Nodes      string
 	Edges      string
 	Candidates string
+	Preferred  string
 	Untreed    string
 	Root       string
 }
@@ -282,9 +340,8 @@ type rustEdge struct {
 	node  uint32
 }
 
-// buildRustDecoderData emits the same wildcard-aware decision tree used by the
-// generated Go decoder. Rust used to ignore this tree and linearly scan the
-// complete catalog while allocating a Vec and BTreeMap for every instruction.
+// Preserve the source tree for lazy ambiguity views, and refine candidate
+// selection independently when a source leaf spans a large instruction bank.
 func buildRustDecoderData(c *Catalog) (rustDecoderData, error) {
 	if c == nil || len(c.Entries) == 0 {
 		return rustDecoderData{}, fmt.Errorf("rust decoder: empty catalog")
@@ -366,6 +423,25 @@ func buildRustDecoderData(c *Catalog) (rustDecoderData, error) {
 
 	var edges []rustEdge
 	var candidates []uint16
+	var preferred []uint16
+	adaptive := false
+	for _, node := range nodes {
+		if len(node.candidates) > 64 {
+			adaptive = true
+			break
+		}
+	}
+	masks := make([]rustMaskValue, len(c.Entries))
+	all := make([]uint16, len(c.Entries))
+	for i, e := range c.Entries {
+		masks[i] = rustMaskValue{e.Mask, e.Value}
+		all[i] = uint16(i)
+	}
+	selection := newRustMaskedDispatch(masks)
+	var allRoot uint32
+	if adaptive {
+		allRoot = selection.add(rustDecodePriority(c, all))
+	}
 	var nodesLit strings.Builder
 	nodesLit.WriteString("static NODES: &[Node] = &[\n")
 	for _, node := range nodes {
@@ -373,6 +449,10 @@ func buildRustDecoderData(c *Catalog) (rustDecoderData, error) {
 		candidateStart := len(candidates)
 		edges = append(edges, node.edges...)
 		candidates = append(candidates, node.candidates...)
+		preferred = append(preferred, rustDecodePriority(c, node.candidates)...)
+		if adaptive && len(node.candidates) > 0 {
+			edgeStart = int(selection.add(rustDecodePriority(c, node.candidates)))
+		}
 		fmt.Fprintf(&nodesLit,
 			"    Node { mask: 0x%08X, edge_start: %d, edge_len: %d, candidate_start: %d, candidate_len: %d },\n",
 			node.mask, edgeStart, len(node.edges), candidateStart, len(node.candidates))
@@ -396,6 +476,7 @@ func buildRustDecoderData(c *Catalog) (rustDecoderData, error) {
 	}
 	candidatesLit.WriteString("];\n")
 
+	var untreed []uint16
 	var untreedLit strings.Builder
 	untreedLit.WriteString("static UNTRED: &[u16] = &[")
 	first := true
@@ -408,14 +489,46 @@ func buildRustDecoderData(c *Catalog) (rustDecoderData, error) {
 		}
 		first = false
 		fmt.Fprintf(&untreedLit, "%d", i)
+		untreed = append(untreed, uint16(i))
 	}
 	untreedLit.WriteString("];\n")
 
+	var preferredLit strings.Builder
+	for _, table := range []struct {
+		name    string
+		indices []uint16
+	}{
+		{"PREFERRED_UNTREED", rustDecodePriority(c, untreed)},
+	} {
+		fmt.Fprintf(&preferredLit, "static %s: &[u16] = &[", table.name)
+		for _, i := range table.indices {
+			fmt.Fprintf(&preferredLit, "%d,", i)
+		}
+		preferredLit.WriteString("];\n")
+	}
+
+	if adaptive {
+		preferredLit.WriteString(selection.emit("SELECT"))
+		fmt.Fprintf(&preferredLit, "const ALL_SELECTOR:usize=%d;\n", allRoot)
+	} else {
+		for _, table := range []struct {
+			name string
+			ids  []uint16
+		}{{"PREFERRED_CANDIDATES", preferred}, {"PREFERRED_ALL", rustDecodePriority(c, all)}} {
+			fmt.Fprintf(&preferredLit, "static %s: &[u16] = &[", table.name)
+			for _, id := range table.ids {
+				fmt.Fprintf(&preferredLit, "%d,", id)
+			}
+			preferredLit.WriteString("];\n")
+		}
+	}
 	return rustDecoderData{
+		Adaptive:   adaptive,
 		Table:      emitRustDecodeTable(c),
 		Nodes:      nodesLit.String(),
 		Edges:      edgesLit.String(),
 		Candidates: candidatesLit.String(),
+		Preferred:  preferredLit.String(),
 		Untreed:    untreedLit.String(),
 		Root:       root,
 	}, nil
@@ -530,4 +643,31 @@ func (cg *CodeGenerator) surfaceHasAll(methods ...string) bool {
 		}
 	}
 	return true
+}
+
+// Match the generated const key function. Name equality resolves collisions.
+func rustFieldKey(name string) uint16 {
+	key := uint16(0x811c)
+	for i := 0; i < len(name); i++ {
+		key = (key ^ uint16(name[i])) * 0x0193
+	}
+	return key
+}
+
+// Mirror better_entry exactly at generation time. Keep the original candidate
+// slices for the public lazy ambiguity view; only selection uses this order.
+func rustDecodePriority(c *Catalog, indices []uint16) []uint16 {
+	ordered := append([]uint16(nil), indices...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := c.Entries[ordered[i]], c.Entries[ordered[j]]
+		ac, bc := bits.OnesCount32(a.Mask), bits.OnesCount32(b.Mask)
+		if ac != bc {
+			return ac > bc
+		}
+		if (a.AliasOf == "") != (b.AliasOf == "") {
+			return a.AliasOf == ""
+		}
+		return a.EncodingID < b.EncodingID
+	})
+	return ordered
 }
