@@ -94,16 +94,14 @@ func evalAtom(a *BitDiffAtom, word uint32) bool {
 	if a.Start < 0 || a.End < a.Start || a.End > 31 {
 		return true // unresolved field: do not reject
 	}
-	width := a.End - a.Start + 1
-	got := fieldBitsMSB(word, a.Start, a.End)
 	switch a.Op {
 	case BitDiffEq:
-		return matchBitString(got, a.Bits, width)
+		return matchFieldBits(word, a.Start, a.End, a.Bits)
 	case BitDiffNe:
-		return !matchBitString(got, a.Bits, width)
+		return !matchFieldBits(word, a.Start, a.End, a.Bits)
 	case BitDiffIn:
 		for _, alt := range a.Alts {
-			if matchBitString(got, alt, width) {
+			if matchFieldBits(word, a.Start, a.End, alt) {
 				return true
 			}
 		}
@@ -113,43 +111,28 @@ func evalAtom(a *BitDiffAtom, word uint32) bool {
 	}
 }
 
-// fieldBitsMSB returns the field bits as a 0/1 string, MSB (End) first.
-func fieldBitsMSB(word uint32, start, end int) string {
-	width := end - start + 1
-	b := make([]byte, width)
-	for i := 0; i < width; i++ {
-		bitPos := end - i
-		if (word>>uint(bitPos))&1 == 1 {
-			b[i] = '1'
-		} else {
-			b[i] = '0'
+// matchFieldBits compares integer masks while preserving normalization's zero
+// padding, truncation and ignored non-bit characters without building text.
+func matchFieldBits(word uint32, start, end int, pattern string) bool {
+	var mask, value uint32
+	p := len(pattern)
+	for bit := start; bit <= end; bit++ {
+		c := byte('0')
+		for p > 0 {
+			p--
+			if b := pattern[p]; b == '0' || b == '1' || b == 'x' || b == 'X' {
+				c = b
+				break
+			}
+		}
+		if c == '0' || c == '1' {
+			mask |= 1 << uint(bit)
+			if c == '1' {
+				value |= 1 << uint(bit)
+			}
 		}
 	}
-	return string(b)
-}
-
-func matchBitString(got, pat string, width int) bool {
-	pat = normalizeBitString(pat, width)
-	if len(pat) != width || len(got) != width {
-		return false
-	}
-	for i := 0; i < width; i++ {
-		switch pat[i] {
-		case '0':
-			if got[i] != '0' {
-				return false
-			}
-		case '1':
-			if got[i] != '1' {
-				return false
-			}
-		case 'x', 'X':
-			// don't care
-		default:
-			return false
-		}
-	}
-	return true
+	return word&mask == value
 }
 
 // normalizeBitString pads/truncates to width. Shorter values are left-padded with '0'.
@@ -210,6 +193,11 @@ func walkPins(n *BitDiffNode, instr *InstructionIR, negated bool) {
 			walkPins(n.Kids[0], instr, !negated)
 		}
 	case BitDiffAnd:
+		// A negated conjunction is a disjunction. No individual child is
+		// required, even if a nested NOT would make its equality positive.
+		if negated {
+			return
+		}
 		for _, k := range n.Kids {
 			walkPins(k, instr, negated)
 		}

@@ -25,6 +25,7 @@ type InstructionIR struct {
 	Encoding      EncodingMask
 	Documentation *InstructionDoc
 	Features      FeatureSet
+	Requirements  Requirements
 	// BitDiffs is the raw encoding@bitdiffs expression from the iform XML.
 	BitDiffs string
 	// BitDiffsTree is the parsed/resolved constraint tree used at match time.
