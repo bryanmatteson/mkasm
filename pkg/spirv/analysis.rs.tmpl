@@ -1,0 +1,23 @@
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct OperandSpan {pub start:usize,pub end:usize,pub index:usize,pub kind:String,pub value:Operand}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Described {pub text:String,pub operands:Vec<OperandSpan>}
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct Hole {pub name:String,pub index:usize,pub kind:String}
+impl Instruction {
+    pub fn describe(&self)->Result<Described,String>{
+        let d=definition(self.opcode).ok_or("unknown opcode")?;let mut text=String::new();let mut operands=Vec::new();
+        for(index,o)in self.operands.iter().enumerate().filter(|(_,o)|o.kind=="IdResult"){let start=text.len();let id=*o.words.first().ok_or("missing result ID")?;text.push_str(&format!("%{id}"));operands.push(OperandSpan{start,end:text.len(),index,kind:o.kind.clone(),value:o.clone()});text.push_str(" = ");}
+        text.push_str(d.name);
+        for(index,o)in self.operands.iter().enumerate().filter(|(_,o)|o.kind!="IdResult"){let spelling=format_operand(o)?.join(" ");if spelling.is_empty(){continue;}text.push(' ');let start=text.len();text.push_str(&spelling);operands.push(OperandSpan{start,end:text.len(),index,kind:o.kind.clone(),value:o.clone()});}
+        Ok(Described{text,operands})
+    }
+    pub fn set_operand(&mut self,index:usize,value:Operand,ctx:Option<&Context>,env:Option<&Environment>)->Result<(),String>{let mut next=self.clone();*next.operands.get_mut(index).ok_or("unknown operand")?=value;encode(&next,ctx,env)?;*self=next;Ok(())}
+    pub fn encode_into(&self,ctx:Option<&Context>,env:Option<&Environment>,output:&mut[u8])->Result<usize,String>{let b=encode(self,ctx,env)?;if output.len()<b.len(){return Err("output buffer too small".into());}output[..b.len()].copy_from_slice(&b);Ok(b.len())}
+}
+impl InstructionTemplate {
+    pub fn definition(&self)->&'static Definition{definition(self.prototype.opcode).expect("validated template opcode")}
+    pub fn holes(&self)->Vec<Hole>{let mut holes=self.holes.iter().map(|(&index,name)|Hole{name:name.clone(),index,kind:self.prototype.operands[index].kind.clone()}).collect::<Vec<_>>();holes.sort_by_key(|h|h.index);holes}
+    pub fn could_match(&self,src:&[u8])->bool{src.len()>=4&&u16::from_le_bytes([src[0],src[1]])==self.prototype.opcode}
+}
