@@ -1,0 +1,2158 @@
+[
+  {
+    "id": "add_000",
+    "cpu": "v850e3v5",
+    "assembly": "add gp, gp",
+    "bytes": "c421",
+    "ghidra_assembly": "add gp,gp"
+  },
+  {
+    "id": "add_001",
+    "cpu": "v850e3v5",
+    "assembly": "add -4, gp",
+    "bytes": "5c22",
+    "ghidra_assembly": "add -0x4,gp"
+  },
+  {
+    "id": "addi_002",
+    "cpu": "v850e3v5",
+    "assembly": "addi -4, gp, gp",
+    "bytes": "0426fcff",
+    "ghidra_assembly": "addi -0x4,gp,gp"
+  },
+  {
+    "id": "adf_003",
+    "cpu": "v850e3v5",
+    "assembly": "adf s, gp, gp, gp",
+    "bytes": "e427a823",
+    "ghidra_assembly": "adfn gp,gp,gp"
+  },
+  {
+    "id": "and_004",
+    "cpu": "v850e3v5",
+    "assembly": "and gp, gp",
+    "bytes": "4421",
+    "ghidra_assembly": "and gp,gp"
+  },
+  {
+    "id": "andi_005",
+    "cpu": "v850e3v5",
+    "assembly": "andi 4, gp, gp",
+    "bytes": "c4260400",
+    "ghidra_assembly": "andi 0x4,gp,gp"
+  },
+  {
+    "id": "bge_006",
+    "cpu": "v850e3v5",
+    "assembly": "bge .+8",
+    "bytes": "ce05",
+    "ghidra_assembly": "bge 0x00001008"
+  },
+  {
+    "id": "bgt_007",
+    "cpu": "v850e3v5",
+    "assembly": "bgt .+8",
+    "bytes": "cf05",
+    "ghidra_assembly": "bgt 0x00001008"
+  },
+  {
+    "id": "ble_008",
+    "cpu": "v850e3v5",
+    "assembly": "ble .+8",
+    "bytes": "c705",
+    "ghidra_assembly": "ble 0x00001008"
+  },
+  {
+    "id": "blt_009",
+    "cpu": "v850e3v5",
+    "assembly": "blt .+8",
+    "bytes": "c605",
+    "ghidra_assembly": "blt 0x00001008"
+  },
+  {
+    "id": "bh_010",
+    "cpu": "v850e3v5",
+    "assembly": "bh .+8",
+    "bytes": "cb05",
+    "ghidra_assembly": "bh 0x00001008"
+  },
+  {
+    "id": "bl_011",
+    "cpu": "v850e3v5",
+    "assembly": "bl .+8",
+    "bytes": "c105",
+    "ghidra_assembly": "bc 0x00001008"
+  },
+  {
+    "id": "bnh_012",
+    "cpu": "v850e3v5",
+    "assembly": "bnh .+8",
+    "bytes": "c305",
+    "ghidra_assembly": "bnh 0x00001008"
+  },
+  {
+    "id": "bnl_013",
+    "cpu": "v850e3v5",
+    "assembly": "bnl .+8",
+    "bytes": "c905",
+    "ghidra_assembly": "bnc 0x00001008"
+  },
+  {
+    "id": "be_014",
+    "cpu": "v850e3v5",
+    "assembly": "be .+8",
+    "bytes": "c205",
+    "ghidra_assembly": "be 0x00001008"
+  },
+  {
+    "id": "bne_015",
+    "cpu": "v850e3v5",
+    "assembly": "bne .+8",
+    "bytes": "ca05",
+    "ghidra_assembly": "bne 0x00001008"
+  },
+  {
+    "id": "bc_016",
+    "cpu": "v850e3v5",
+    "assembly": "bc .+8",
+    "bytes": "c105",
+    "ghidra_assembly": "bc 0x00001008"
+  },
+  {
+    "id": "bf_017",
+    "cpu": "v850e3v5",
+    "assembly": "bf .+8",
+    "bytes": "ca05",
+    "ghidra_assembly": "bne 0x00001008"
+  },
+  {
+    "id": "bn_018",
+    "cpu": "v850e3v5",
+    "assembly": "bn .+8",
+    "bytes": "c405",
+    "ghidra_assembly": "bn 0x00001008"
+  },
+  {
+    "id": "bnc_019",
+    "cpu": "v850e3v5",
+    "assembly": "bnc .+8",
+    "bytes": "c905",
+    "ghidra_assembly": "bnc 0x00001008"
+  },
+  {
+    "id": "bnv_020",
+    "cpu": "v850e3v5",
+    "assembly": "bnv .+8",
+    "bytes": "c805",
+    "ghidra_assembly": "bnv 0x00001008"
+  },
+  {
+    "id": "bnz_021",
+    "cpu": "v850e3v5",
+    "assembly": "bnz .+8",
+    "bytes": "ca05",
+    "ghidra_assembly": "bne 0x00001008"
+  },
+  {
+    "id": "bp_022",
+    "cpu": "v850e3v5",
+    "assembly": "bp .+8",
+    "bytes": "cc05",
+    "ghidra_assembly": "bp 0x00001008"
+  },
+  {
+    "id": "br_023",
+    "cpu": "v850e3v5",
+    "assembly": "br .+8",
+    "bytes": "c505",
+    "ghidra_assembly": "br 0x00001008"
+  },
+  {
+    "id": "bsa_024",
+    "cpu": "v850e3v5",
+    "assembly": "bsa .+8",
+    "bytes": "cd05",
+    "ghidra_assembly": "bsa 0x00001008"
+  },
+  {
+    "id": "bt_025",
+    "cpu": "v850e3v5",
+    "assembly": "bt .+8",
+    "bytes": "c205",
+    "ghidra_assembly": "be 0x00001008"
+  },
+  {
+    "id": "bv_026",
+    "cpu": "v850e3v5",
+    "assembly": "bv .+8",
+    "bytes": "c005",
+    "ghidra_assembly": "bv 0x00001008"
+  },
+  {
+    "id": "bz_027",
+    "cpu": "v850e3v5",
+    "assembly": "bz .+8",
+    "bytes": "c205",
+    "ghidra_assembly": "be 0x00001008"
+  },
+  {
+    "id": "bge_028",
+    "cpu": "v850e3v5",
+    "assembly": "bge17 .+8",
+    "bytes": "ee070900",
+    "ghidra_assembly": "ld.hu 0x8[r14],r0"
+  },
+  {
+    "id": "bgt_029",
+    "cpu": "v850e3v5",
+    "assembly": "bgt17 .+8",
+    "bytes": "ef070900",
+    "ghidra_assembly": "ld.hu 0x8[r15],r0"
+  },
+  {
+    "id": "ble_030",
+    "cpu": "v850e3v5",
+    "assembly": "ble17 .+8",
+    "bytes": "e7070900",
+    "ghidra_assembly": "ld.hu 0x8[r7],r0"
+  },
+  {
+    "id": "blt_031",
+    "cpu": "v850e3v5",
+    "assembly": "blt17 .+8",
+    "bytes": "e6070900",
+    "ghidra_assembly": "ld.hu 0x8[r6],r0"
+  },
+  {
+    "id": "bh_032",
+    "cpu": "v850e3v5",
+    "assembly": "bh17 .+8",
+    "bytes": "eb070900",
+    "ghidra_assembly": "ld.hu 0x8[r11],r0"
+  },
+  {
+    "id": "bl_033",
+    "cpu": "v850e3v5",
+    "assembly": "bl17 .+8",
+    "bytes": "e1070900",
+    "ghidra_assembly": "ld.hu 0x8[r1],r0"
+  },
+  {
+    "id": "bnh_034",
+    "cpu": "v850e3v5",
+    "assembly": "bnh17 .+8",
+    "bytes": "e3070900",
+    "ghidra_assembly": "ld.hu 0x8[sp],r0"
+  },
+  {
+    "id": "bnl_035",
+    "cpu": "v850e3v5",
+    "assembly": "bnl17 .+8",
+    "bytes": "e9070900",
+    "ghidra_assembly": "ld.hu 0x8[r9],r0"
+  },
+  {
+    "id": "be_036",
+    "cpu": "v850e3v5",
+    "assembly": "be17 .+8",
+    "bytes": "e2070900",
+    "ghidra_assembly": "ld.hu 0x8[r2],r0"
+  },
+  {
+    "id": "bne_037",
+    "cpu": "v850e3v5",
+    "assembly": "bne17 .+8",
+    "bytes": "ea070900",
+    "ghidra_assembly": "ld.hu 0x8[r10],r0"
+  },
+  {
+    "id": "bc_038",
+    "cpu": "v850e3v5",
+    "assembly": "bc17 .+8",
+    "bytes": "e1070900",
+    "ghidra_assembly": "ld.hu 0x8[r1],r0"
+  },
+  {
+    "id": "bf_039",
+    "cpu": "v850e3v5",
+    "assembly": "bf17 .+8",
+    "bytes": "ea070900",
+    "ghidra_assembly": "ld.hu 0x8[r10],r0"
+  },
+  {
+    "id": "bn_040",
+    "cpu": "v850e3v5",
+    "assembly": "bn17 .+8",
+    "bytes": "e4070900",
+    "ghidra_assembly": "ld.hu 0x8[gp],r0"
+  },
+  {
+    "id": "bnc_041",
+    "cpu": "v850e3v5",
+    "assembly": "bnc17 .+8",
+    "bytes": "e9070900",
+    "ghidra_assembly": "ld.hu 0x8[r9],r0"
+  },
+  {
+    "id": "bnv_042",
+    "cpu": "v850e3v5",
+    "assembly": "bnv17 .+8",
+    "bytes": "e8070900",
+    "ghidra_assembly": "ld.hu 0x8[r8],r0"
+  },
+  {
+    "id": "bnz_043",
+    "cpu": "v850e3v5",
+    "assembly": "bnz17 .+8",
+    "bytes": "ea070900",
+    "ghidra_assembly": "ld.hu 0x8[r10],r0"
+  },
+  {
+    "id": "bp_044",
+    "cpu": "v850e3v5",
+    "assembly": "bp17 .+8",
+    "bytes": "ec070900",
+    "ghidra_assembly": "ld.hu 0x8[r12],r0"
+  },
+  {
+    "id": "br_045",
+    "cpu": "v850e3v5",
+    "assembly": "br17 .+8",
+    "bytes": "e5070900",
+    "ghidra_assembly": "ld.hu 0x8[tp],r0"
+  },
+  {
+    "id": "bsa_046",
+    "cpu": "v850e3v5",
+    "assembly": "bsa17 .+8",
+    "bytes": "ed070900",
+    "ghidra_assembly": "ld.hu 0x8[r13],r0"
+  },
+  {
+    "id": "bt_047",
+    "cpu": "v850e3v5",
+    "assembly": "bt17 .+8",
+    "bytes": "e2070900",
+    "ghidra_assembly": "ld.hu 0x8[r2],r0"
+  },
+  {
+    "id": "bv_048",
+    "cpu": "v850e3v5",
+    "assembly": "bv17 .+8",
+    "bytes": "e0070900",
+    "ghidra_assembly": "ld.hu 0x8[r0],r0"
+  },
+  {
+    "id": "bz_049",
+    "cpu": "v850e3v5",
+    "assembly": "bz17 .+8",
+    "bytes": "e2070900",
+    "ghidra_assembly": "ld.hu 0x8[r2],r0"
+  },
+  {
+    "id": "bge17_050",
+    "cpu": "v850e3v5",
+    "assembly": "bge17 .+8",
+    "bytes": "ee070900",
+    "ghidra_assembly": "ld.hu 0x8[r14],r0"
+  },
+  {
+    "id": "bgt17_051",
+    "cpu": "v850e3v5",
+    "assembly": "bgt17 .+8",
+    "bytes": "ef070900",
+    "ghidra_assembly": "ld.hu 0x8[r15],r0"
+  },
+  {
+    "id": "ble17_052",
+    "cpu": "v850e3v5",
+    "assembly": "ble17 .+8",
+    "bytes": "e7070900",
+    "ghidra_assembly": "ld.hu 0x8[r7],r0"
+  },
+  {
+    "id": "blt17_053",
+    "cpu": "v850e3v5",
+    "assembly": "blt17 .+8",
+    "bytes": "e6070900",
+    "ghidra_assembly": "ld.hu 0x8[r6],r0"
+  },
+  {
+    "id": "bh17_054",
+    "cpu": "v850e3v5",
+    "assembly": "bh17 .+8",
+    "bytes": "eb070900",
+    "ghidra_assembly": "ld.hu 0x8[r11],r0"
+  },
+  {
+    "id": "bl17_055",
+    "cpu": "v850e3v5",
+    "assembly": "bl17 .+8",
+    "bytes": "e1070900",
+    "ghidra_assembly": "ld.hu 0x8[r1],r0"
+  },
+  {
+    "id": "bnh17_056",
+    "cpu": "v850e3v5",
+    "assembly": "bnh17 .+8",
+    "bytes": "e3070900",
+    "ghidra_assembly": "ld.hu 0x8[sp],r0"
+  },
+  {
+    "id": "bnl17_057",
+    "cpu": "v850e3v5",
+    "assembly": "bnl17 .+8",
+    "bytes": "e9070900",
+    "ghidra_assembly": "ld.hu 0x8[r9],r0"
+  },
+  {
+    "id": "be17_058",
+    "cpu": "v850e3v5",
+    "assembly": "be17 .+8",
+    "bytes": "e2070900",
+    "ghidra_assembly": "ld.hu 0x8[r2],r0"
+  },
+  {
+    "id": "bne17_059",
+    "cpu": "v850e3v5",
+    "assembly": "bne17 .+8",
+    "bytes": "ea070900",
+    "ghidra_assembly": "ld.hu 0x8[r10],r0"
+  },
+  {
+    "id": "bc17_060",
+    "cpu": "v850e3v5",
+    "assembly": "bc17 .+8",
+    "bytes": "e1070900",
+    "ghidra_assembly": "ld.hu 0x8[r1],r0"
+  },
+  {
+    "id": "bf17_061",
+    "cpu": "v850e3v5",
+    "assembly": "bf17 .+8",
+    "bytes": "ea070900",
+    "ghidra_assembly": "ld.hu 0x8[r10],r0"
+  },
+  {
+    "id": "bn17_062",
+    "cpu": "v850e3v5",
+    "assembly": "bn17 .+8",
+    "bytes": "e4070900",
+    "ghidra_assembly": "ld.hu 0x8[gp],r0"
+  },
+  {
+    "id": "bnc17_063",
+    "cpu": "v850e3v5",
+    "assembly": "bnc17 .+8",
+    "bytes": "e9070900",
+    "ghidra_assembly": "ld.hu 0x8[r9],r0"
+  },
+  {
+    "id": "bnv17_064",
+    "cpu": "v850e3v5",
+    "assembly": "bnv17 .+8",
+    "bytes": "e8070900",
+    "ghidra_assembly": "ld.hu 0x8[r8],r0"
+  },
+  {
+    "id": "bnz17_065",
+    "cpu": "v850e3v5",
+    "assembly": "bnz17 .+8",
+    "bytes": "ea070900",
+    "ghidra_assembly": "ld.hu 0x8[r10],r0"
+  },
+  {
+    "id": "bp17_066",
+    "cpu": "v850e3v5",
+    "assembly": "bp17 .+8",
+    "bytes": "ec070900",
+    "ghidra_assembly": "ld.hu 0x8[r12],r0"
+  },
+  {
+    "id": "br17_067",
+    "cpu": "v850e3v5",
+    "assembly": "br17 .+8",
+    "bytes": "e5070900",
+    "ghidra_assembly": "ld.hu 0x8[tp],r0"
+  },
+  {
+    "id": "bsa17_068",
+    "cpu": "v850e3v5",
+    "assembly": "bsa17 .+8",
+    "bytes": "ed070900",
+    "ghidra_assembly": "ld.hu 0x8[r13],r0"
+  },
+  {
+    "id": "bt17_069",
+    "cpu": "v850e3v5",
+    "assembly": "bt17 .+8",
+    "bytes": "e2070900",
+    "ghidra_assembly": "ld.hu 0x8[r2],r0"
+  },
+  {
+    "id": "bv17_070",
+    "cpu": "v850e3v5",
+    "assembly": "bv17 .+8",
+    "bytes": "e0070900",
+    "ghidra_assembly": "ld.hu 0x8[r0],r0"
+  },
+  {
+    "id": "bz17_071",
+    "cpu": "v850e3v5",
+    "assembly": "bz17 .+8",
+    "bytes": "e2070900",
+    "ghidra_assembly": "ld.hu 0x8[r2],r0"
+  },
+  {
+    "id": "bsh_072",
+    "cpu": "v850e3v5",
+    "assembly": "bsh gp, gp",
+    "bytes": "e0274223",
+    "ghidra_assembly": "bsh gp,gp"
+  },
+  {
+    "id": "bsw_073",
+    "cpu": "v850e3v5",
+    "assembly": "bsw gp, gp",
+    "bytes": "e0274023",
+    "ghidra_assembly": "bsw gp,gp"
+  },
+  {
+    "id": "callt_081",
+    "cpu": "v850e3v5",
+    "assembly": "callt 4",
+    "bytes": "0402",
+    "ghidra_assembly": "callt 0x4"
+  },
+  {
+    "id": "caxi_082",
+    "cpu": "v850e3v5",
+    "assembly": "caxi [gp], gp, gp",
+    "bytes": "e427ee20",
+    "ghidra_assembly": "caxi [gp],gp,gp"
+  },
+  {
+    "id": "clr1_083",
+    "cpu": "v850e3v5",
+    "assembly": "clr1 4, -4[gp]",
+    "bytes": "c4a7fcff",
+    "ghidra_assembly": "clr1 0x4,-0x4[gp]"
+  },
+  {
+    "id": "clr1_084",
+    "cpu": "v850e3v5",
+    "assembly": "clr1 gp, [gp]",
+    "bytes": "e427e400",
+    "ghidra_assembly": "clr1 gp,[gp]"
+  },
+  {
+    "id": "cmov_085",
+    "cpu": "v850e3v5",
+    "assembly": "cmov s, gp, gp, gp",
+    "bytes": "e4272823",
+    "ghidra_assembly": "cmovn gp,gp,gp"
+  },
+  {
+    "id": "cmov_086",
+    "cpu": "v850e3v5",
+    "assembly": "cmov s, -4, gp, gp",
+    "bytes": "fc270823",
+    "ghidra_assembly": "cmovn -0x4,gp,gp"
+  },
+  {
+    "id": "cmp_087",
+    "cpu": "v850e3v5",
+    "assembly": "cmp gp, gp",
+    "bytes": "e421",
+    "ghidra_assembly": "cmp gp,gp"
+  },
+  {
+    "id": "cmp_088",
+    "cpu": "v850e3v5",
+    "assembly": "cmp -4, gp",
+    "bytes": "7c22",
+    "ghidra_assembly": "cmp -0x4,gp"
+  },
+  {
+    "id": "ctret_089",
+    "cpu": "v850e3v5",
+    "assembly": "ctret",
+    "bytes": "e0074401",
+    "ghidra_assembly": "ctret"
+  },
+  {
+    "id": "dbcp_090",
+    "cpu": "v850e3v5",
+    "assembly": "dbcp",
+    "bytes": "40e8",
+    "ghidra_assembly": "divh r0,r29"
+  },
+  {
+    "id": "dbhvtrap_091",
+    "cpu": "v850e3v5",
+    "assembly": "dbhvtrap",
+    "bytes": "40e0",
+    "ghidra_assembly": "divh r0,r28"
+  },
+  {
+    "id": "dbtrap_095",
+    "cpu": "v850e3v5",
+    "assembly": "dbtrap",
+    "bytes": "40f8",
+    "ghidra_assembly": "divh r0,lp"
+  },
+  {
+    "id": "di_096",
+    "cpu": "v850e3v5",
+    "assembly": "di",
+    "bytes": "e0076001",
+    "ghidra_assembly": "di"
+  },
+  {
+    "id": "dispose_097",
+    "cpu": "v850e3v5",
+    "assembly": "dispose 4, {r20-r22}, gp",
+    "bytes": "4806040e",
+    "ghidra_assembly": "dispose 0x4,{ r20,r21,r22, },[gp]"
+  },
+  {
+    "id": "dispose_098",
+    "cpu": "v850e3v5",
+    "assembly": "dispose 4, {r20-r22}",
+    "bytes": "4806000e",
+    "ghidra_assembly": "dispose 0x4,{ r20,r21,r22, }"
+  },
+  {
+    "id": "div_099",
+    "cpu": "v850e3v5",
+    "assembly": "div gp, gp, gp",
+    "bytes": "e427c022",
+    "ghidra_assembly": "div gp,gp,gp"
+  },
+  {
+    "id": "divh_100",
+    "cpu": "v850e3v5",
+    "assembly": "divh gp, gp, gp",
+    "bytes": "e4278022",
+    "ghidra_assembly": "divh gp,gp,gp"
+  },
+  {
+    "id": "divh_101",
+    "cpu": "v850e3v5",
+    "assembly": "divh gp, gp",
+    "bytes": "4420",
+    "ghidra_assembly": "divh gp,gp"
+  },
+  {
+    "id": "divhu_103",
+    "cpu": "v850e3v5",
+    "assembly": "divhu gp, gp, gp",
+    "bytes": "e4278222",
+    "ghidra_assembly": "divhu gp,gp,gp"
+  },
+  {
+    "id": "divq_106",
+    "cpu": "v850e3v5",
+    "assembly": "divq gp, gp, gp",
+    "bytes": "e427fc22",
+    "ghidra_assembly": "divq gp,gp,gp"
+  },
+  {
+    "id": "divqu_107",
+    "cpu": "v850e3v5",
+    "assembly": "divqu gp, gp, gp",
+    "bytes": "e427fe22",
+    "ghidra_assembly": "divqu gp,gp,gp"
+  },
+  {
+    "id": "divu_108",
+    "cpu": "v850e3v5",
+    "assembly": "divu gp, gp, gp",
+    "bytes": "e427c222",
+    "ghidra_assembly": "divu gp,gp,gp"
+  },
+  {
+    "id": "ei_111",
+    "cpu": "v850e3v5",
+    "assembly": "ei",
+    "bytes": "e0876001",
+    "ghidra_assembly": "ei"
+  },
+  {
+    "id": "eiret_112",
+    "cpu": "v850e3v5",
+    "assembly": "eiret",
+    "bytes": "e0074801",
+    "ghidra_assembly": "eiret"
+  },
+  {
+    "id": "feret_114",
+    "cpu": "v850e3v5",
+    "assembly": "feret",
+    "bytes": "e0074a01",
+    "ghidra_assembly": "feret"
+  },
+  {
+    "id": "fetrap_115",
+    "cpu": "v850e3v5",
+    "assembly": "fetrap 4",
+    "bytes": "4020",
+    "ghidra_assembly": "fetrap 0x4"
+  },
+  {
+    "id": "halt_116",
+    "cpu": "v850e3v5",
+    "assembly": "halt",
+    "bytes": "e0072001",
+    "ghidra_assembly": "halt"
+  },
+  {
+    "id": "hsh_117",
+    "cpu": "v850e3v5",
+    "assembly": "hsh gp, gp",
+    "bytes": "e0274623",
+    "ghidra_assembly": "hsh gp,gp"
+  },
+  {
+    "id": "hsw_118",
+    "cpu": "v850e3v5",
+    "assembly": "hsw gp, gp",
+    "bytes": "e0274423",
+    "ghidra_assembly": "hsw gp,gp"
+  },
+  {
+    "id": "jarl_122",
+    "cpu": "v850e3v5",
+    "assembly": "jarl .+8, gp",
+    "bytes": "80270800",
+    "ghidra_assembly": "jarl 0x00001008,gp"
+  },
+  {
+    "id": "jarl22_125",
+    "cpu": "v850e3v5",
+    "assembly": "jarl22 .+8, gp",
+    "bytes": "80270800",
+    "ghidra_assembly": "jarl 0x00001008,gp"
+  },
+  {
+    "id": "jmp_128",
+    "cpu": "v850e3v5",
+    "assembly": "jmp32 -4[gp]",
+    "bytes": "e406fcffffff",
+    "ghidra_assembly": "jmp 0xfffffffc[gp]"
+  },
+  {
+    "id": "jmp_129",
+    "cpu": "v850e2v3",
+    "assembly": "jmp32 -4[gp]",
+    "bytes": "e406fcffffff",
+    "ghidra_assembly": "jmp 0xfffffffc[gp]"
+  },
+  {
+    "id": "jmp_130",
+    "cpu": "v850e3v5",
+    "assembly": "jmp [gp]",
+    "bytes": "6400",
+    "ghidra_assembly": "jmp [gp]"
+  },
+  {
+    "id": "jmp22_131",
+    "cpu": "v850e3v5",
+    "assembly": "jmp22 [gp]",
+    "bytes": "6400",
+    "ghidra_assembly": "jmp [gp]"
+  },
+  {
+    "id": "jmp32_132",
+    "cpu": "v850e3v5",
+    "assembly": "jmp32 -4[gp]",
+    "bytes": "e406fcffffff",
+    "ghidra_assembly": "jmp 0xfffffffc[gp]"
+  },
+  {
+    "id": "jmpw_133",
+    "cpu": "v850e3v5",
+    "assembly": "jmpw -4[gp]",
+    "bytes": "e406fcffffff",
+    "ghidra_assembly": "jmp 0xfffffffc[gp]"
+  },
+  {
+    "id": "jr_134",
+    "cpu": "v850e3v5",
+    "assembly": "jr .+8",
+    "bytes": "80070800",
+    "ghidra_assembly": "jr 0x00001008"
+  },
+  {
+    "id": "jr22_136",
+    "cpu": "v850e3v5",
+    "assembly": "jr22 .+8",
+    "bytes": "80070800",
+    "ghidra_assembly": "jr 0x00001008"
+  },
+  {
+    "id": "jgt_138",
+    "cpu": "v850e3v5",
+    "assembly": "jgt .+8",
+    "bytes": "cf05",
+    "ghidra_assembly": "bgt 0x00001008"
+  },
+  {
+    "id": "jge_139",
+    "cpu": "v850e3v5",
+    "assembly": "jge .+8",
+    "bytes": "ce05",
+    "ghidra_assembly": "bge 0x00001008"
+  },
+  {
+    "id": "jlt_140",
+    "cpu": "v850e3v5",
+    "assembly": "jlt .+8",
+    "bytes": "c605",
+    "ghidra_assembly": "blt 0x00001008"
+  },
+  {
+    "id": "jle_141",
+    "cpu": "v850e3v5",
+    "assembly": "jle .+8",
+    "bytes": "c705",
+    "ghidra_assembly": "ble 0x00001008"
+  },
+  {
+    "id": "jh_142",
+    "cpu": "v850e3v5",
+    "assembly": "jh .+8",
+    "bytes": "cb05",
+    "ghidra_assembly": "bh 0x00001008"
+  },
+  {
+    "id": "jnh_143",
+    "cpu": "v850e3v5",
+    "assembly": "jnh .+8",
+    "bytes": "c305",
+    "ghidra_assembly": "bnh 0x00001008"
+  },
+  {
+    "id": "jl_144",
+    "cpu": "v850e3v5",
+    "assembly": "jl .+8",
+    "bytes": "c105",
+    "ghidra_assembly": "bc 0x00001008"
+  },
+  {
+    "id": "jnl_145",
+    "cpu": "v850e3v5",
+    "assembly": "jnl .+8",
+    "bytes": "c905",
+    "ghidra_assembly": "bnc 0x00001008"
+  },
+  {
+    "id": "je_146",
+    "cpu": "v850e3v5",
+    "assembly": "je .+8",
+    "bytes": "c205",
+    "ghidra_assembly": "be 0x00001008"
+  },
+  {
+    "id": "jne_147",
+    "cpu": "v850e3v5",
+    "assembly": "jne .+8",
+    "bytes": "ca05",
+    "ghidra_assembly": "bne 0x00001008"
+  },
+  {
+    "id": "jv_148",
+    "cpu": "v850e3v5",
+    "assembly": "jv .+8",
+    "bytes": "c005",
+    "ghidra_assembly": "bv 0x00001008"
+  },
+  {
+    "id": "jnv_149",
+    "cpu": "v850e3v5",
+    "assembly": "jnv .+8",
+    "bytes": "c805",
+    "ghidra_assembly": "bnv 0x00001008"
+  },
+  {
+    "id": "jn_150",
+    "cpu": "v850e3v5",
+    "assembly": "jn .+8",
+    "bytes": "c405",
+    "ghidra_assembly": "bn 0x00001008"
+  },
+  {
+    "id": "jp_151",
+    "cpu": "v850e3v5",
+    "assembly": "jp .+8",
+    "bytes": "cc05",
+    "ghidra_assembly": "bp 0x00001008"
+  },
+  {
+    "id": "jc_152",
+    "cpu": "v850e3v5",
+    "assembly": "jc .+8",
+    "bytes": "c105",
+    "ghidra_assembly": "bc 0x00001008"
+  },
+  {
+    "id": "jnc_153",
+    "cpu": "v850e3v5",
+    "assembly": "jnc .+8",
+    "bytes": "c905",
+    "ghidra_assembly": "bnc 0x00001008"
+  },
+  {
+    "id": "jz_154",
+    "cpu": "v850e3v5",
+    "assembly": "jz .+8",
+    "bytes": "c205",
+    "ghidra_assembly": "be 0x00001008"
+  },
+  {
+    "id": "jnz_155",
+    "cpu": "v850e3v5",
+    "assembly": "jnz .+8",
+    "bytes": "ca05",
+    "ghidra_assembly": "bne 0x00001008"
+  },
+  {
+    "id": "jbr_156",
+    "cpu": "v850e3v5",
+    "assembly": "jbr .+8",
+    "bytes": "c505",
+    "ghidra_assembly": "br 0x00001008"
+  },
+  {
+    "id": "ld.b_158",
+    "cpu": "v850e3v5",
+    "assembly": "ld.b -4[gp], gp",
+    "bytes": "0427fcff",
+    "ghidra_assembly": "ld.b -0x4[gp],gp"
+  },
+  {
+    "id": "ld.bu_161",
+    "cpu": "v850e3v5",
+    "assembly": "ld.bu -4[gp], gp",
+    "bytes": "8427fdff",
+    "ghidra_assembly": "ld.bu -0x4[gp],gp"
+  },
+  {
+    "id": "ld.h_166",
+    "cpu": "v850e3v5",
+    "assembly": "ld.h -4[gp], gp",
+    "bytes": "2427fcff",
+    "ghidra_assembly": "ld.h -0x4[gp],gp"
+  },
+  {
+    "id": "ld.hu_169",
+    "cpu": "v850e3v5",
+    "assembly": "ld.hu -4[gp], gp",
+    "bytes": "e427fdff",
+    "ghidra_assembly": "ld.hu -0x4[gp],gp"
+  },
+  {
+    "id": "ld.w_172",
+    "cpu": "v850e3v5",
+    "assembly": "ld.w -4[gp], gp",
+    "bytes": "2427fdff",
+    "ghidra_assembly": "ld.w -0x4[gp],gp"
+  },
+  {
+    "id": "ldsr_177",
+    "cpu": "v850e3v5",
+    "assembly": "ldsr gp, sr4",
+    "bytes": "e4272000",
+    "ghidra_assembly": "ldsr gp,ECR"
+  },
+  {
+    "id": "ldsr_178",
+    "cpu": "v850e2v3",
+    "assembly": "ldsr gp, sr4",
+    "bytes": "e4272000",
+    "ghidra_assembly": "ldsr gp,ECR"
+  },
+  {
+    "id": "loop_186",
+    "cpu": "v850e3v5",
+    "assembly": "loop gp, .-8",
+    "bytes": "e4060900",
+    "ghidra_assembly": "mulhi 0x9,gp,r0"
+  },
+  {
+    "id": "mac_188",
+    "cpu": "v850e3v5",
+    "assembly": "mac gp, gp, gp, gp",
+    "bytes": "e427c423",
+    "ghidra_assembly": "mac gp,gp,r4r5,r4r5"
+  },
+  {
+    "id": "macu_189",
+    "cpu": "v850e3v5",
+    "assembly": "macu gp, gp, gp, gp",
+    "bytes": "e427e423",
+    "ghidra_assembly": "macu gp,gp,r4r5,r4r5"
+  },
+  {
+    "id": "mov_191",
+    "cpu": "v850e3v5",
+    "assembly": "mov gp, gp",
+    "bytes": "0420",
+    "ghidra_assembly": "mov gp,gp"
+  },
+  {
+    "id": "mov_192",
+    "cpu": "v850e3v5",
+    "assembly": "mov -4, gp",
+    "bytes": "1c22",
+    "ghidra_assembly": "mov -0x4,gp"
+  },
+  {
+    "id": "mov_193",
+    "cpu": "v850e3v5",
+    "assembly": "mov 305419896, gp",
+    "bytes": "240678563412",
+    "ghidra_assembly": "mov 0x12345678,gp"
+  },
+  {
+    "id": "movl_194",
+    "cpu": "v850e3v5",
+    "assembly": "movl 305419896, gp",
+    "bytes": "240678563412",
+    "ghidra_assembly": "mov 0x12345678,gp"
+  },
+  {
+    "id": "movea_195",
+    "cpu": "v850e3v5",
+    "assembly": "movea -4, gp, gp",
+    "bytes": "2426fcff",
+    "ghidra_assembly": "movea -0x4,gp,gp"
+  },
+  {
+    "id": "movhi_196",
+    "cpu": "v850e3v5",
+    "assembly": "movhi -4, gp, gp",
+    "bytes": "4426fcff",
+    "ghidra_assembly": "movhi -0x4,gp,gp"
+  },
+  {
+    "id": "mul_197",
+    "cpu": "v850e3v5",
+    "assembly": "mul gp, gp, gp",
+    "bytes": "e4272022",
+    "ghidra_assembly": "mul gp,gp,gp"
+  },
+  {
+    "id": "mul_198",
+    "cpu": "v850e3v5",
+    "assembly": "mul -4, gp, gp",
+    "bytes": "fc277c22",
+    "ghidra_assembly": "mul -0x4,gp,gp"
+  },
+  {
+    "id": "mulh_199",
+    "cpu": "v850e3v5",
+    "assembly": "mulh -4, gp",
+    "bytes": "fc22",
+    "ghidra_assembly": "mulh -0x4,gp"
+  },
+  {
+    "id": "mulh_200",
+    "cpu": "v850e3v5",
+    "assembly": "mulh gp, gp",
+    "bytes": "e420",
+    "ghidra_assembly": "mulh gp,gp"
+  },
+  {
+    "id": "mulhi_201",
+    "cpu": "v850e3v5",
+    "assembly": "mulhi -4, gp, gp",
+    "bytes": "e426fcff",
+    "ghidra_assembly": "mulhi -0x4,gp,gp"
+  },
+  {
+    "id": "mulu_202",
+    "cpu": "v850e3v5",
+    "assembly": "mulu gp, gp, gp",
+    "bytes": "e4272222",
+    "ghidra_assembly": "mulu gp,gp,gp"
+  },
+  {
+    "id": "mulu_203",
+    "cpu": "v850e3v5",
+    "assembly": "mulu 4, gp, gp",
+    "bytes": "e4274222",
+    "ghidra_assembly": "mulu 0x4,gp,gp"
+  },
+  {
+    "id": "nop_204",
+    "cpu": "v850e3v5",
+    "assembly": "nop",
+    "bytes": "0000",
+    "ghidra_assembly": "nop"
+  },
+  {
+    "id": "not_205",
+    "cpu": "v850e3v5",
+    "assembly": "not gp, gp",
+    "bytes": "2420",
+    "ghidra_assembly": "not gp,gp"
+  },
+  {
+    "id": "not1_206",
+    "cpu": "v850e3v5",
+    "assembly": "not1 4, -4[gp]",
+    "bytes": "c467fcff",
+    "ghidra_assembly": "not1 0x4,-0x4[gp]"
+  },
+  {
+    "id": "not1_207",
+    "cpu": "v850e3v5",
+    "assembly": "not1 gp, [gp]",
+    "bytes": "e427e200",
+    "ghidra_assembly": "not1 gp,[gp]"
+  },
+  {
+    "id": "or_208",
+    "cpu": "v850e3v5",
+    "assembly": "or gp, gp",
+    "bytes": "0421",
+    "ghidra_assembly": "or gp,gp"
+  },
+  {
+    "id": "ori_209",
+    "cpu": "v850e3v5",
+    "assembly": "ori 4, gp, gp",
+    "bytes": "84260400",
+    "ghidra_assembly": "ori 0x4,gp,gp"
+  },
+  {
+    "id": "prepare_212",
+    "cpu": "v850e3v5",
+    "assembly": "prepare {r20-r22}, 4, sp",
+    "bytes": "8807030e",
+    "ghidra_assembly": "prepare { r20,r21,r22 },0x4,sp"
+  },
+  {
+    "id": "prepare_213",
+    "cpu": "v850e3v5",
+    "assembly": "prepare {r20-r22}, 4, -4",
+    "bytes": "88070b0efcff",
+    "ghidra_assembly": "prepare { r20,r21,r22 },0x4,-0x4"
+  },
+  {
+    "id": "prepare_215",
+    "cpu": "v850e3v5",
+    "assembly": "prepare {r20-r22}, 4, 305419896",
+    "bytes": "88071b0e78563412",
+    "ghidra_assembly": "prepare { r20,r21,r22 },0x4,0x12345678"
+  },
+  {
+    "id": "prepare_216",
+    "cpu": "v850e3v5",
+    "assembly": "prepare {r20-r22}, 4",
+    "bytes": "8807010e",
+    "ghidra_assembly": "prepare { r20,r21,r22 },0x4"
+  },
+  {
+    "id": "reti_220",
+    "cpu": "v850e3v5",
+    "assembly": "reti",
+    "bytes": "e0074001",
+    "ghidra_assembly": "reti"
+  },
+  {
+    "id": "sar_221",
+    "cpu": "v850e3v5",
+    "assembly": "sar gp, gp, gp",
+    "bytes": "e427a220",
+    "ghidra_assembly": "sar gp,gp,gp"
+  },
+  {
+    "id": "sar_222",
+    "cpu": "v850e3v5",
+    "assembly": "sar 4, gp",
+    "bytes": "a422",
+    "ghidra_assembly": "sar 0x4,gp"
+  },
+  {
+    "id": "sar_223",
+    "cpu": "v850e3v5",
+    "assembly": "sar gp, gp",
+    "bytes": "e427a000",
+    "ghidra_assembly": "sar gp,gp"
+  },
+  {
+    "id": "sasf_224",
+    "cpu": "v850e3v5",
+    "assembly": "sasf s, gp",
+    "bytes": "e4270002",
+    "ghidra_assembly": "sasfn gp"
+  },
+  {
+    "id": "satadd_225",
+    "cpu": "v850e3v5",
+    "assembly": "satadd gp, gp, gp",
+    "bytes": "e427ba23",
+    "ghidra_assembly": "satadd gp,gp,gp"
+  },
+  {
+    "id": "satadd_226",
+    "cpu": "v850e3v5",
+    "assembly": "satadd -4, gp",
+    "bytes": "3c22",
+    "ghidra_assembly": "satadd -0x4,gp"
+  },
+  {
+    "id": "satadd_227",
+    "cpu": "v850e3v5",
+    "assembly": "satadd gp, gp",
+    "bytes": "c420",
+    "ghidra_assembly": "satadd gp,gp"
+  },
+  {
+    "id": "satsub_228",
+    "cpu": "v850e3v5",
+    "assembly": "satsub gp, gp, gp",
+    "bytes": "e4279a23",
+    "ghidra_assembly": "satsub gp,gp,gp"
+  },
+  {
+    "id": "satsub_229",
+    "cpu": "v850e3v5",
+    "assembly": "satsub gp, gp",
+    "bytes": "a420",
+    "ghidra_assembly": "satsub gp,gp"
+  },
+  {
+    "id": "satsubi_230",
+    "cpu": "v850e3v5",
+    "assembly": "satsubi -4, gp, gp",
+    "bytes": "6426fcff",
+    "ghidra_assembly": "satsubi -0x4,gp,gp"
+  },
+  {
+    "id": "satsubr_231",
+    "cpu": "v850e3v5",
+    "assembly": "satsubr gp, gp",
+    "bytes": "8420",
+    "ghidra_assembly": "satsubr gp,gp"
+  },
+  {
+    "id": "sbf_232",
+    "cpu": "v850e3v5",
+    "assembly": "sbf s, gp, gp, gp",
+    "bytes": "e4278823",
+    "ghidra_assembly": "sbfn gp,gp,gp"
+  },
+  {
+    "id": "sch0l_233",
+    "cpu": "v850e3v5",
+    "assembly": "sch0l gp, gp",
+    "bytes": "e0276423",
+    "ghidra_assembly": "sch0l gp,gp"
+  },
+  {
+    "id": "sch0r_234",
+    "cpu": "v850e3v5",
+    "assembly": "sch0r gp, gp",
+    "bytes": "e0276023",
+    "ghidra_assembly": "sch0r gp,gp"
+  },
+  {
+    "id": "sch1l_235",
+    "cpu": "v850e3v5",
+    "assembly": "sch1l gp, gp",
+    "bytes": "e0276623",
+    "ghidra_assembly": "sch1l gp,gp"
+  },
+  {
+    "id": "sch1r_236",
+    "cpu": "v850e3v5",
+    "assembly": "sch1r gp, gp",
+    "bytes": "e0276223",
+    "ghidra_assembly": "sch1r gp,gp"
+  },
+  {
+    "id": "set1_241",
+    "cpu": "v850e3v5",
+    "assembly": "set1 4, -4[gp]",
+    "bytes": "c427fcff",
+    "ghidra_assembly": "set1 0x4,-0x4[gp]"
+  },
+  {
+    "id": "set1_242",
+    "cpu": "v850e3v5",
+    "assembly": "set1 gp, [gp]",
+    "bytes": "e427e000",
+    "ghidra_assembly": "set1 gp,[gp]"
+  },
+  {
+    "id": "setf_243",
+    "cpu": "v850e3v5",
+    "assembly": "setf s, gp",
+    "bytes": "e4270000",
+    "ghidra_assembly": "setfn gp"
+  },
+  {
+    "id": "shl_244",
+    "cpu": "v850e3v5",
+    "assembly": "shl gp, gp, gp",
+    "bytes": "e427c220",
+    "ghidra_assembly": "shl gp,gp,gp"
+  },
+  {
+    "id": "shl_245",
+    "cpu": "v850e3v5",
+    "assembly": "shl 4, gp",
+    "bytes": "c422",
+    "ghidra_assembly": "shl 0x4,gp"
+  },
+  {
+    "id": "shl_246",
+    "cpu": "v850e3v5",
+    "assembly": "shl gp, gp",
+    "bytes": "e427c000",
+    "ghidra_assembly": "shl gp,gp"
+  },
+  {
+    "id": "shr_247",
+    "cpu": "v850e3v5",
+    "assembly": "shr gp, gp, gp",
+    "bytes": "e4278220",
+    "ghidra_assembly": "shr gp,gp,gp"
+  },
+  {
+    "id": "shr_248",
+    "cpu": "v850e3v5",
+    "assembly": "shr 4, gp",
+    "bytes": "8422",
+    "ghidra_assembly": "shr 0x4,gp"
+  },
+  {
+    "id": "shr_249",
+    "cpu": "v850e3v5",
+    "assembly": "shr gp, gp",
+    "bytes": "e4278000",
+    "ghidra_assembly": "shr gp,gp"
+  },
+  {
+    "id": "sld.b_250",
+    "cpu": "v850e3v5",
+    "assembly": "sld.b 4[ep], gp",
+    "bytes": "0423",
+    "ghidra_assembly": "sld.b 0x4[ep],gp"
+  },
+  {
+    "id": "sld.bu_251",
+    "cpu": "v850e3v5",
+    "assembly": "sld.bu 4[ep], gp",
+    "bytes": "6420",
+    "ghidra_assembly": "sld.bu 0x4[ep],gp"
+  },
+  {
+    "id": "sld.h_252",
+    "cpu": "v850e3v5",
+    "assembly": "sld.h 4[ep], gp",
+    "bytes": "0224",
+    "ghidra_assembly": "sld.h 0x4[ep],gp"
+  },
+  {
+    "id": "sld.hu_253",
+    "cpu": "v850e3v5",
+    "assembly": "sld.hu 4[ep], gp",
+    "bytes": "7220",
+    "ghidra_assembly": "sld.hu 0x4[ep],gp"
+  },
+  {
+    "id": "sld.w_254",
+    "cpu": "v850e3v5",
+    "assembly": "sld.w 4[ep], gp",
+    "bytes": "0225",
+    "ghidra_assembly": "sld.w 0x4[ep],gp"
+  },
+  {
+    "id": "sst.b_256",
+    "cpu": "v850e3v5",
+    "assembly": "sst.b gp, 4[ep]",
+    "bytes": "8423",
+    "ghidra_assembly": "sst.b gp,0x4[ep]"
+  },
+  {
+    "id": "sst.h_257",
+    "cpu": "v850e3v5",
+    "assembly": "sst.h gp, 4[ep]",
+    "bytes": "8224",
+    "ghidra_assembly": "sst.h gp,0x4[ep]"
+  },
+  {
+    "id": "sst.w_258",
+    "cpu": "v850e3v5",
+    "assembly": "sst.w gp, 4[ep]",
+    "bytes": "0325",
+    "ghidra_assembly": "sst.w gp,0x4[ep]"
+  },
+  {
+    "id": "st.b_261",
+    "cpu": "v850e3v5",
+    "assembly": "st.b gp, -4[gp]",
+    "bytes": "4427fcff",
+    "ghidra_assembly": "st.b gp,-0x4[gp]"
+  },
+  {
+    "id": "st.h_266",
+    "cpu": "v850e3v5",
+    "assembly": "st.h gp, -4[gp]",
+    "bytes": "6427fcff",
+    "ghidra_assembly": "st.h gp,-0x4[gp]"
+  },
+  {
+    "id": "st.w_269",
+    "cpu": "v850e3v5",
+    "assembly": "st.w gp, -4[gp]",
+    "bytes": "6427fdff",
+    "ghidra_assembly": "st.w gp,-0x4[gp]"
+  },
+  {
+    "id": "stsr_274",
+    "cpu": "v850e3v5",
+    "assembly": "stsr sr4, gp",
+    "bytes": "e4274000",
+    "ghidra_assembly": "stsr ECR,gp"
+  },
+  {
+    "id": "stsr_275",
+    "cpu": "v850e2v3",
+    "assembly": "stsr sr4, gp",
+    "bytes": "e4274000",
+    "ghidra_assembly": "stsr ECR,gp"
+  },
+  {
+    "id": "sub_283",
+    "cpu": "v850e3v5",
+    "assembly": "sub gp, gp",
+    "bytes": "a421",
+    "ghidra_assembly": "sub gp,gp"
+  },
+  {
+    "id": "subr_284",
+    "cpu": "v850e3v5",
+    "assembly": "subr gp, gp",
+    "bytes": "8421",
+    "ghidra_assembly": "subr gp,gp"
+  },
+  {
+    "id": "switch_285",
+    "cpu": "v850e3v5",
+    "assembly": "switch gp",
+    "bytes": "4400",
+    "ghidra_assembly": "switch gp"
+  },
+  {
+    "id": "sxb_286",
+    "cpu": "v850e3v5",
+    "assembly": "sxb gp",
+    "bytes": "a400",
+    "ghidra_assembly": "sxb gp"
+  },
+  {
+    "id": "sxh_287",
+    "cpu": "v850e3v5",
+    "assembly": "sxh gp",
+    "bytes": "e400",
+    "ghidra_assembly": "sxh gp"
+  },
+  {
+    "id": "trap_293",
+    "cpu": "v850e3v5",
+    "assembly": "trap 4",
+    "bytes": "e4070001",
+    "ghidra_assembly": "trap 0x4"
+  },
+  {
+    "id": "tst_294",
+    "cpu": "v850e3v5",
+    "assembly": "tst gp, gp",
+    "bytes": "6421",
+    "ghidra_assembly": "tst gp,gp"
+  },
+  {
+    "id": "tst1_295",
+    "cpu": "v850e3v5",
+    "assembly": "tst1 4, -4[gp]",
+    "bytes": "c4e7fcff",
+    "ghidra_assembly": "tst1 0x4,-0x4[gp]"
+  },
+  {
+    "id": "tst1_296",
+    "cpu": "v850e3v5",
+    "assembly": "tst1 gp, [gp]",
+    "bytes": "e427e600",
+    "ghidra_assembly": "tst1 gp,[gp]"
+  },
+  {
+    "id": "xor_297",
+    "cpu": "v850e3v5",
+    "assembly": "xor gp, gp",
+    "bytes": "2421",
+    "ghidra_assembly": "xor gp,gp"
+  },
+  {
+    "id": "xori_298",
+    "cpu": "v850e3v5",
+    "assembly": "xori 4, gp, gp",
+    "bytes": "a4260400",
+    "ghidra_assembly": "xori 0x4,gp,gp"
+  },
+  {
+    "id": "zxb_299",
+    "cpu": "v850e3v5",
+    "assembly": "zxb gp",
+    "bytes": "8400",
+    "ghidra_assembly": "zxb gp"
+  },
+  {
+    "id": "zxh_300",
+    "cpu": "v850e3v5",
+    "assembly": "zxh gp",
+    "bytes": "c400",
+    "ghidra_assembly": "zxh gp"
+  },
+  {
+    "id": "absf.d_301",
+    "cpu": "v850e3v5",
+    "assembly": "absf.d gp, gp",
+    "bytes": "e0275824",
+    "ghidra_assembly": "absf.d r4r5,r4r5"
+  },
+  {
+    "id": "absf.s_302",
+    "cpu": "v850e3v5",
+    "assembly": "absf.s gp, gp",
+    "bytes": "e0274824",
+    "ghidra_assembly": "absf.s gp,gp"
+  },
+  {
+    "id": "addf.d_303",
+    "cpu": "v850e3v5",
+    "assembly": "addf.d gp, gp, gp",
+    "bytes": "e4277024",
+    "ghidra_assembly": "addf.d r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "addf.s_304",
+    "cpu": "v850e3v5",
+    "assembly": "addf.s gp, gp, gp",
+    "bytes": "e4276024",
+    "ghidra_assembly": "addf.s gp,gp,gp"
+  },
+  {
+    "id": "ceilf.dl_305",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.dl gp, gp",
+    "bytes": "e2275424",
+    "ghidra_assembly": "ceilf.dl r4r5,r4r5"
+  },
+  {
+    "id": "ceilf.dul_306",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.dul gp, gp",
+    "bytes": "f2275424",
+    "ghidra_assembly": "ceilf.dul r4r5,r4r5"
+  },
+  {
+    "id": "ceilf.duw_307",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.duw gp, gp",
+    "bytes": "f2275024",
+    "ghidra_assembly": "ceilf.duw r4r5,gp"
+  },
+  {
+    "id": "ceilf.dw_308",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.dw gp, gp",
+    "bytes": "e2275024",
+    "ghidra_assembly": "ceilf.dw r4r5,gp"
+  },
+  {
+    "id": "ceilf.sl_309",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.sl gp, gp",
+    "bytes": "e2274424",
+    "ghidra_assembly": "ceilf.sl gp,r4r5"
+  },
+  {
+    "id": "ceilf.sul_310",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.sul gp, gp",
+    "bytes": "f2274424",
+    "ghidra_assembly": "ceilf.sul gp,r4r5"
+  },
+  {
+    "id": "ceilf.suw_311",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.suw gp, gp",
+    "bytes": "f2274024",
+    "ghidra_assembly": "ceilf.sul gp,gp"
+  },
+  {
+    "id": "ceilf.sw_312",
+    "cpu": "v850e3v5",
+    "assembly": "ceilf.sw gp, gp",
+    "bytes": "e2274024",
+    "ghidra_assembly": "ceilf.sw gp,gp"
+  },
+  {
+    "id": "cmovf.d_313",
+    "cpu": "v850e3v5",
+    "assembly": "cmovf.d 4, gp, gp, gp",
+    "bytes": "e4271824",
+    "ghidra_assembly": "cmovf.d 0x4,r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "cmovf.d_314",
+    "cpu": "v850e3v5",
+    "assembly": "cmovf.d gp, gp, gp",
+    "bytes": "e4271024",
+    "ghidra_assembly": "cmovf.d 0x0,r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "cmovf.s_315",
+    "cpu": "v850e3v5",
+    "assembly": "cmovf.s 4, gp, gp, gp",
+    "bytes": "e4270824",
+    "ghidra_assembly": "cmovf.s 0x4,gp,gp,gp"
+  },
+  {
+    "id": "cmovf.s_316",
+    "cpu": "v850e3v5",
+    "assembly": "cmovf.s gp, gp, gp",
+    "bytes": "e4270024",
+    "ghidra_assembly": "cmovf.s 0x0,gp,gp,gp"
+  },
+  {
+    "id": "cmpf.d_317",
+    "cpu": "v850e3v5",
+    "assembly": "cmpf.d olt, gp, gp, 4",
+    "bytes": "e4273824",
+    "ghidra_assembly": "cmpf.d olt,r4r5,r4r5,0x4"
+  },
+  {
+    "id": "cmpf.d_318",
+    "cpu": "v850e3v5",
+    "assembly": "cmpf.d olt, gp, gp",
+    "bytes": "e4273024",
+    "ghidra_assembly": "cmpf.d olt,r4r5,r4r5,0x0"
+  },
+  {
+    "id": "cmpf.s_319",
+    "cpu": "v850e3v5",
+    "assembly": "cmpf.s olt, gp, gp, 4",
+    "bytes": "e4272824",
+    "ghidra_assembly": "cmpf.s olt,gp,gp,0x4"
+  },
+  {
+    "id": "cmpf.s_320",
+    "cpu": "v850e3v5",
+    "assembly": "cmpf.s olt, gp, gp",
+    "bytes": "e4272024",
+    "ghidra_assembly": "cmpf.s olt,gp,gp,0x0"
+  },
+  {
+    "id": "cvtf.dl_321",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.dl gp, gp",
+    "bytes": "e4275424",
+    "ghidra_assembly": "cvtf.dl r4r5,r4r5"
+  },
+  {
+    "id": "cvtf.ds_322",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.ds gp, gp",
+    "bytes": "e3275224",
+    "ghidra_assembly": "cvtf.ds r4r5,gp"
+  },
+  {
+    "id": "cvtf.dul_323",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.dul gp, gp",
+    "bytes": "f4275424",
+    "ghidra_assembly": "cvtf.dul r4r5,r4r5"
+  },
+  {
+    "id": "cvtf.duw_324",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.duw gp, gp",
+    "bytes": "f4275024",
+    "ghidra_assembly": "cvtf.duw r4r5,gp"
+  },
+  {
+    "id": "cvtf.dw_325",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.dw gp, gp",
+    "bytes": "e4275024",
+    "ghidra_assembly": "cvtf.sw r4r5,gp"
+  },
+  {
+    "id": "cvtf.ld_327",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.ld gp, gp",
+    "bytes": "e1275224",
+    "ghidra_assembly": "cvtf.ls r4r5,r4r5"
+  },
+  {
+    "id": "cvtf.ls_328",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.ls gp, gp",
+    "bytes": "e1274224",
+    "ghidra_assembly": "cvtf.ls r4r5,gp"
+  },
+  {
+    "id": "cvtf.sd_329",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.sd gp, gp",
+    "bytes": "e2275224",
+    "ghidra_assembly": "cvtf.sd gp,r4r5"
+  },
+  {
+    "id": "cvtf.sl_330",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.sl gp, gp",
+    "bytes": "e4274424",
+    "ghidra_assembly": "cvtf.sl gp,r4r5"
+  },
+  {
+    "id": "cvtf.sul_332",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.sul gp, gp",
+    "bytes": "f4274424",
+    "ghidra_assembly": "cvtf.sul gp,r4r5"
+  },
+  {
+    "id": "cvtf.suw_333",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.suw gp, gp",
+    "bytes": "f4274024",
+    "ghidra_assembly": "cvtf.suw gp,gp"
+  },
+  {
+    "id": "cvtf.sw_334",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.sw gp, gp",
+    "bytes": "e4274024",
+    "ghidra_assembly": "cvtf.sw gp,gp"
+  },
+  {
+    "id": "cvtf.uld_335",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.uld gp, gp",
+    "bytes": "f1275224",
+    "ghidra_assembly": "cvtf.uls r4r5,r4r5"
+  },
+  {
+    "id": "cvtf.uls_336",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.uls gp, gp",
+    "bytes": "f1274224",
+    "ghidra_assembly": "cvtf.uls r4r5,gp"
+  },
+  {
+    "id": "cvtf.uwd_337",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.uwd gp, gp",
+    "bytes": "f0275224",
+    "ghidra_assembly": "cvtf.uwd gp,r4r5"
+  },
+  {
+    "id": "cvtf.uws_338",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.uws gp, gp",
+    "bytes": "f0274224",
+    "ghidra_assembly": "cvtf.uws gp,gp"
+  },
+  {
+    "id": "cvtf.wd_339",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.wd gp, gp",
+    "bytes": "e0275224",
+    "ghidra_assembly": "cvtf.wd gp,r4r5"
+  },
+  {
+    "id": "cvtf.ws_340",
+    "cpu": "v850e3v5",
+    "assembly": "cvtf.ws gp, gp",
+    "bytes": "e0274224",
+    "ghidra_assembly": "cvtf.ws gp,gp"
+  },
+  {
+    "id": "divf.d_341",
+    "cpu": "v850e3v5",
+    "assembly": "divf.d gp, gp, gp",
+    "bytes": "e4277e24",
+    "ghidra_assembly": "divf.s r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "divf.s_342",
+    "cpu": "v850e3v5",
+    "assembly": "divf.s gp, gp, gp",
+    "bytes": "e4276e24",
+    "ghidra_assembly": "divf.s gp,gp,gp"
+  },
+  {
+    "id": "floorf.dl_343",
+    "cpu": "v850e3v5",
+    "assembly": "floorf.dl gp, gp",
+    "bytes": "e3275424",
+    "ghidra_assembly": "floorf.dl r4r5,r4r5"
+  },
+  {
+    "id": "floorf.dul_344",
+    "cpu": "v850e3v5",
+    "assembly": "floorf.dul gp, gp",
+    "bytes": "f3275424",
+    "ghidra_assembly": "floorf.dul r4r5,r4r5"
+  },
+  {
+    "id": "floorf.duw_345",
+    "cpu": "v850e3v5",
+    "assembly": "floorf.duw gp, gp",
+    "bytes": "f3275024",
+    "ghidra_assembly": "floorf.duw r4r5,gp"
+  },
+  {
+    "id": "floorf.dw_346",
+    "cpu": "v850e3v5",
+    "assembly": "floorf.dw gp, gp",
+    "bytes": "e3275024",
+    "ghidra_assembly": "floorf.dw r4r5,gp"
+  },
+  {
+    "id": "floorf.sl_347",
+    "cpu": "v850e3v5",
+    "assembly": "floorf.sl gp, gp",
+    "bytes": "e3274424",
+    "ghidra_assembly": "floorf.sl gp,r4r5"
+  },
+  {
+    "id": "floorf.sul_348",
+    "cpu": "v850e3v5",
+    "assembly": "floorf.sul gp, gp",
+    "bytes": "f3274424",
+    "ghidra_assembly": "floorf.sul gp,r4r5"
+  },
+  {
+    "id": "floorf.sw_350",
+    "cpu": "v850e3v5",
+    "assembly": "floorf.sw gp, gp",
+    "bytes": "e3274024",
+    "ghidra_assembly": "floorf.suw gp,gp"
+  },
+  {
+    "id": "maddf.s_351",
+    "cpu": "v850e2v3",
+    "assembly": "maddf.s gp, gp, gp, gp",
+    "bytes": "e4270425",
+    "ghidra_assembly": "maddf.s gp,gp,gp,gp"
+  },
+  {
+    "id": "fmaf.s_352",
+    "cpu": "v850e3v5",
+    "assembly": "fmaf.s gp, gp, gp",
+    "bytes": "e427e024",
+    "ghidra_assembly": "fmaf.s gp,gp,gp"
+  },
+  {
+    "id": "maxf.d_353",
+    "cpu": "v850e3v5",
+    "assembly": "maxf.d gp, gp, gp",
+    "bytes": "e4277824",
+    "ghidra_assembly": "maxf.d r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "maxf.s_354",
+    "cpu": "v850e3v5",
+    "assembly": "maxf.s gp, gp, gp",
+    "bytes": "e4276824",
+    "ghidra_assembly": "maxf.s gp,gp,gp"
+  },
+  {
+    "id": "minf.d_355",
+    "cpu": "v850e3v5",
+    "assembly": "minf.d gp, gp, gp",
+    "bytes": "e4277a24",
+    "ghidra_assembly": "minf.d r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "minf.s_356",
+    "cpu": "v850e3v5",
+    "assembly": "minf.s gp, gp, gp",
+    "bytes": "e4276a24",
+    "ghidra_assembly": "minf.s gp,gp,gp"
+  },
+  {
+    "id": "msubf.s_357",
+    "cpu": "v850e2v3",
+    "assembly": "msubf.s gp, gp, gp, gp",
+    "bytes": "e4272425",
+    "ghidra_assembly": "msubf.s gp,gp,gp,gp"
+  },
+  {
+    "id": "fmsf.s_358",
+    "cpu": "v850e3v5",
+    "assembly": "fmsf.s gp, gp, gp",
+    "bytes": "e427e224",
+    "ghidra_assembly": "fmsf.s gp,gp,gp"
+  },
+  {
+    "id": "mulf.d_359",
+    "cpu": "v850e3v5",
+    "assembly": "mulf.d gp, gp, gp",
+    "bytes": "e4277424",
+    "ghidra_assembly": "mulf.d r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "mulf.s_360",
+    "cpu": "v850e3v5",
+    "assembly": "mulf.s gp, gp, gp",
+    "bytes": "e4276424",
+    "ghidra_assembly": "mulf.s gp,gp,gp"
+  },
+  {
+    "id": "negf.d_361",
+    "cpu": "v850e3v5",
+    "assembly": "negf.d gp, gp",
+    "bytes": "e1275824",
+    "ghidra_assembly": "negf.d r4r5,r4r5"
+  },
+  {
+    "id": "negf.s_362",
+    "cpu": "v850e3v5",
+    "assembly": "negf.s gp, gp",
+    "bytes": "e1274824",
+    "ghidra_assembly": "negf.s gp,gp"
+  },
+  {
+    "id": "nmaddf.s_363",
+    "cpu": "v850e2v3",
+    "assembly": "nmaddf.s gp, gp, gp, gp",
+    "bytes": "e4274425",
+    "ghidra_assembly": "nmaddf.s gp,gp,gp,gp"
+  },
+  {
+    "id": "fnmaf.s_364",
+    "cpu": "v850e3v5",
+    "assembly": "fnmaf.s gp, gp, gp",
+    "bytes": "e427e424",
+    "ghidra_assembly": "fnmaf.s gp,gp,gp"
+  },
+  {
+    "id": "nmsubf.s_365",
+    "cpu": "v850e2v3",
+    "assembly": "nmsubf.s gp, gp, gp, gp",
+    "bytes": "e4276425",
+    "ghidra_assembly": "nmsubf.s gp,gp,gp,gp"
+  },
+  {
+    "id": "fnmsf.s_366",
+    "cpu": "v850e3v5",
+    "assembly": "fnmsf.s gp, gp, gp",
+    "bytes": "e427e624",
+    "ghidra_assembly": "fnmfs.s gp,gp,gp"
+  },
+  {
+    "id": "recipf.d_367",
+    "cpu": "v850e3v5",
+    "assembly": "recipf.d gp, gp",
+    "bytes": "e1275e24",
+    "ghidra_assembly": "recipf.d r4r5,r4r5"
+  },
+  {
+    "id": "recipf.s_368",
+    "cpu": "v850e3v5",
+    "assembly": "recipf.s gp, gp",
+    "bytes": "e1274e24",
+    "ghidra_assembly": "recipf.s gp,gp"
+  },
+  {
+    "id": "rsqrtf.d_377",
+    "cpu": "v850e3v5",
+    "assembly": "rsqrtf.d gp, gp",
+    "bytes": "e2275e24",
+    "ghidra_assembly": "rsqrtf.d r4r5,r4r5"
+  },
+  {
+    "id": "rsqrtf.s_378",
+    "cpu": "v850e3v5",
+    "assembly": "rsqrtf.s gp, gp",
+    "bytes": "e2274e24",
+    "ghidra_assembly": "rsqrtf.s gp,gp"
+  },
+  {
+    "id": "sqrtf.d_379",
+    "cpu": "v850e3v5",
+    "assembly": "sqrtf.d gp, gp",
+    "bytes": "e0275e24",
+    "ghidra_assembly": "sqrtf.d r4r5,r4r5"
+  },
+  {
+    "id": "sqrtf.s_380",
+    "cpu": "v850e3v5",
+    "assembly": "sqrtf.s gp, gp",
+    "bytes": "e0274e24",
+    "ghidra_assembly": "sqrtf.s gp,gp"
+  },
+  {
+    "id": "subf.d_381",
+    "cpu": "v850e3v5",
+    "assembly": "subf.d gp, gp, gp",
+    "bytes": "e4277224",
+    "ghidra_assembly": "subf.d r4r5,r4r5,r4r5"
+  },
+  {
+    "id": "subf.s_382",
+    "cpu": "v850e3v5",
+    "assembly": "subf.s gp, gp, gp",
+    "bytes": "e4276224",
+    "ghidra_assembly": "subf.s gp,gp,gp"
+  },
+  {
+    "id": "trfsr_383",
+    "cpu": "v850e3v5",
+    "assembly": "trfsr 4",
+    "bytes": "e0070804",
+    "ghidra_assembly": "trfsr 0x4"
+  },
+  {
+    "id": "trfsr_384",
+    "cpu": "v850e3v5",
+    "assembly": "trfsr",
+    "bytes": "e0070004",
+    "ghidra_assembly": "trfsr 0x0"
+  },
+  {
+    "id": "trncf.dl_385",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.dl gp, gp",
+    "bytes": "e1275424",
+    "ghidra_assembly": "trncf.dl r4r5,r4r5"
+  },
+  {
+    "id": "trncf.dul_386",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.dul gp, gp",
+    "bytes": "f1275424",
+    "ghidra_assembly": "trncf.dul r4r5,r4r5"
+  },
+  {
+    "id": "trncf.duw_387",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.duw gp, gp",
+    "bytes": "f1275024",
+    "ghidra_assembly": "trncf.duw r4r5,gp"
+  },
+  {
+    "id": "trncf.dw_388",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.dw gp, gp",
+    "bytes": "e1275024",
+    "ghidra_assembly": "trncf.dw r4r5,gp"
+  },
+  {
+    "id": "trncf.sl_389",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.sl gp, gp",
+    "bytes": "e1274424",
+    "ghidra_assembly": "trncf.sl gp,r4r5"
+  },
+  {
+    "id": "trncf.sul_390",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.sul gp, gp",
+    "bytes": "f1274424",
+    "ghidra_assembly": "trncf.sul gp,r4r5"
+  },
+  {
+    "id": "trncf.suw_391",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.suw gp, gp",
+    "bytes": "f1274024",
+    "ghidra_assembly": "trncf.suw gp,gp"
+  },
+  {
+    "id": "trncf.sw_392",
+    "cpu": "v850e3v5",
+    "assembly": "trncf.sw gp, gp",
+    "bytes": "e1274024",
+    "ghidra_assembly": "trncf.sw gp,gp"
+  },
+  {
+    "id": "breakpoint_393",
+    "cpu": "v850e3v5",
+    "assembly": "breakpoint",
+    "bytes": "0100",
+    "ghidra_assembly": "mov r1,r0"
+  },
+  {
+    "id": "synci_394",
+    "cpu": "v850e3v5",
+    "assembly": "synci",
+    "bytes": "1c00",
+    "ghidra_assembly": "mov r28,r0"
+  },
+  {
+    "id": "synce_395",
+    "cpu": "v850e3v5",
+    "assembly": "synce",
+    "bytes": "1d00",
+    "ghidra_assembly": "synce"
+  },
+  {
+    "id": "syncm_396",
+    "cpu": "v850e3v5",
+    "assembly": "syncm",
+    "bytes": "1e00",
+    "ghidra_assembly": "syncm"
+  },
+  {
+    "id": "syncp_397",
+    "cpu": "v850e3v5",
+    "assembly": "syncp",
+    "bytes": "1f00",
+    "ghidra_assembly": "syncp"
+  },
+  {
+    "id": "syscall_398",
+    "cpu": "v850e3v5",
+    "assembly": "syscall 4",
+    "bytes": "e4d76001",
+    "ghidra_assembly": "syscall 0x4"
+  },
+  {
+    "id": "sync_399",
+    "cpu": "v850e3v5",
+    "assembly": "sync",
+    "bytes": "1f00",
+    "ghidra_assembly": "syncp"
+  },
+  {
+    "id": "rmtrap_400",
+    "cpu": "v850e3v5",
+    "assembly": "rmtrap",
+    "bytes": "40f0",
+    "ghidra_assembly": "divh r0,ep"
+  },
+  {
+    "id": "rie_401",
+    "cpu": "v850e3v5",
+    "assembly": "rie",
+    "bytes": "4000",
+    "ghidra_assembly": "rie"
+  },
+  {
+    "id": "rie_402",
+    "cpu": "v850e3v5",
+    "assembly": "rie 4, 4",
+    "bytes": "f4270000",
+    "ghidra_assembly": "rie 0x4,0x4"
+  }
+]
