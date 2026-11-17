@@ -1,0 +1,532 @@
+//! Structured address fields and transactional instruction/block relocation.
+use super::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AddressReferenceKind {
+    Branch,
+    Data,
+    Literal,
+    Absolute,
+}
+
+/// One physical little-endian field. `bit_offset` is measured from byte zero.
+/// `min`/`max` describe the encoded integer, before multiplication by `scale`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AddressReference {
+    pub operand_index: usize,
+    pub kind: AddressReferenceKind,
+    pub bit_offset: u16,
+    pub bit_width: u8,
+    pub signed: bool,
+    pub scale: u64,
+    pub pc_relative: bool,
+    pub pc_bias: i64,
+    pub pc_align_bits: u8,
+    pub wrap_bits: u8,
+    pub min: i128,
+    pub max: i128,
+    pub target: u64,
+}
+
+impl Decoded {
+    /// Statically encoded addresses only; register-based effective addresses
+    /// and segmented far pointers require runtime state and are not invented.
+    pub fn address_references(&self, ip: u64) -> Vec<AddressReference> {
+        let mut result = Vec::new();
+        for (index, operand) in self.operands().iter().enumerate() {
+            let (kind, field, relative, bits, signed) = match operand.kind {
+                OperandKind::Relative => (
+                    AddressReferenceKind::Branch,
+                    operand.immediate,
+                    true,
+                    relative_address_bits(&self.physical, self.encoding().mnemonic) as u8,
+                    true,
+                ),
+                OperandKind::Memory if operand.memory.rip_relative => (
+                    AddressReferenceKind::Data,
+                    self.physical.displacement,
+                    true,
+                    self.physical.address_size,
+                    true,
+                ),
+                OperandKind::Memory
+                    if operand.memory.base.is_none() && operand.memory.index.is_none() =>
+                {
+                    let field = if self.physical.displacement.width > 0 {
+                        self.physical.displacement
+                    } else if let Some(field) = self.physical.immediates
+                        [..self.physical.immediate_count as usize]
+                        .iter()
+                        .find(|f| f.width == operand.memory.displacement_width)
+                    {
+                        *field
+                    } else {
+                        continue;
+                    };
+                    // 64-bit SIB disp32 addresses sign-extend; address-size
+                    // overrides and moffs fields use unsigned address bits.
+                    let signed = self.physical.address_size == 64
+                        && field.width == 32
+                        && self.physical.displacement.width > 0;
+                    (
+                        AddressReferenceKind::Absolute,
+                        field,
+                        false,
+                        operand.memory.address_size,
+                        signed,
+                    )
+                }
+                _ => continue,
+            };
+            if field.width == 0 {
+                continue;
+            }
+            let (min, max) = if signed {
+                (
+                    -(1i128 << (field.width - 1)),
+                    (1i128 << (field.width - 1)) - 1,
+                )
+            } else {
+                (0, (1i128 << field.width) - 1)
+            };
+            let target = if relative {
+                ip.wrapping_add(self.length as u64)
+                    .wrapping_add_signed(field.signed)
+                    & ip_mask(bits as u32)
+            } else if signed {
+                field.signed as u64
+            } else {
+                field.value & ip_mask(bits as u32)
+            };
+            result.push(AddressReference {
+                operand_index: index,
+                kind,
+                bit_offset: u16::from(field.offset) * 8,
+                bit_width: field.width,
+                signed,
+                scale: 1,
+                pc_relative: relative,
+                pc_bias: if relative { i64::from(self.length) } else { 0 },
+                pc_align_bits: 0,
+                wrap_bits: bits,
+                min,
+                max,
+                target,
+            });
+        }
+        result
+    }
+}
+
+/// Rewrite one structured reference, retaining the decoded form. Every check
+/// precedes the write, including verification that `original` matches `decoded`.
+pub fn rewrite_reference(
+    decoded: &Decoded,
+    original: &[u8],
+    ip: u64,
+    reference_index: usize,
+    target: u64,
+    output: &mut [u8; 15],
+) -> Result<usize, RelocateError> {
+    validate_original(decoded, original)?;
+    if decoded.physical.mode == Mode::Mode64 {
+        checked_end(ip, original.len())?;
+    }
+    let references = decoded.address_references(ip);
+    let r = references
+        .get(reference_index)
+        .ok_or(RelocateError::Unsupported)?;
+    let mut scratch = [0u8; 15];
+    scratch[..original.len()].copy_from_slice(original);
+    patch_reference(r, ip, target, &mut scratch, original.len())?;
+    output[..original.len()].copy_from_slice(&scratch[..original.len()]);
+    Ok(original.len())
+}
+fn validate_original(decoded: &Decoded, original: &[u8]) -> Result<(), RelocateError> {
+    if original.len() < decoded.length as usize {
+        return Err(RelocateError::Truncated);
+    }
+    if original.len() != decoded.length as usize {
+        return Err(RelocateError::LengthMismatch);
+    }
+    let actual = decode(original, decoded.physical.mode).map_err(|_| RelocateError::Unsupported)?;
+    if actual.form_index != decoded.form_index
+        || actual.length != decoded.length
+        || actual.physical != decoded.physical
+    {
+        return Err(RelocateError::Unsupported);
+    }
+    Ok(())
+}
+fn patch_reference(
+    r: &AddressReference,
+    ip: u64,
+    target: u64,
+    bytes: &mut [u8; 15],
+    length: usize,
+) -> Result<(), RelocateError> {
+    if !matches!(r.bit_width, 8 | 16 | 32 | 64) || r.bit_offset % 8 != 0 {
+        return Err(RelocateError::Unsupported);
+    }
+    let offset = r.bit_offset as usize / 8;
+    let width = r.bit_width as usize / 8;
+    if offset.checked_add(width).is_none_or(|n| n > length) {
+        return Err(RelocateError::Unsupported);
+    }
+    let value = if r.pc_relative {
+        if target & !ip_mask(r.wrap_bits as u32) != 0 {
+            return Err(RelocateError::OutOfRange);
+        }
+        modular_displacement(
+            target.wrapping_sub(ip.wrapping_add_signed(r.pc_bias)),
+            r.wrap_bits as u32,
+        ) as i128
+    } else if r.signed {
+        target as i64 as i128
+    } else {
+        target as i128
+    };
+    if value < r.min || value > r.max {
+        return Err(RelocateError::OutOfRange);
+    }
+    bytes[offset..offset + width].copy_from_slice(&(value as u64).to_le_bytes()[..width]);
+    Ok(())
+}
+pub(crate) fn relocate_exact(
+    decoded: &Decoded,
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    output: &mut [u8; 15],
+) -> Result<usize, RelocateError> {
+    validate_original(decoded, original)?;
+    if decoded.physical.mode == Mode::Mode64 {
+        checked_end(old_ip, original.len())?;
+        checked_end(new_ip, original.len())?;
+    }
+    if decoded.flow_control() == FlowControl::Call
+        && decoded.branch_target(old_ip)
+            == Some(
+                old_ip.wrapping_add(decoded.length as u64)
+                    & ip_mask(relative_address_bits(
+                        &decoded.physical,
+                        decoded.encoding().mnemonic,
+                    )),
+            )
+    {
+        return Err(RelocateError::PositionDiscovery);
+    }
+    let mut scratch = [0u8; 15];
+    scratch[..original.len()].copy_from_slice(original);
+    for r in decoded
+        .address_references(old_ip)
+        .iter()
+        .filter(|r| r.pc_relative)
+    {
+        patch_reference(r, new_ip, r.target, &mut scratch, original.len())?;
+    }
+    output[..original.len()].copy_from_slice(&scratch[..original.len()]);
+    Ok(original.len())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelocatedBlock {
+    pub bytes: Vec<u8>,
+    /// Original and resulting byte offsets, in instruction order.
+    pub offsets: Vec<(usize, usize)>,
+    pub original_len: usize,
+}
+impl RelocatedBlock {
+    /// Linear byte address; mask to the architectural IP width in wrapping modes.
+    pub fn relocated_address(&self, old_offset: usize, new_ip: u64) -> Option<u64> {
+        let offset = if old_offset == self.original_len {
+            self.bytes.len()
+        } else {
+            self.offsets.iter().find(|p| p.0 == old_offset)?.1
+        };
+        new_ip.checked_add(u64::try_from(offset).ok()?)
+    }
+}
+struct BlockInstruction {
+    decoded: Decoded,
+    old: usize,
+    length: usize,
+    widened: bool,
+}
+
+/// Relocate a complete instruction block with monotonic branch relaxation.
+/// Internal direct branch targets must be instruction boundaries. The byte just
+/// past the block remains an external continuation at its original address.
+/// Data references always retain their original targets, including in-block data.
+/// Plain short JMP/Jcc can widen to near forms; LOOP/JCXZ, prefixed short forms,
+/// and destinations outside a near branch's range return explicit errors.
+pub fn relocate_block(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    mode: Mode,
+) -> Result<RelocatedBlock, RelocateError> {
+    checked_end(old_ip, original.len())?;
+    let old_len = original.len();
+    let mode_bits = match mode {
+        Mode::Mode16 => 16,
+        Mode::Mode32 => 32,
+        Mode::Mode64 => 64,
+    };
+    validate_address_span(old_len, mode_bits)?;
+    let mut insns = Vec::new();
+    let mut offset = 0;
+    while offset < original.len() {
+        let d = decode(&original[offset..], mode).map_err(|e| match e {
+            DecodeError::Truncated => RelocateError::Truncated,
+            _ => RelocateError::Unsupported,
+        })?;
+        let len = d.length as usize;
+        if len == 0
+            || offset
+                .checked_add(len)
+                .is_none_or(|end| end > original.len())
+        {
+            return Err(RelocateError::Truncated);
+        }
+        let source = checked_end(old_ip, offset)?;
+        if d.flow_control() == FlowControl::Call
+            && d.branch_target(source)
+                == Some(
+                    source.wrapping_add(len as u64)
+                        & ip_mask(relative_address_bits(&d.physical, d.encoding().mnemonic)),
+                )
+        {
+            return Err(RelocateError::PositionDiscovery);
+        }
+        insns.push(BlockInstruction {
+            decoded: d,
+            old: offset,
+            length: len,
+            widened: false,
+        });
+        offset += len;
+    }
+    let boundaries: Vec<usize> = insns.iter().map(|i| i.old).collect();
+    // Validate middle-of-instruction destinations even if no growth is needed.
+    for insn in &insns {
+        for r in insn
+            .decoded
+            .address_references(checked_end(old_ip, insn.old)?)
+        {
+            if r.kind == AddressReferenceKind::Branch {
+                if let Some(target_offset) = internal_branch_offset(&r, old_ip, old_len)? {
+                    if !boundaries.contains(&target_offset) {
+                        return Err(RelocateError::MidInstructionTarget);
+                    }
+                }
+            }
+        }
+    }
+    loop {
+        let offsets = block_offsets(&insns)?;
+        let total = offsets.last().copied().unwrap_or(0);
+        checked_end(new_ip, total)?;
+        validate_address_span(total, mode_bits)?;
+        for insn in &insns {
+            for r in insn
+                .decoded
+                .address_references(checked_end(old_ip, insn.old)?)
+            {
+                if r.kind == AddressReferenceKind::Branch {
+                    validate_address_span(total, r.wrap_bits)?;
+                }
+            }
+        }
+        let mut changed = false;
+        for (index, insn) in insns.iter_mut().enumerate() {
+            let from = checked_end(old_ip, insn.old)?;
+            let to = checked_end(new_ip, offsets[index])?;
+            for mut r in insn
+                .decoded
+                .address_references(from)
+                .into_iter()
+                .filter(|r| r.pc_relative)
+            {
+                let target = remapped_target(&r, old_ip, old_len, new_ip, &boundaries, &offsets)?;
+                if insn.widened {
+                    r = widened_reference(&insn.decoded, insn.length)?;
+                }
+                let mut scratch = [0u8; 15];
+                if let Err(error) = patch_reference(&r, to, target, &mut scratch, insn.length) {
+                    if error == RelocateError::OutOfRange
+                        && !insn.widened
+                        && r.kind == AddressReferenceKind::Branch
+                        && r.bit_width == 8
+                    {
+                        let bytes = &original[insn.old..insn.old + insn.decoded.length as usize];
+                        let near = near_length(bytes, mode).ok_or(RelocateError::Unsupported)?;
+                        insn.length = near;
+                        insn.widened = true;
+                        changed = true;
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        if changed {
+            continue;
+        }
+        let mut result = Vec::with_capacity(total);
+        for (index, insn) in insns.iter().enumerate() {
+            let source = &original[insn.old..insn.old + insn.decoded.length as usize];
+            let mut bytes = [0u8; 15];
+            if insn.widened {
+                if source[0] == 0xeb {
+                    bytes[0] = 0xe9;
+                } else {
+                    bytes[0] = 0x0f;
+                    bytes[1] = 0x80 | (source[0] & 15);
+                }
+            } else {
+                bytes[..source.len()].copy_from_slice(source);
+            }
+            for mut r in insn
+                .decoded
+                .address_references(checked_end(old_ip, insn.old)?)
+                .into_iter()
+                .filter(|r| r.pc_relative)
+            {
+                let target = remapped_target(&r, old_ip, old_len, new_ip, &boundaries, &offsets)?;
+                if insn.widened {
+                    r = widened_reference(&insn.decoded, insn.length)?;
+                }
+                patch_reference(
+                    &r,
+                    checked_end(new_ip, offsets[index])?,
+                    target,
+                    &mut bytes,
+                    insn.length,
+                )?;
+            }
+            if insn.widened {
+                // A filtered catalog may omit the selected near form. Never
+                // emit a transformation that this generated codec cannot check.
+                let back =
+                    decode(&bytes[..insn.length], mode).map_err(|_| RelocateError::Unsupported)?;
+                if back.length as usize != insn.length
+                    || back.flow_control() != insn.decoded.flow_control()
+                {
+                    return Err(RelocateError::Unsupported);
+                }
+            }
+            result.extend_from_slice(&bytes[..insn.length]);
+        }
+        return Ok(RelocatedBlock {
+            bytes: result,
+            offsets: insns
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.old, offsets[i]))
+                .collect(),
+            original_len: original.len(),
+        });
+    }
+}
+/// Transactional caller-owned-storage variant. Capacity errors leave storage untouched.
+pub fn relocate_block_into(
+    original: &[u8],
+    old_ip: u64,
+    new_ip: u64,
+    mode: Mode,
+    output: &mut [u8],
+) -> Result<usize, RelocateError> {
+    let block = relocate_block(original, old_ip, new_ip, mode)?;
+    if output.len() < block.bytes.len() {
+        return Err(RelocateError::BufferTooSmall);
+    }
+    output[..block.bytes.len()].copy_from_slice(&block.bytes);
+    Ok(block.bytes.len())
+}
+fn checked_end(ip: u64, length: usize) -> Result<u64, RelocateError> {
+    ip.checked_add(u64::try_from(length).map_err(|_| RelocateError::AddressOverflow)?)
+        .ok_or(RelocateError::AddressOverflow)
+}
+fn block_offsets(insns: &[BlockInstruction]) -> Result<Vec<usize>, RelocateError> {
+    let mut result = Vec::with_capacity(insns.len() + 1);
+    let mut n = 0usize;
+    result.push(n);
+    for i in insns {
+        n = n
+            .checked_add(i.length)
+            .ok_or(RelocateError::AddressOverflow)?;
+        result.push(n);
+    }
+    Ok(result)
+}
+fn remapped_target(
+    r: &AddressReference,
+    old_ip: u64,
+    old_len: usize,
+    new_ip: u64,
+    boundaries: &[usize],
+    offsets: &[usize],
+) -> Result<u64, RelocateError> {
+    if r.kind != AddressReferenceKind::Branch {
+        return Ok(r.target);
+    }
+    let Some(target_offset) = internal_branch_offset(r, old_ip, old_len)? else {
+        return Ok(r.target);
+    };
+    let index = boundaries
+        .binary_search(&target_offset)
+        .map_err(|_| RelocateError::MidInstructionTarget)?;
+    Ok(checked_end(new_ip, offsets[index])? & ip_mask(r.wrap_bits as u32))
+}
+fn validate_address_span(len: usize, bits: u8) -> Result<(), RelocateError> {
+    if len as u128 > ip_mask(bits as u32) as u128 + 1 {
+        return Err(RelocateError::Unsupported);
+    }
+    Ok(())
+}
+fn internal_branch_offset(
+    r: &AddressReference,
+    old_ip: u64,
+    old_len: usize,
+) -> Result<Option<usize>, RelocateError> {
+    validate_address_span(old_len, r.wrap_bits)?;
+    let offset = r.target.wrapping_sub(old_ip) & ip_mask(r.wrap_bits as u32);
+    Ok((offset < old_len as u64).then_some(offset as usize))
+}
+
+fn near_length(bytes: &[u8], mode: Mode) -> Option<usize> {
+    if bytes.len() != 2 {
+        return None;
+    }
+    let width = if mode == Mode::Mode16 { 2 } else { 4 };
+    if bytes[0] == 0xeb {
+        Some(1 + width)
+    } else if (0x70..=0x7f).contains(&bytes[0]) {
+        Some(2 + width)
+    } else {
+        None
+    }
+}
+fn widened_reference(d: &Decoded, length: usize) -> Result<AddressReference, RelocateError> {
+    let mut r = d
+        .address_references(0)
+        .into_iter()
+        .find(|r| r.kind == AddressReferenceKind::Branch)
+        .ok_or(RelocateError::Unsupported)?;
+    r.bit_width = if d.physical.mode == Mode::Mode16 {
+        16
+    } else {
+        32
+    };
+    r.bit_offset = ((length - r.bit_width as usize / 8) * 8) as u16;
+    r.pc_bias = length as i64;
+    r.min = -(1i128 << (r.bit_width - 1));
+    r.max = (1i128 << (r.bit_width - 1)) - 1;
+    r.wrap_bits = match d.physical.mode {
+        Mode::Mode16 => 16,
+        Mode::Mode32 => 32,
+        Mode::Mode64 => 64,
+    };
+    Ok(r)
+}

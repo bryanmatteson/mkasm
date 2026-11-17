@@ -1,0 +1,85 @@
+package x86
+
+// The reference callback is deliberately restricted to finite binary32 fused
+// operations with the BF16 fixed environment. Conversion/NaN tests need no FP.
+const x86BfloatRecipeTests = `
+struct BfloatState{memory:AccessState,calls:std::cell::Cell<usize>,mxcsr_reads:std::cell::Cell<usize>}
+impl BfloatState{fn new()->Self{Self{memory:AccessState::new(),calls:Default::default(),mxcsr_reads:Default::default()}}}
+impl Machine for BfloatState{
+ fn read_register(&self,r:s::Register)->Value{if r.bank=="x86.mxcsr"{self.mxcsr_reads.set(self.mxcsr_reads.get()+1);panic!("BF16 read MXCSR")}self.memory.read_register(r)}
+ fn read_memory(&self,a:u64,w:u8,e:s::Endian)->Result<Value,EvalError>{self.memory.read_memory(a,w,e)}
+ fn read_wide_memory(&self,a:u64,w:u16,e:s::Endian)->Result<Vec<Value>,EvalError>{self.memory.read_wide_memory(a,w,e)}
+ fn evaluate_float(&self,f:&s::FloatExpression,inputs:&[Value],control:Value,status:Value)->Result<Value,EvalError>{
+  if f.operation!=(s::FloatOperation::FusedMultiplyAdd{negate_product:false,negate_addend:false})||f.width!=32||f.environment!=s::FloatEnvironment::X86Mxcsr||f.projection!=s::FloatProjection::Value{return Err(EvalError::Unsupported)}
+  assert_eq!(control,Value::known(32,0x9fc0));assert_eq!(status,Value::known(32,0));self.calls.set(self.calls.get()+1);
+  let daz=|v:Value|{let x=v.bits as u32;if x&0x7f800000==0{f32::from_bits(x&0x80000000)}else{f32::from_bits(x)}};
+  let a=daz(inputs[0]);let b=daz(inputs[1]);let c=daz(inputs[2]);if ![a,b,c].iter().all(|x|x.is_finite()){return Err(EvalError::Unsupported)}let value=b.mul_add(c,a).to_bits();Ok(Value::known(32,u64::from(if value&0x7f800000==0{value&0x80000000}else{value})))
+ }
+}
+fn bfloat_eval(text:&str,st:&BfloatState)->Transition{let t=s::evaluate(&memory_recipe(text),st).unwrap();assert!(!t.registers.iter().any(|x|x.register.bank=="x86.mxcsr"));assert_eq!(st.mxcsr_reads.get(),0);t}
+#[test]fn bfloat_narrowing_fixed_rounding_and_nan_payloads(){
+ let mut st=BfloatState::new();let inputs=[0x00000001u32,0x80000001,0x3f808000,0x3f818000,0x7f7fffff,0xff800000,0x7f800001,0xffc1abcd];vector(&mut st.memory.state,1,&inputs.chunks(2).map(|x|u64::from(x[0])|u64::from(x[1])<<32).collect::<Vec<_>>());
+ let t=bfloat_eval("vcvtneps2bf16 xmm0, ymm1",&st);assert_eq!(vector_result(&t,0,0),packed_halves([0,0x8000,0x3f80,0x3f82]));assert_eq!(vector_result(&t,0,1),packed_halves([0x7f80,0xff80,0x7fc0,0xffc1]));for i in 2..8{assert_eq!(vector_result(&t,0,i),0)}assert_eq!(st.calls.get(),0);
+}
+#[test]fn bfloat_native_physical_512_source_ties_and_upper_zero(){
+ let mut st=BfloatState::new();vector(&mut st.memory.state,0,&[u64::MAX;8]);vector(&mut st.memory.state,1,&[0x3f8180003f808000;8]);let bytes=[0x62,0xf2,0x7e,0x48,0x72,0xc1];let d=decode(&bytes,Mode::Mode64).unwrap();assert_eq!(d.encoding().mnemonic,"VCVTNEPS2BF16");let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full,"{:?} {:?}",d.encoding(),d.operands());r.validate().unwrap();let t=s::evaluate(&r,&st).unwrap();for chunk in 0..4{assert_eq!(vector_result(&t,0,chunk),0x3f823f803f823f80)}for chunk in 4..8{assert_eq!(vector_result(&t,0,chunk),0)}assert_eq!(st.mxcsr_reads.get(),0);assert_eq!(st.calls.get(),0);assert!(!t.registers.iter().any(|x|x.register.bank=="x86.mxcsr"));
+}
+#[test]fn bfloat_native_test_prerequisite_physical_forms_have_recipes(){
+ for bytes in [[0x62,0xf1,0x75,0x48,0xfc,0xc2],[0x62,0xf1,0xf5,0x48,0x54,0xc2]]{let d=decode(&bytes,Mode::Mode64).unwrap();assert_eq!(d.semantic_recipe(0).support,Support::Full,"{} {bytes:02x?}",d.encoding().mnemonic);}
+}
+fn float_logical_name(name:&str)->bool{matches!(name,"VANDPS"|"VANDPD"|"VANDNPS"|"VANDNPD"|"VORPS"|"VORPD"|"VXORPS"|"VXORPD")}
+fn logical_expected(name:&str,a:u64,b:u64)->u64{let name=name.strip_prefix('V').unwrap_or(name);if name.starts_with("ANDN"){!a&b}else if name.starts_with("AND"){a&b}else if name.starts_with("OR"){a|b}else{a^b}}
+#[test]fn float_logical_physical_forms_raw_bits_aliases_masks_and_upper_zero(){
+ let mut forms=0;for i in 0..encoding_count(){let e=encoding(i).unwrap();if !float_logical_name(e.mnemonic){continue}forms+=1;for mode in[Mode::Mode16,Mode::Mode32,Mode::Mode64]{if !encoding_supports_mode(i,mode){continue}let mut bytes=[0;15];let n=encode_representative(i,mode,&mut bytes).unwrap();let d=decode(&bytes[..n],mode).unwrap();let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full,"{} {bytes:02x?}",e.form_id);r.validate().unwrap();if d.operands().iter().any(|o|o.kind==OperandKind::Memory){continue}let vl=d.physical.vector_length;let w=if e.mnemonic.ends_with("PD"){64}else{32};for alias in[0,1,2]{let mut st=BfloatState::new();let old=0x7fc01234ffffffffu64;let a=0x80000000aaaaaaaau64;let b=0xffff000055555555u64;vector(&mut st.memory.state,0,&[old;8]);vector(&mut st.memory.state,1,&[a;8]);vector(&mut st.memory.state,2,&[b;8]);for masked in[false,true]{if masked&&bytes[0]!=0x62{continue}st.memory.state.reg("x86.mask",1,0xaaaaaaaaaaaaaaaa);for zero in[false,true]{if zero&&!masked{continue}let fields=EncodeFields{mode,mod_bits:3,reg:0,vvvv:if alias==1{0}else{1},rm:if alias==2{0}else{2},mask:u8::from(masked),zeroing:zero,..Default::default()};let n=encode(i,fields,&mut bytes).unwrap();let d=decode(&bytes[..n],mode).unwrap();let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full);let t=s::evaluate(&r,&st).unwrap();let expected=logical_expected(e.mnemonic,if alias==1{old}else{a},if alias==2{old}else{b});for lane in 0..vl/u16::from(w){let shift=u32::from(lane*u16::from(w)%64);let mask=if w==64{u64::MAX}else{u64::from(u32::MAX)};assert_eq!(int_lane(&t,0,usize::from(lane),w),if !masked||lane%2==1{expected>>shift&mask}else if zero{0}else{old>>shift&mask},"{} {mode:?} alias{alias} lane{lane}",e.form_id);}for chunk in vl/64..8{assert_eq!(vector_result(&t,0,chunk),0)}assert_eq!(st.mxcsr_reads.get(),0);assert_eq!(st.calls.get(),0);}}}}
+ }assert_eq!(forms,80);
+}
+#[test]fn float_logical_masked_memory_broadcast_and_zero_idioms(){
+ let mut st=BfloatState::new();st.memory.state.x(0,0xb000);st.memory.state.reg("x86.mask",1,0x81);vector(&mut st.memory.state,1,&[0xaaaaaaaa55555555;8]);st.memory.state.mem.insert(0xb000,0xffff0000ffff0000);st.memory.state.mem.insert(0xb038,0x123456789abcdef0);let t=bfloat_eval("vandpd zmm0 {k1}{z}, zmm1, zmmword ptr [rax]",&st);assert_eq!(*st.memory.reads.borrow(),vec![(0xb000,64),(0xb038,64)]);assert_eq!(vector_result(&t,0,0),0xaaaa000055550000);assert_eq!(vector_result(&t,0,7),0x0220022810145450);
+ st.memory.reads.borrow_mut().clear();let t=s::evaluate(&integer_broadcast("vandnpd zmm0 {k1}{z}, zmm1, zmmword ptr [rax]"),&st).unwrap();assert_eq!(*st.memory.reads.borrow(),vec![(0xb000,64)]);assert_eq!(vector_result(&t,0,7),!0xaaaaaaaa55555555u64&0xffff0000ffff0000);
+ st.memory.state.reg("x86.mask",1,0);st.memory.unknown_address=true;st.memory.address_reads.set(0);st.memory.reads.borrow_mut().clear();let _=s::evaluate(&memory_recipe("vandpd zmm0 {k1}{z}, zmm1, zmmword ptr [rax]"),&NoIntegerVectorReads(&st.memory)).unwrap();assert_eq!(st.memory.address_reads.get(),0);assert!(st.memory.reads.borrow().is_empty());
+ struct NoVector;impl Machine for NoVector{fn read_register(&self,r:s::Register)->Value{assert!(r.bank!="x86.vector64"||r.index<8);Value::known(64,0)}fn read_memory(&self,_:u64,_:u8,_:s::Endian)->Result<Value,EvalError>{Err(EvalError::Memory)}}for text in["vxorps zmm0, zmm1, zmm1","vandnpd zmm0, zmm1, zmm1"]{let t=s::evaluate(&memory_recipe(text),&NoVector).unwrap();for chunk in 0..8{assert_eq!(vector_result(&t,0,chunk),0)}}
+}
+fn legacy_float_logical_name(name:&str)->bool{matches!(name,"ANDPS"|"ANDPD"|"ANDNPS"|"ANDNPD"|"ORPS"|"ORPD"|"XORPS"|"XORPD")}
+#[test]fn legacy_float_logical_all_physical_forms_modes_aliases_and_upper_preservation(){
+ let mut forms=0;
+ for i in 0..encoding_count(){let e=encoding(i).unwrap();if !legacy_float_logical_name(e.mnemonic){continue}forms+=1;
+  for mode in[Mode::Mode16,Mode::Mode32,Mode::Mode64]{if !encoding_supports_mode(i,mode){continue}let mut bytes=[0;15];let n=encode_representative(i,mode,&mut bytes).unwrap();let d=decode(&bytes[..n],mode).unwrap();assert_eq!(bytes[0],if e.mnemonic.ends_with("PD"){0x66}else{0x0f});let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full,"{} {mode:?} {bytes:02x?}",e.form_id);r.validate().unwrap();if d.operands().iter().any(|o|o.kind==OperandKind::Memory){continue}
+   for dest in if mode==Mode::Mode64{vec![0,8]}else{vec![0]}{for alias in[false,true]{let source=if alias{dest}else{dest+1};let fields=EncodeFields{mode,mod_bits:3,reg:dest,rm:source,..Default::default()};let n=encode(i,fields,&mut bytes).unwrap();let d=decode(&bytes[..n],mode).unwrap();assert_eq!(d.encoding().mnemonic,e.mnemonic);let mut st=BfloatState::new();let old=[0x7fc01234ffffffff,0x80000000aaaaaaaa];let other=[0xffff000055555555,0x0123456789abcdef];vector(&mut st.memory.state,u16::from(dest),&[old[0],old[1],11,12,13,14,15,16]);if !alias{vector(&mut st.memory.state,u16::from(source),&other)}let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full);let t=s::evaluate(&r,&st).unwrap();for chunk in 0..2{assert_eq!(vector_result(&t,u16::from(dest),chunk),logical_expected(e.mnemonic,old[usize::from(chunk)],if alias{old[usize::from(chunk)]}else{other[usize::from(chunk)]}),"{} {mode:?} alias{alias}",e.form_id)}assert_eq!(t.registers.len(),2);assert!(t.registers.iter().all(|v|v.register.bank=="x86.vector64"&&v.register.index/8==u16::from(dest)&&v.register.index%8<2));assert_eq!(st.mxcsr_reads.get(),0);assert_eq!(st.calls.get(),0);assert!(st.memory.reads.borrow().is_empty());}}
+  }
+ }assert_eq!(forms,16);
+}
+#[test]fn legacy_float_logical_original_m128_faults_alignment_and_no_mxcsr(){
+ struct NoLogicalVectorReads<'a>(&'a AccessState);impl Machine for NoLogicalVectorReads<'_>{fn read_register(&self,r:s::Register)->Value{assert!(!matches!(r.bank,"x86.vector64"|"x86.mxcsr"),"faulting access read {r:?}");self.0.read_register(r)}fn read_memory(&self,a:u64,w:u8,e:s::Endian)->Result<Value,EvalError>{self.0.read_memory(a,w,e)}fn read_wide_memory(&self,a:u64,w:u16,e:s::Endian)->Result<Vec<Value>,EvalError>{self.0.read_wide_memory(a,w,e)}}
+ let mut forms=0;
+ for i in 0..encoding_count(){let e=encoding(i).unwrap();if !legacy_float_logical_name(e.mnemonic){continue}let mut bytes=[0;15];let n=encode_representative(i,Mode::Mode64,&mut bytes).unwrap();if !decode(&bytes[..n],Mode::Mode64).unwrap().operands().iter().any(|o|o.kind==OperandKind::Memory){continue}forms+=1;
+  for mode in[Mode::Mode16,Mode::Mode32,Mode::Mode64]{if !encoding_supports_mode(i,mode){continue}let n=encode(i,EncodeFields{mode,mod_bits:0,reg:0,rm:0,..Default::default()},&mut bytes).unwrap();let d=decode(&bytes[..n],mode).unwrap();let m=d.operands().iter().find(|o|o.kind==OperandKind::Memory).unwrap().memory;let mut st=BfloatState::new();let base=m.base.unwrap();st.memory.state.x(u16::from(base.number),0xc000);vector(&mut st.memory.state,0,&[0x0123456789abcdef,0x7fc01234ffffffff,11,12,13,14,15,16]);st.memory.state.mem.insert(0xc000,0x80000000aaaaaaaa);st.memory.state.mem.insert(0xc008,0xffff000055555555);let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full,"{} {mode:?}",e.form_id);r.validate().unwrap();assert_eq!(r.wide_loads.len(),1);assert_eq!(r.wide_loads[0].width,128);let t=s::evaluate(&r,&st).unwrap();assert_eq!(*st.memory.reads.borrow(),vec![(0xc000,128)]);assert_eq!(vector_result(&t,0,0),logical_expected(e.mnemonic,0x0123456789abcdef,0x80000000aaaaaaaa));assert_eq!(vector_result(&t,0,1),logical_expected(e.mnemonic,0x7fc01234ffffffff,0xffff000055555555));assert_eq!(t.registers.len(),2);assert!(t.trap.is_none());assert_eq!(st.mxcsr_reads.get(),0);
+   st.memory.state.mem.remove(&0xc008);st.memory.reads.borrow_mut().clear();assert_eq!(s::evaluate(&r,&st),Err(EvalError::Memory),"{} {mode:?}",e.form_id);assert_eq!(*st.memory.reads.borrow(),vec![(0xc000,128)]);
+   st.memory.state.x(u16::from(base.number),0xc001);st.memory.reads.borrow_mut().clear();let t=s::evaluate(&r,&NoLogicalVectorReads(&st.memory)).unwrap();assert_eq!(t.trap,Some(s::TrapKind::Protection));assert!(t.registers.is_empty());assert!(st.memory.reads.borrow().is_empty());assert_eq!(st.mxcsr_reads.get(),0);
+  }
+ }assert_eq!(forms,8);
+}
+#[test]fn legacy_float_logical_alignment_uses_linear_segmented_address(){
+ for i in 0..encoding_count(){let e=encoding(i).unwrap();if !legacy_float_logical_name(e.mnemonic){continue}let mut bytes=[0;15];let n=encode_representative(i,Mode::Mode64,&mut bytes).unwrap();if !decode(&bytes[..n],Mode::Mode64).unwrap().operands().iter().any(|o|o.kind==OperandKind::Memory){continue}
+  for mode in[Mode::Mode16,Mode::Mode32,Mode::Mode64]{let n=encode(i,EncodeFields{mode,mod_bits:0,reg:0,rm:0,..Default::default()},&mut bytes).unwrap();let mut input=bytes[..n].to_vec();if mode==Mode::Mode64{input.insert(0,0x64)}let d=decode(&input,mode).unwrap();let m=d.operands().iter().find(|o|o.kind==OperandKind::Memory).unwrap().memory;let mut st=BfloatState::new();st.memory.state.x(u16::from(m.base.unwrap().number),0xc008);let segment=if mode==Mode::Mode64{4}else{3};st.memory.state.reg("x86.segment_base",segment,8);vector(&mut st.memory.state,0,&[u64::MAX;8]);st.memory.state.mem.insert(0xc010,0x0123456789abcdef);st.memory.state.mem.insert(0xc018,0x7fc01234ffffffff);let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full);r.validate().unwrap();let t=s::evaluate(&r,&st).unwrap();assert!(t.trap.is_none());assert_eq!(*st.memory.reads.borrow(),vec![(0xc010,128)]);assert_eq!(vector_result(&t,0,0),logical_expected(e.mnemonic,u64::MAX,0x0123456789abcdef));assert_eq!(st.mxcsr_reads.get(),0);
+   st.memory.state.reg("x86.segment_base",segment,9);st.memory.reads.borrow_mut().clear();let t=s::evaluate(&r,&st).unwrap();assert_eq!(t.trap,Some(s::TrapKind::Protection));assert!(t.registers.is_empty());assert!(st.memory.reads.borrow().is_empty());
+  }
+ }
+}
+#[test]fn legacy_float_logical_zero_idioms_need_no_incoming_vector_or_mxcsr(){
+ struct NoReads;impl Machine for NoReads{fn read_register(&self,r:s::Register)->Value{panic!("unexpected incoming read {r:?}")}fn read_memory(&self,_:u64,_:u8,_:s::Endian)->Result<Value,EvalError>{panic!("unexpected memory read")}}
+ for opcode in[0x55,0x57]{for pd in[false,true]{for mode in[Mode::Mode16,Mode::Mode32,Mode::Mode64]{let mut bytes=vec![];if pd{bytes.push(0x66)}bytes.extend_from_slice(&[0x0f,opcode,0xc0]);let d=decode(&bytes,mode).unwrap();assert!(legacy_float_logical_name(d.encoding().mnemonic));let r=d.semantic_recipe(0);assert_eq!(r.support,Support::Full);let t=s::evaluate(&r,&NoReads).unwrap();assert_eq!(t.registers.len(),2);for chunk in 0..2{assert_eq!(vector_result(&t,0,chunk),0)}}}}
+}
+#[test]fn legacy_float_logical_reserved_repeat_and_lock_prefixes_are_not_full(){
+ for prefix in[0xf0,0xf2,0xf3]{for opcode in[0x54,0x55,0x56,0x57]{for pd in[false,true]{for mode in[Mode::Mode16,Mode::Mode32,Mode::Mode64]{let mut bytes=vec![prefix];if pd{bytes.push(0x66)}bytes.extend_from_slice(&[0x0f,opcode,0xc1]);if let Ok(d)=decode(&bytes,mode){assert_ne!(d.semantic_recipe(0).support,Support::Full,"{bytes:02x?} {mode:?} {}",d.encoding().mnemonic);}}}}}
+}
+#[test]fn bfloat_dual_order_mask_and_memory_fault_suppression(){
+ let mut st=BfloatState::new();vector(&mut st.memory.state,1,&[u64::from(2f32.to_bits())*0x100000001;8]);vector(&mut st.memory.state,2,&[u64::from(3f32.to_bits())*0x100000001;8]);let t=bfloat_eval("vcvtne2ps2bf16 ymm0, ymm1, ymm2",&st);for i in 0..2{assert_eq!(vector_result(&t,0,i),0x4040404040404040)}for i in 2..4{assert_eq!(vector_result(&t,0,i),0x4000400040004000)}
+ st.memory.state.reg("x86.mask",1,1<<8);st.memory.unknown_address=true;let t=bfloat_eval("vcvtne2ps2bf16 ymm0 {k1}{z}, ymm1, ymmword ptr [rax]",&st);assert_eq!(vector_result(&t,0,2),0x4000);assert!(st.memory.reads.borrow().is_empty());assert_eq!(st.memory.address_reads.get(),0);
+ st.memory.unknown_address=false;st.memory.state.x(0,0x4000);st.memory.state.reg("x86.mask",1,1);st.memory.state.mem.insert(0x4000,1f32.to_bits()as u64);let t=bfloat_eval("vcvtneps2bf16 xmm0 {k1}{z}, ymmword ptr [rax]",&st);assert_eq!(vector_result(&t,0,0),0x3f80);assert_eq!(*st.memory.reads.borrow(),vec![(0x4000,32)]);
+}
+#[test]fn bfloat_dot_high_then_low_and_explicit_nan_priority(){
+ let mut st=BfloatState::new();vector(&mut st.memory.state,0,&[u64::from(1f32.to_bits())*0x100000001;2]);vector(&mut st.memory.state,1,&[0x4000400040004000;2]);vector(&mut st.memory.state,2,&[0x4040404040404040;2]);let t=bfloat_eval("vdpbf16ps xmm0, xmm1, xmm2",&st);assert_eq!(vector_result(&t,0,0),u64::from(13f32.to_bits())*0x100000001);assert_eq!(st.calls.get(),8);
+ st.calls.set(0);vector(&mut st.memory.state,1,&[0x7fc17f827fc17f82;2]);vector(&mut st.memory.state,2,&[0x7fc37fc47fc37fc4;2]);let t=bfloat_eval("vdpbf16ps xmm0, xmm1, xmm2",&st);assert_eq!(vector_result(&t,0,0),0x7fc200007fc20000);assert_eq!(st.calls.get(),0);
+ st.memory.state.reg("x86.mask",1,0);st.memory.unknown_address=true;let t=bfloat_eval("vdpbf16ps xmm0 {k1}{z}, xmm1, xmmword ptr [rax]",&st);assert_eq!(vector_result(&t,0,0),0);assert!(st.memory.reads.borrow().is_empty());assert_eq!(st.calls.get(),0);
+}
+`

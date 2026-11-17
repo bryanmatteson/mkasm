@@ -25,6 +25,7 @@ type EncodeFields struct {
 	Mask            byte
 	Zeroing         bool
 	Broadcast       bool
+	RoundingControl byte
 	OpcodeReg       byte
 	Displacement    int64
 	Immediate       [4]uint64
@@ -42,7 +43,13 @@ func Encode(dst []byte, e *Encoding, fields EncodeFields) (int, error) {
 	if e.OperandSize == 64 && fields.Mode != Mode64 {
 		return 0, ErrInvalidEncodeField
 	}
-	if fields.Reg > 31 || fields.RM > 31 || fields.Index > 31 || fields.Base > 31 || fields.VVVV > 31 || fields.Mask > 7 || fields.OpcodeReg > 15 || fields.Mod > 3 || fields.Scale > 3 {
+	if fields.Mode != Mode64 && (fields.Reg > 7 || fields.RM > 7 || fields.Index > 7 || fields.Base > 7 || fields.VVVV > 7 || fields.OpcodeReg > 7) {
+		return 0, ErrInvalidEncodeField
+	}
+	if fields.Reg > 31 || fields.RM > 31 || fields.Index > 31 || fields.Base > 31 || fields.VVVV > 31 || fields.Mask > 7 || fields.RoundingControl > 3 || fields.OpcodeReg > 15 || fields.Mod > 3 || fields.Scale > 3 {
+		return 0, ErrInvalidEncodeField
+	}
+	if (boolBit(fields.Zeroing)<<7|boolBit(fields.Broadcast)<<4|fields.Mask)&e.EVEXMask != e.EVEXValue {
 		return 0, ErrInvalidEncodeField
 	}
 	if e.Kind != EncodingEVEX && (fields.Mask != 0 || fields.Zeroing || fields.Broadcast) {
@@ -51,10 +58,17 @@ func Encode(dst []byte, e *Encoding, fields EncodeFields) (int, error) {
 	if e.Kind != EncodingEVEX && (fields.Reg > 15 || fields.RM > 15 || fields.Index > 15 || fields.Base > 15 || fields.VVVV > 15) {
 		return 0, ErrInvalidEncodeField
 	}
+	if e.NoSourceDestMatch && (fields.Reg == fields.VVVV || fields.Mod == 3 && fields.Reg == fields.RM) {
+		return 0, ErrInvalidEncodeField
+	}
 	if e.RegMask != 0 && fields.Reg&e.RegMask != e.RegValue || e.RMMask != 0 && fields.RM&e.RMMask != e.RMValue {
 		return 0, ErrInvalidEncodeField
 	}
 	if e.Mod == ModMemory && fields.Mod == 3 || e.Mod == ModRegister && fields.Mod != 3 {
+		return 0, ErrInvalidEncodeField
+	}
+	wantSIB := e.HasModRM && fields.Mod != 3 && effectiveAddressBits(fields.Mode, fields.AddressOverride) != 16 && fields.RM&7 == 4
+	if fields.UseSIB != wantSIB {
 		return 0, ErrInvalidEncodeField
 	}
 
@@ -246,9 +260,21 @@ func vectorPrefix(e *Encoding, fields EncodeFields) ([4]byte, int, error) {
 		} else if e.VectorLength == 512 {
 			ll = 2
 		}
+		if e.VectorLengthIgnored {
+			ll = fields.RoundingControl
+		}
+		if e.SuppressExceptions {
+			ll = 0
+			if e.EmbeddedRounding {
+				if fields.RoundingControl > 3 {
+					return out, 0, ErrInvalidEncodeField
+				}
+				ll = fields.RoundingControl
+			}
+		}
 		regHigh, vHigh := fields.Reg>>4&1, fields.VVVV>>4&1
 		out[0] = 0x62
-		out[1] = (^r&1)<<7 | (^x&1)<<6 | (^b&1)<<5 | (^regHigh&1)<<4 | (mapBits & 3)
+		out[1] = (^r&1)<<7 | (^x&1)<<6 | (^b&1)<<5 | (^regHigh&1)<<4 | (mapBits & 7)
 		out[2] = w<<7 | (^fields.VVVV&15)<<3 | 1<<2 | pp
 		out[3] = boolBit(fields.Zeroing)<<7 | ll<<5 | boolBit(fields.Broadcast)<<4 | (^vHigh&1)<<3 | fields.Mask
 		return out, 4, nil
@@ -287,6 +313,10 @@ func mmmmmFromMap(opcodeMap OpcodeMap) (byte, bool) {
 		return 2, true
 	case Map0F3A:
 		return 3, true
+	case MapEVEX5:
+		return 5, true
+	case MapEVEX6:
+		return 6, true
 	case MapXOP8:
 		return 8, true
 	case MapXOP9:

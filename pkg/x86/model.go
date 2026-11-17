@@ -2,7 +2,11 @@
 // from the fixed-width ARM IR.
 package x86
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/bryanmatteson/mkasm/pkg/ir"
+)
 
 // Mode is the active x86 execution mode.
 type Mode uint8
@@ -79,6 +83,8 @@ const (
 	MapXOP8
 	MapXOP9
 	MapXOPA
+	MapEVEX5
+	MapEVEX6
 	opcodeMapCount
 )
 
@@ -129,10 +135,15 @@ const (
 
 // Encoding is one independently decodable syntax form.
 type Encoding struct {
-	ID       string
-	FormID   string
-	Mnemonic string
-	Syntax   string
+	// IFlags retains opcodesDB per-flag access codes; absent entries are unknown.
+	IFlags           map[string]string
+	ID               string
+	FormID           string
+	Mnemonic         string
+	Syntax           string
+	Requirements     ir.Requirements
+	SourceISA        string
+	SourceExtensions []string
 
 	Kind            EncodingKind
 	Map             OpcodeMap
@@ -147,9 +158,16 @@ type Encoding struct {
 	W            BitConstraint
 	OperandSize  uint8
 	VectorLength uint16
-	// ReservedVVVV holds the decoded (ones'-complemented) VEX, XOP, or EVEX
-	// vvvv bits, with EVEX.V' as bit 4, that the form leaves unused. They
-	// must be encoded as ones, so any set bit here is #UD.
+	// EmbeddedRounding separates raw LL rounding bits from logical vector width.
+	// SuppressExceptions records the source's ER/SAE contract on register forms.
+	NoSourceDestMatch   bool
+	VectorLengthIgnored bool
+	EmbeddedRounding    bool
+	SuppressExceptions  bool
+	// EVEXMask/Value constrain raw EVEX P2 decorator bits from supplemental source.
+	EVEXMask  byte
+	EVEXValue byte
+	// ReservedVVVV holds decoded vvvv bits that a form leaves unused (#UD if set).
 	ReservedVVVV byte
 	Tuple        string
 
@@ -168,6 +186,7 @@ type Encoding struct {
 // used by generated decoders to turn physical fields into registers, memory
 // references, immediates, and implicit effects.
 type Operand struct {
+	AddressRegisters []Operand
 	Type             string
 	Symbol           string
 	EncodedIn        string
@@ -210,6 +229,9 @@ func (c *Catalog) Validate() error {
 		}
 		if e.Map >= opcodeMapCount {
 			return fmt.Errorf("%s has invalid opcode map %d", e.FormID, e.Map)
+		}
+		if e.EVEXValue & ^e.EVEXMask != 0 || e.EVEXMask & ^byte(0x97) != 0 || (e.EVEXMask != 0 && e.Kind != EncodingEVEX) {
+			return fmt.Errorf("%s has invalid EVEX decorator constraints", e.FormID)
 		}
 		if e.OpcodePlusReg && e.Opcode > 0xf8 {
 			return fmt.Errorf("%s opcode+register base 0x%02x overflows", e.FormID, e.Opcode)

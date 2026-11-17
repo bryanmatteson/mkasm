@@ -104,6 +104,9 @@ type decodedHead struct {
 	addressOverride bool
 	baseExt         byte
 	vvvv            byte
+	rmHighExt       byte
+	regExt          byte
+	evexP2          byte
 	modrmOffset     int
 }
 
@@ -174,7 +177,7 @@ func encodingSpecificity(e *Encoding) int {
 }
 
 func matchEncoding(src []byte, mode Mode, head decodedHead, e *Encoding) (length int, matched, short bool) {
-	if !e.Modes.supports(mode) || head.prefixBits&e.PrefixMask != e.PrefixValue {
+	if !e.Modes.supports(mode) || head.prefixBits&e.PrefixMask != e.PrefixValue || head.evexP2&e.EVEXMask != e.EVEXValue || head.regExt&e.RegMask&16 != e.RegValue&16 {
 		return 0, false, false
 	}
 	// Opcode 90 is NOP only for the architectural self-exchange. REX.B extends
@@ -188,7 +191,7 @@ func matchEncoding(src []byte, mode Mode, head decodedHead, e *Encoding) (length
 	if e.OperandSize != 0 && int(e.OperandSize) != effectiveOperandBits(mode, head.prefixBits&1 != 0, head.w != 0) {
 		return 0, false, false
 	}
-	if e.VectorLength != 0 && e.VectorLength != head.vectorLength {
+	if !e.SuppressExceptions && !e.VectorLengthIgnored && e.VectorLength != 0 && e.VectorLength != head.vectorLength {
 		return 0, false, false
 	}
 	// A vvvv field the form does not use (and EVEX.V' unless it extends a
@@ -202,6 +205,13 @@ func matchEncoding(src []byte, mode Mode, head decodedHead, e *Encoding) (length
 		end, ok, short = modRMLength(src, mode, head.addressOverride, head.modrmOffset, e)
 		if !ok {
 			return 0, false, short
+		}
+		if e.NoSourceDestMatch {
+			mr := src[head.modrmOffset]
+			reg := (mr >> 3 & 7) | head.regExt
+			if reg == head.vvvv || mr>>6 == 3 && reg == (mr&7|head.baseExt|head.rmHighExt) {
+				return 0, false, false
+			}
 		}
 	}
 	for _, tail := range e.Tail {
@@ -352,6 +362,13 @@ prefixesDone:
 			return h, ErrUnknownEncoding
 		}
 		p1, p2 := src[pos+2], src[pos+3]
+		if p1&4 == 0 {
+			return h, ErrUnknownEncoding
+		}
+		h.evexP2 = p2
+		h.regExt = (^src[pos+1]>>7&1)<<3 | (^src[pos+1]>>4&1)<<4
+		h.baseExt = (^src[pos+1] >> 5 & 1) << 3
+		h.rmHighExt = (^src[pos+1] >> 6 & 1) << 4
 		h.w, h.prefixBits = p1>>7, prefixBitsFromPP(p1&3)
 		switch (p2 >> 5) & 3 {
 		case 0:
@@ -361,7 +378,7 @@ prefixesDone:
 		case 2:
 			h.vectorLength = 512
 		default:
-			return h, ErrUnknownEncoding
+			h.vectorLength = 1024 // LL=3 is RC=RZ only on an ER/SAE form.
 		}
 		h.vvvv = (^p1>>3)&15 | (^p2>>3&1)<<4
 		pos += 4
@@ -437,6 +454,10 @@ func mapFromMmmmm(m byte) (OpcodeMap, bool) {
 		return Map0F38, true
 	case 3:
 		return Map0F3A, true
+	case 5:
+		return MapEVEX5, true
+	case 6:
+		return MapEVEX6, true
 	case 8:
 		return MapXOP8, true
 	case 9:

@@ -6,6 +6,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/bryanmatteson/mkasm/pkg/ir"
 )
 
 type opcodesDBDocument struct {
@@ -15,8 +17,13 @@ type opcodesDBDocument struct {
 }
 
 type opcodesDBRecord struct {
-	ID      string `json:"id"`
-	RecType string `json:"rectype"`
+	Extensions []string `json:"extensions"`
+	Metadata   struct {
+		ISA string `json:"isa"`
+	} `json:"metadata"`
+	IFlags  map[string]string `json:"iflags"`
+	ID      string            `json:"id"`
+	RecType string            `json:"rectype"`
 	Diagram struct {
 		Fields []opcodesDBField `json:"fields"`
 	} `json:"diagram"`
@@ -43,18 +50,21 @@ type opcodesDBField struct {
 }
 
 type opcodesDBOperand struct {
-	Type             string `json:"type"`
-	Symbol           string `json:"symbol"`
-	EncodedIn        string `json:"encodedin"`
-	DataType         string `json:"datatype"`
-	Size             any    `json:"size"`
-	Value            any    `json:"value"`
-	Read             int    `json:"read"`
-	Write            int    `json:"write"`
-	Suppressed       int    `json:"suppressed"`
-	Zeroing          int    `json:"zeroing"`
-	ConditionalRead  int    `json:"conditional_reading"`
-	ConditionalWrite int    `json:"conditional_writing"`
+	Base             *opcodesDBOperand `json:"base"`
+	Index            *opcodesDBOperand `json:"index"`
+	Segment          *opcodesDBOperand `json:"segment"`
+	Type             string            `json:"type"`
+	Symbol           string            `json:"symbol"`
+	EncodedIn        string            `json:"encodedin"`
+	DataType         string            `json:"datatype"`
+	Size             any               `json:"size"`
+	Value            any               `json:"value"`
+	Read             int               `json:"read"`
+	Write            int               `json:"write"`
+	Suppressed       int               `json:"suppressed"`
+	Zeroing          int               `json:"zeroing"`
+	ConditionalRead  int               `json:"conditional_reading"`
+	ConditionalWrite int               `json:"conditional_writing"`
 }
 
 // ParseOpcodesDB reads an uncompressed opcodesDB v3 JSON document and
@@ -90,6 +100,16 @@ func ParseOpcodesDB(r io.Reader) (*Catalog, error) {
 			if err != nil {
 				return nil, err
 			}
+			e.IFlags = record.IFlags
+			e.SourceISA = record.Metadata.ISA
+			e.SourceExtensions = append([]string(nil), record.Extensions...)
+			var requirement ir.RequirementExpr
+			if record.Metadata.ISA != "" {
+				requirement = ir.ParseRequirementExpression(record.Metadata.ISA, true)
+			} else {
+				requirement = ir.UnknownRequirement("opcodesDB metadata.isa absent")
+			}
+			e.Requirements = ir.Requirements{Expression: &requirement, Source: "opcodesDB metadata.isa (source ISA class, not a CPUID bit)"}
 			cat.Encodings = append(cat.Encodings, e)
 		}
 	}
@@ -128,7 +148,7 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 	if size, parseErr := strconv.ParseUint(fields["OSZ"], 10, 8); parseErr == nil && (size == 16 || size == 32 || size == 64) {
 		e.OperandSize = uint8(size)
 	}
-	if e.Kind == EncodingLegacy && (fields["OSZ"] != "" || e.Mnemonic == "TZCNT" || e.Mnemonic == "LZCNT" || e.Mnemonic == "POPCNT") {
+	if e.Kind == EncodingLegacy && (fields["OSZ"] != "" || e.Mnemonic == "TZCNT" || e.Mnemonic == "LZCNT" || e.Mnemonic == "POPCNT" || e.Mnemonic == "CRC32") {
 		// In legacy encodings the physical 66 byte can be the OSZ
 		// override even when P66 (mandatory-prefix role) is zero. VEX,
 		// XOP, and EVEX pp selects a single implied prefix and leaves 66 no
@@ -173,6 +193,11 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 			ConditionalRead:  operand.ConditionalRead != 0,
 			ConditionalWrite: operand.ConditionalWrite != 0,
 		})
+		for _, address := range []*opcodesDBOperand{operand.Base, operand.Index, operand.Segment} {
+			if address != nil {
+				e.Operands[len(e.Operands)-1].AddressRegisters = append(e.Operands[len(e.Operands)-1].AddressRegisters, Operand{Symbol: address.Symbol, Value: scalarString(address.Value), EncodedIn: strings.ToUpper(address.EncodedIn), Read: address.Read != 0, Write: address.Write != 0})
+			}
+		}
 		// opcodesDB expands +r opcode families into one ENCODING record per
 		// register (B8, B9, ...), while retaining encodedin=OPCODE on the
 		// operand. The opcode is therefore already exact for this form.
@@ -184,6 +209,9 @@ func importOpcodesDBForm(id string, templateIndex int, tmpl opcodesDBTemplate, f
 		}
 	}
 	e.ReservedVVVV = reservedVVVV(e.Kind, e.Operands)
+	if err := normalizeOpcodesDBEVEX(&e, fields); err != nil {
+		return Encoding{}, fmt.Errorf("%s template %d: %w", id, templateIndex, err)
+	}
 	return e, nil
 }
 

@@ -231,3 +231,28 @@ func TestDecodeErrorsAndAllocations(t *testing.T) {
 		t.Fatalf("Decode allocated %.2f times", allocs)
 	}
 }
+
+func TestEncodeRequiresConsistentSIBFields(t *testing.T) {
+	for _, mode := range []Mode{Mode16, Mode32, Mode64} {
+		for _, override := range []bool{false, true} {
+			for _, mod := range []byte{0, 1, 2, 3} {
+				for _, rm := range []byte{0, 4} {
+					for _, sib := range []bool{false, true} {
+						e := Encoding{Kind: EncodingLegacy, Opcode: 0x01, Modes: modeAll, HasModRM: true}
+						fields := EncodeFields{Mode: mode, AddressOverride: override, Mod: mod, RM: rm, UseSIB: sib}
+						wantSIB := mod != 3 && effectiveAddressBits(mode, override) != 16 && rm == 4
+						var dst [15]byte
+						n, err := Encode(dst[:], &e, fields)
+						if sib != wantSIB {
+							if !errors.Is(err, ErrInvalidEncodeField) {
+								t.Errorf("mode=%d override=%t mod=%d rm=%d sib=%t: encoded % x, err=%v; want invalid field", mode, override, mod, rm, sib, dst[:n], err)
+							}
+						} else if err != nil {
+							t.Errorf("valid fields %+v: %v", fields, err)
+						}
+					}
+				}
+			}
+		}
+	}
+}

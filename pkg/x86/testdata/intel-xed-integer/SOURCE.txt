@@ -1,0 +1,26 @@
+Intel XED integer supplement
+
+Repository: https://github.com/intelxed/xed
+Revision: 0bcb6237345c5066726dcc08b3d87928df3b5b26
+License: Apache-2.0 (original LICENSE included).
+
+All source files are unmodified original bytes. avx-ifma/avx-vnni/avx-vnni-int8/
+avx-vnni-int16 ISA and corresponding CPUID files come from datafiles/<family>/.
+The avx512-vnni-int16 and avx10-2-simd ISA files and avx10-2 CPUID file come
+from datafiles/avx10-2/. Only VNNI_INT8 forms are selected from the latter SIMD
+file; all unrelated classes are explicitly counted separately. Unknown selected
+class constraints fail closed. No original opcodesDB forms are replaced.
+
+SHA-256:
+7330526e510d83ee5da23f9653b67024fefab6d0a56bfa76dfdf2497aef647c6  LICENSE
+c460df5ee08eaca93f8a9a2e4c3f8b919bad00be9f23adadec8291fd7160d45f  avx-ifma-cpuid.xed.txt
+df3a516b00846483331151696bd7f6c20239960791707ff65d2d95c7896266c6  avx-ifma-isa.xed.txt
+2946cad42694d9d3bc45b9846d4edbedd284a10c2f434902aecd0ac8c1635ed5  avx-vnni-cpuid.xed.txt
+7b9867a55a9b77e0a17566d8f6c6e5d7c7fdc7f7bcca445f1df18731b53e4e8b  avx-vnni-int16-cpuid.xed.txt
+bb2b94a0509705678695eaa37a6399ff1a2cac0b80b784693cd414fb2583c4c6  avx-vnni-int16-isa.xed.txt
+b032fbeb5a6b59345400c93a067ebf2bcd56a652d3290811a11cf1635b4c8f90  avx-vnni-int8-cpuid.xed.txt
+1ea4bc49d18591cd489b1f070b0d7df03eecb5665d24028a9636311aa10116ef  avx-vnni-int8-isa.xed.txt
+f128b8ee02061a5a9b7e5051273c0b663843315bebfa2ae651c5e17089667c41  avx-vnni-isa.xed.txt
+e3f44806deccb83e8054bd101fb76fd5aa593ff682b3a26eabf75ac8676acf8a  avx10-2-cpuid.xed.txt
+e64629fbd65467daa9a35229897ad9a8d0a14cbaa0690fbb7c0b8d091b511e3a  avx10-2-simd-isa.xed.txt
+8cf8054c0ee4b3a22d4e54cebe09ff575855038bf6526dd014a0083e567cafce  avx512-vnni-int16-isa.xed.txt

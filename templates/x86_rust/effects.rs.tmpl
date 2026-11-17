@@ -1,0 +1,136 @@
+//! Architectural effects retained from operand metadata and bounded ISA rules.
+use super::*;
+{{.Types}}
+
+fn register_effect(r:Register,read:bool,write:bool,conditional:bool,implicit:bool,address:bool,d:&Decoded)->RegisterEffect {
+    let bank=match r.class {RegisterClass::Gpr=>"gpr",RegisterClass::Vector=>"vector",RegisterClass::Mask=>"mask",RegisterClass::Mmx=>"mmx",RegisterClass::Bound=>"bound",RegisterClass::Control=>"control",RegisterClass::Debug=>"debug",RegisterClass::Segment=>"segment",RegisterClass::X87=>"x87",RegisterClass::Other=>"other"};
+    let native=if d.physical.mode==Mode::Mode64{64}else{32};
+    let behavior=if r.width==0 {WriteBehavior::Unknown} else if !write {WriteBehavior::Unknown} else if r.class==RegisterClass::Gpr {
+        if r.width==32&&native==64{WriteBehavior::ZeroUpper}else if r.width==native&&!r.high8{WriteBehavior::Replace}else{WriteBehavior::PreserveUpper}
+    }else if r.class==RegisterClass::Vector&&d.encoding().kind!=0&&r.width>=128 {WriteBehavior::ZeroUpper}
+    else if r.class==RegisterClass::Vector&&r.width>=128 {WriteBehavior::PreserveUpper}
+    else {WriteBehavior::Unknown};
+    RegisterEffect{register:RegisterSlice{bank,number:Some((if r.high8{r.number&3}else{r.number}) as u16),name:"",offset:if r.high8{8}else{0},width:(r.width!=0).then_some(r.width)},read,write,conditional,implicit,address,write_behavior:behavior}
+}
+
+fn source_flags(d:&Decoded)->&'static [FlagEffect] {match d.form_index {
+{{.FlagRules}}
+_=>&[]}}
+
+fn source_addresses(d:&Decoded,index:usize)->&'static [(&'static str,&'static str,&'static str,bool,bool)] {match(d.form_index,index){
+{{.AddressRules}}
+_=>&[]}}
+const FLAGS:&[&str]=&["CF","PF","AF","ZF","SF","TF","IF","DF","OF","IOPL","NT","RF","VM","AC","VIF","VIP","ID"];
+fn flag_rule(m:&str,name:&str)->(bool,FlagAction) {
+    use FlagAction::*;
+    let arithmetic=matches!(name,"CF"|"PF"|"AF"|"ZF"|"SF"|"OF");
+    let known=matches!(m,"ADD"|"ADC"|"SUB"|"SBB"|"CMP"|"NEG"|"INC"|"DEC"|"AND"|"OR"|"XOR"|"TEST"|"NOT"|"MOV"|"MOVZX"|"MOVSX"|"MOVSXD"|"LEA"|"NOP"|"XCHG"|"PUSH"|"POP"|"JMP"|"CALL"|"RET"|"CLC"|"STC"|"CMC"|"CLD"|"STD");
+    let condition=match m {"JO"=>"OF","JNO"=>"OF","JB"|"JC"|"JNAE"|"JAE"|"JNB"|"JNC"=>"CF","JE"|"JZ"|"JNE"|"JNZ"=>"ZF","JBE"|"JNA"|"JA"|"JNBE"=>"CF ZF","JS"|"JNS"=>"SF","JP"|"JPE"|"JNP"|"JPO"=>"PF","JL"|"JNGE"|"JGE"|"JNL"=>"SF OF","JLE"|"JNG"|"JG"|"JNLE"=>"ZF SF OF",_=>""};
+    let read=(matches!(m,"ADC"|"SBB"|"CMC")&&name=="CF")||condition.split_whitespace().any(|f|f==name);
+    if !known&&condition.is_empty(){return (read,Unknown);}
+    let action=if name=="CF"&&matches!(m,"CLC"|"STC"|"CMC"){match m{"CLC"=>Clear,"STC"=>Set,_=>Write}}
+    else if name=="DF"&&matches!(m,"CLD"|"STD"){if m=="CLD"{Clear}else{Set}}
+    else if arithmetic&&matches!(m,"AND"|"OR"|"XOR"|"TEST"){match name{"CF"|"OF"=>Clear,"AF"=>Undefined,_=>Write}}
+    else if arithmetic&&matches!(m,"ADD"|"ADC"|"SUB"|"SBB"|"CMP"|"NEG"){Write}
+    else if arithmetic&&matches!(m,"INC"|"DEC")&&name!="CF"{Write}
+    else {Preserve};
+    (read,action)
+}
+impl Decoded {
+    /// Exact known accesses; completeness is independent for each category.
+    /// Register width identifies the accessed slice; ZeroUpper additionally
+    /// clears the enclosing architectural register above that slice.
+    pub fn effects(&self)->EffectSummary {
+        let mut out=EffectSummary{knowledge:EffectKnowledge::Partial,registers_knowledge:EffectKnowledge::Partial,memory_knowledge:EffectKnowledge::Partial,..EffectSummary::default()};
+        let m=self.encoding().mnemonic;
+        let e=self.encoding();
+        let near_stack=e.kind==0&&e.map==0&&match m {"PUSH"=>matches!(e.opcode,0x50..=0x57|0x68|0x6a)||(e.opcode==0xff&&e.reg_value==6),"POP"=>matches!(e.opcode,0x58..=0x5f)||e.opcode==0x8f,"CALL"=>e.opcode==0xe8||(e.opcode==0xff&&e.reg_value==2),"RET"=>matches!(e.opcode,0xc2|0xc3),_=>false};
+        let near_jump=e.kind==0&&e.map==0&&(matches!(e.opcode,0xe9|0xeb)||(e.opcode==0xff&&e.reg_mask==7&&e.reg_value==4));
+        // Legacy scalar register moves preserve the remaining XMM bits,
+        // whereas their memory-load forms clear the rest of the low 128 bits.
+        // Physical gates keep the identically named MOVSD string family out.
+        let scalar_move=if e.kind==0&&e.map==1&&matches!(e.opcode,0x10|0x11) {match(m,e.mandatory){("MOVSS",2)=>Some(32),("MOVSD",3)=>Some(64),_=>None}}else{None};
+        let memory_form=self.operands().iter().any(|o|o.kind==OperandKind::Memory);
+        for (i,o) in self.operands().iter().enumerate() {
+            let conditional=o.access.conditional_read||o.access.conditional_write||(self.physical.mask!=0&&o.kind==OperandKind::Memory);
+            let read=o.access.read||o.access.conditional_read;
+            let write=o.access.write||o.access.conditional_write;
+            if let Some(mut r)=o.register {if (read||write)&&!(o.kind==OperandKind::Mask&&r.number==0) {
+                if near_stack&&o.implicit&&r.class==RegisterClass::Gpr&&r.number==4 {r.width=if self.physical.mode==Mode::Mode64{64}else{0};}
+                let merge=write&&r.class==RegisterClass::Vector&&self.physical.mask!=0&&!self.physical.zeroing;
+                let mut effect=register_effect(r,read||merge,write,conditional||merge||(self.physical.mask!=0&&r.class==RegisterClass::Vector&&read),o.implicit,false,self);
+                if let Some(bits)=scalar_move {
+                    if r.class==RegisterClass::Vector&&r.width==128 {
+                        if read||!memory_form{effect.register.width=Some(bits);}
+                        if write{effect.write_behavior=WriteBehavior::PreserveUpper;}
+                    }
+                }
+                out.registers.push(effect);
+            }}
+            if matches!(o.text,"RIP"|"EIP"|"IP")&&(read||write) {out.registers.push(RegisterEffect{register:RegisterSlice{bank:"ip",number:Some(0),name:o.text,offset:0,width:Some(if o.text=="RIP"{64}else if o.text=="EIP"{32}else{16})},read,write,conditional,implicit:o.implicit,address:false,write_behavior:if write{WriteBehavior::Replace}else{WriteBehavior::Unknown}});}
+            if o.kind==OperandKind::Memory {
+                if o.memory.rip_relative {out.registers.push(RegisterEffect{register:RegisterSlice{bank:"ip",number:Some(0),name:if o.memory.address_size==32{"EIP"}else{"RIP"},offset:0,width:Some(u16::from(o.memory.address_size))},read:true,write:false,conditional,implicit:true,address:true,write_behavior:WriteBehavior::Unknown});}
+                let source=source_addresses(self,i);
+                if !source.is_empty(){for &(symbol,value,encoded,read,write) in source {
+                    let number=match encoded{"REG"=>self.physical.reg,"RM"=>self.physical.rm,_=>0};
+                    let r=if value.is_empty(){register_for_symbol(symbol,number,&self.physical,self.physical.rex!=0)}else{fixed_register(value,self.physical.operand_size,self.physical.address_size)};
+                    if let Some(mut r)=r{if near_stack&&r.class==RegisterClass::Gpr&&r.number==4{r.width=if self.physical.mode==Mode::Mode64{64}else{0};}out.registers.push(register_effect(r,read,write,conditional,o.implicit,true,self));}
+                }} else if !o.implicit {for r in [o.memory.segment,o.memory.base,o.memory.index].into_iter().flatten() {out.registers.push(register_effect(r,true,false,conditional,false,true,self));}}
+                let address_only=OPERANDS.get(e.operand_start as usize+i).map(|s|s.kind=="AGEN").unwrap_or(false);
+                if (read||write)&&!address_only {
+                    let atomic=(read&&write)&&(self.physical.lock||self.encoding().mnemonic=="XCHG");
+                    out.memory.push(MemoryEffect{operand:Some(i),read,write,conditional,implicit:o.implicit,width_bits:(o.memory.size!=0).then_some(o.memory.size),ordering:if atomic{MemoryOrdering::Sequential}else{MemoryOrdering::Unknown},atomicity:if atomic{Atomicity::Atomic}else{Atomicity::Unknown},writeback:Writeback::None});
+                }
+            }
+        }
+
+        // Near stack operations have implicit address and stack-pointer effects
+        // even when an upstream syntax AST omits its suppressed operands.
+        if near_stack {
+            let width=if self.physical.mode==Mode::Mode64 {64}else{0};
+            if !out.registers.iter().any(|r|r.register.bank=="gpr"&&r.register.number==Some(4)&&r.write) {
+                out.registers.push(register_effect(Register{class:RegisterClass::Gpr,number:4,width,high8:false},true,true,false,true,true,self));
+            }
+            let bits=if self.physical.mode==Mode::Mode64&&(m=="CALL"||self.physical.operand_size!=16){64}else{self.physical.operand_size as u16};
+            for effect in out.memory.iter_mut().filter(|r|r.implicit) {effect.width_bits=Some(bits);effect.writeback=if matches!(m,"PUSH"|"CALL"){Writeback::Before}else{Writeback::After};}
+            if !out.memory.iter().any(|r|r.implicit) {
+                out.memory.push(MemoryEffect{operand:None,read:matches!(m,"POP"|"RET"),write:matches!(m,"PUSH"|"CALL"),conditional:false,implicit:true,width_bits:Some(bits),ordering:MemoryOrdering::Unknown,atomicity:Atomicity::Unknown,writeback:if matches!(m,"PUSH"|"CALL"){Writeback::Before}else{Writeback::After}});
+            }
+        }
+        let mut flags_complete=true;
+        // Far CALL/JMP may switch tasks in protected mode and replace flags.
+        // No descriptor context here proves that they preserve those flags.
+        for &name in FLAGS {let(read,action)=flag_rule(if (m=="CALL"&&!near_stack)||(m=="JMP"&&!near_jump){""}else{m},name); let source=source_flags(self).iter().find(|f|f.name==name);
+            let (read,action,conditional)=if action==FlagAction::Unknown {source.map(|f|(f.read,f.action,f.conditional)).unwrap_or((read,action,false))}else{(read,action,false)};flags_complete&=action!=FlagAction::Unknown;out.flags.push(FlagEffect{name,read,action,conditional});}
+        // Counts can suppress writes and change definedness. Upstream iflags
+        // is a form-level bound, so resolve these flags at the decoded count.
+        if matches!(m,"SHL"|"SAL"|"SHR"|"SAR"|"ROL"|"ROR"|"RCL"|"RCR") {
+            let width=self.operands().first().map(|o|o.register.map(|r|r.width).unwrap_or(o.memory.size)).unwrap_or(0);
+            let count=self.operands().iter().skip(1).find(|o|o.kind==OperandKind::Immediate).map(|o|o.immediate.value as u16 & if width==64{63}else{31});
+            let rotate=matches!(m,"ROL"|"ROR"|"RCL"|"RCR");
+            // Whole-turn rotates have count-dependent CF/OF details. Retain
+            // unknown actions outside the separately qualified zero/one cases.
+            let count=count.filter(|&c|!rotate||c<=1);
+            for f in &mut out.flags {
+                let status=matches!(f.name,"CF"|"PF"|"AF"|"ZF"|"SF"|"OF");
+                f.read=matches!(m,"RCL"|"RCR")&&f.name=="CF"&&count!=Some(0);
+                f.conditional=count.is_none()&&if rotate{matches!(f.name,"CF"|"OF")}else{status};
+                f.action=match count {
+                    Some(0)=>FlagAction::Preserve,
+                    None if status&&(!rotate||matches!(f.name,"CF"|"OF"))=>FlagAction::Unknown,
+                    Some(c) if f.name=="OF"=>if c==1{FlagAction::Write}else{FlagAction::Undefined},
+                    Some(c) if f.name=="CF"=>if !rotate&&c>=width&&m!="SAR"{FlagAction::Undefined}else{FlagAction::Write},
+                    Some(_) if !rotate&&f.name=="AF"=>FlagAction::Undefined,
+                    Some(_) if !rotate&&matches!(f.name,"PF"|"ZF"|"SF")=>FlagAction::Write,
+                    _=>FlagAction::Preserve,
+                };
+            }
+            flags_complete=count.is_some();
+        }
+        out.flags_knowledge=if flags_complete{EffectKnowledge::Complete}else{EffectKnowledge::Unknown};
+        if out.registers.is_empty(){out.registers_knowledge=EffectKnowledge::Unknown;}
+        if out.memory.is_empty(){out.memory_knowledge=EffectKnowledge::Unknown;}
+        if out.registers.is_empty()&&out.memory.is_empty()&&!out.flags.iter().any(|f|f.read||f.action!=FlagAction::Unknown){out.knowledge=EffectKnowledge::Unknown;}
+        out
+    }
+}

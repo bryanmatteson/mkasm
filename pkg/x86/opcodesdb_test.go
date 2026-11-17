@@ -60,6 +60,29 @@ func TestParseOpcodesDBRejectsWrongArchitecture(t *testing.T) {
 	}
 }
 
+func TestCRC32OperandSizeOverrideWithMandatoryF2(t *testing.T) {
+	input := `{"version":"3","arch":"x86","records":[{"id":"CRC32","rectype":"ENCODING","diagram":{"fields":[{"name":"MAP","value":"0f38"},{"name":"MR","value":"1"},{"name":"OP","value":"0xf1"},{"name":"P66","value":"0"},{"name":"PF2","value":"1"},{"name":"PF3","value":"0"}]},"templates":[{"syntax":{"mnem":"CRC32","text":"CRC32","ast":[{"type":"REG","symbol":"GPRy","encodedin":"REG"},{"type":"REG","symbol":"GPRv","encodedin":"RM"}]}}]}]}`
+	c, err := ParseOpcodesDB(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := NewDecoder(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []Mode{Mode16, Mode32, Mode64} {
+		for _, raw := range [][]byte{{0x66, 0xf2, 0x0f, 0x38, 0xf1, 0xc3}, {0xf2, 0x66, 0x0f, 0x38, 0xf1, 0xc3}, {0xf2, 0x0f, 0x38, 0xf1, 0xc3}} {
+			decoded, err := d.Decode(raw, mode)
+			if err != nil || int(decoded.Length) != len(raw) {
+				t.Fatalf("mode%d %x: %+v %v", mode, raw, decoded, err)
+			}
+		}
+		if _, err := d.Decode([]byte{0x66, 0x0f, 0x38, 0xf1, 0xc3}, mode); err == nil {
+			t.Fatal("CRC32 accepted without mandatory F2")
+		}
+	}
+}
+
 func TestParseOpcodesDBPacksIS4AndIBIntoOneTailByte(t *testing.T) {
 	input := `{"version":"3","arch":"x86","records":[{
 		"id":"VPERMIL2PD","rectype":"ENCODING",

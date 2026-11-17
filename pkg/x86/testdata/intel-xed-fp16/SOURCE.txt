@@ -1,0 +1,26 @@
+Intel XED AVX512-FP16 source
+
+Repository: https://github.com/intelxed/xed
+Revision: 0bcb6237345c5066726dcc08b3d87928df3b5b26
+Original directory: datafiles/avx512-fp16/
+Files prefixed avx512f- come from datafiles/avx512f/ (prefix removed).
+License: Apache-2.0 (unmodified LICENSE included).
+
+All .txt data files are unmodified original bytes. xed_fp16.go embeds the ISA
+file; width, disp8, RC/SAE and feature normalizations follow the pinned companion
+files. Unknown pattern grammar fails closed. All 590 source blocks are imported.
+Embedded RC uses physical LL independently of logical VL128/VL512. Generated
+crates retain this source notice and the original Intel XED license.
+
+SHA-256:
+7330526e510d83ee5da23f9653b67024fefab6d0a56bfa76dfdf2497aef647c6  LICENSE
+8f962a5101f7d6aa47d918ffe944d86305e36a677207541c5b29f618d15efd1d  avx512-evex-disp8-enc-fp16.txt
+f15ed9199eb38914a405045e6b79968e8ada72ba839fb58a401093c8c6ddf44a  avx512-evex-disp8-fp16.txt
+de89f382bc4fca635acfd77ac0012739551c79dc1de10bc01831678554077abc  avx512-evex-enc-map5-and-6.txt
+1eb4a0c6f7bcf4d2ebaef96cccfad972c6f3e0e82d6a6666b48a51556795fb3f  avx512-fp16-isa.xed.txt
+0662988aac987615beae097a4e8d6ee8d3499ad0e52d11af1ab1b69629d0eb2a  avx512f-avx512-evex-dec.txt
+0935ae439289de86afed55ac9a8677563e26a94a0deb325579abb0057b64f5dd  avx512f-avx512-evex-enc.txt
+78416850082da03b62489e3cee00b2115e0e877d037ae5b701d0a94644dcd27e  avx512f-avx512-state-bits.txt
+ccd5ff0d10e295be5bd7f16b2acad6c81e1fc295f1d4611b18284264bba883e2  cpuid.xed.txt
+7ae56d1be91bd6b744e559fb5ab22608f2bbaaf911cba1e7e043fc0870826bae  state-bits.txt
+8bbd3120bf057bd3442efee899a4e294e7da5d828359d680c0d953d6eaa03932  widths.txt

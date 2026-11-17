@@ -1,0 +1,458 @@
+{
+  "arch": "x86",
+  "version": "3",
+  "records": [
+    {
+      "categories": [
+        "SYSTEM",
+        "CONVERSION"
+      ],
+      "diagram": {
+        "fields": [
+          {
+            "name": "MAP",
+            "value": "0f"
+          },
+          {
+            "name": "MR",
+            "value": "1"
+          },
+          {
+            "name": "OP",
+            "value": "0x11"
+          },
+          {
+            "name": "P66",
+            "value": "0"
+          },
+          {
+            "name": "PF2",
+            "value": "1"
+          },
+          {
+            "name": "PF3",
+            "value": "0"
+          }
+        ]
+      },
+      "exceptions": [
+        "SSE_TYPE_5"
+      ],
+      "extensions": [
+        "SSE2"
+      ],
+      "id": "MOVSD_mqrq",
+      "metadata": {
+        "isa": "SSE2"
+      },
+      "rectype": "ENCODING",
+      "tags": {
+        "page": "MOVS"
+      },
+      "templates": [
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "REG"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F64",
+                "encodedin": "RM",
+                "symbol": "XMMREG",
+                "type": "REG",
+                "write": 1
+              },
+              {
+                "datatype": "F64",
+                "encodedin": "REG",
+                "read": 1,
+                "symbol": "XMMREG",
+                "type": "REG"
+              }
+            ],
+            "mnem": "MOVSD",
+            "text": "MOVSD REG:w:f64=$XMMm  REG:r:f64=$XMMr"
+          }
+        },
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "MEM"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F64",
+                "encodedin": "RM",
+                "size": 64,
+                "symbol": "MEM",
+                "type": "MEM",
+                "write": 1
+              },
+              {
+                "datatype": "F64",
+                "encodedin": "REG",
+                "read": 1,
+                "symbol": "XMMREG",
+                "type": "REG"
+              }
+            ],
+            "mnem": "MOVSD",
+            "text": "MOVSD MEM:w:f64=$mem64 REG:r:f64=$XMMr"
+          }
+        }
+      ]
+    },
+    {
+      "categories": [
+        "SYSTEM",
+        "CONVERSION"
+      ],
+      "diagram": {
+        "fields": [
+          {
+            "name": "MAP",
+            "value": "0f"
+          },
+          {
+            "name": "MR",
+            "value": "1"
+          },
+          {
+            "name": "OP",
+            "value": "0x10"
+          },
+          {
+            "name": "P66",
+            "value": "0"
+          },
+          {
+            "name": "PF2",
+            "value": "1"
+          },
+          {
+            "name": "PF3",
+            "value": "0"
+          }
+        ]
+      },
+      "exceptions": [
+        "SSE_TYPE_5"
+      ],
+      "extensions": [
+        "SSE2"
+      ],
+      "id": "MOVSD_rxmq",
+      "metadata": {
+        "isa": "SSE2"
+      },
+      "rectype": "ENCODING",
+      "tags": {
+        "page": "MOVS"
+      },
+      "templates": [
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "REG"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F64",
+                "encodedin": "REG",
+                "symbol": "XMMREG",
+                "type": "REG",
+                "write": 1
+              },
+              {
+                "datatype": "F64",
+                "encodedin": "RM",
+                "read": 1,
+                "symbol": "XMMREG",
+                "type": "REG"
+              }
+            ],
+            "mnem": "MOVSD",
+            "text": "MOVSD REG:w:f64=$XMMr  REG:r:f64=$XMMm"
+          }
+        },
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "MEM"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F64",
+                "encodedin": "REG",
+                "symbol": "XMMREG",
+                "type": "VREG",
+                "write": 1
+              },
+              {
+                "datatype": "F64",
+                "encodedin": "RM",
+                "read": 1,
+                "size": 64,
+                "symbol": "MEM",
+                "type": "MEM"
+              }
+            ],
+            "mnem": "MOVSD",
+            "text": "MOVSD VREG:w:f64=$XMMr MEM:r:f64=$mem64"
+          }
+        }
+      ]
+    },
+    {
+      "categories": [
+        "SYSTEM",
+        "CONVERSION"
+      ],
+      "diagram": {
+        "fields": [
+          {
+            "name": "MAP",
+            "value": "0f"
+          },
+          {
+            "name": "MR",
+            "value": "1"
+          },
+          {
+            "name": "OP",
+            "value": "0x11"
+          },
+          {
+            "name": "P66",
+            "value": "0"
+          },
+          {
+            "name": "PF2",
+            "value": "0"
+          },
+          {
+            "name": "PF3",
+            "value": "1"
+          }
+        ]
+      },
+      "exceptions": [
+        "SSE_TYPE_5"
+      ],
+      "extensions": [
+        "SSE"
+      ],
+      "id": "MOVSS_mdrd",
+      "metadata": {
+        "isa": "SSE"
+      },
+      "rectype": "ENCODING",
+      "tags": {
+        "page": "MOVSS"
+      },
+      "templates": [
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "REG"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F32",
+                "encodedin": "RM",
+                "symbol": "XMMREG",
+                "type": "REG",
+                "write": 1
+              },
+              {
+                "datatype": "F32",
+                "encodedin": "REG",
+                "read": 1,
+                "symbol": "XMMREG",
+                "type": "REG"
+              }
+            ],
+            "mnem": "MOVSS",
+            "text": "MOVSS REG:w:f32=$XMMm  REG:r:f32=$XMMr"
+          }
+        },
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "MEM"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F32",
+                "encodedin": "RM",
+                "size": 32,
+                "symbol": "MEM",
+                "type": "MEM",
+                "write": 1
+              },
+              {
+                "datatype": "F32",
+                "encodedin": "REG",
+                "read": 1,
+                "symbol": "XMMREG",
+                "type": "REG"
+              }
+            ],
+            "mnem": "MOVSS",
+            "text": "MOVSS MEM:w:f32=$mem32 REG:r:f32=$XMMr"
+          }
+        }
+      ]
+    },
+    {
+      "categories": [
+        "SYSTEM",
+        "CONVERSION"
+      ],
+      "diagram": {
+        "fields": [
+          {
+            "name": "MAP",
+            "value": "0f"
+          },
+          {
+            "name": "MR",
+            "value": "1"
+          },
+          {
+            "name": "OP",
+            "value": "0x10"
+          },
+          {
+            "name": "P66",
+            "value": "0"
+          },
+          {
+            "name": "PF2",
+            "value": "0"
+          },
+          {
+            "name": "PF3",
+            "value": "1"
+          }
+        ]
+      },
+      "exceptions": [
+        "SSE_TYPE_5"
+      ],
+      "extensions": [
+        "SSE"
+      ],
+      "id": "MOVSS_rxmd",
+      "metadata": {
+        "isa": "SSE"
+      },
+      "rectype": "ENCODING",
+      "tags": {
+        "page": "MOVSS"
+      },
+      "templates": [
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "REG"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F32",
+                "encodedin": "REG",
+                "symbol": "XMMREG",
+                "type": "REG",
+                "write": 1
+              },
+              {
+                "datatype": "F32",
+                "encodedin": "RM",
+                "read": 1,
+                "symbol": "XMMREG",
+                "type": "REG"
+              }
+            ],
+            "mnem": "MOVSS",
+            "text": "MOVSS REG:w:f32=$XMMr  REG:r:f32=$XMMm"
+          }
+        },
+        {
+          "bitdiffs": {
+            "fields": [
+              {
+                "name": "MOD",
+                "value": "MEM"
+              }
+            ]
+          },
+          "metadata": {},
+          "syntax": {
+            "ast": [
+              {
+                "datatype": "F32",
+                "encodedin": "REG",
+                "symbol": "XMMREG",
+                "type": "VREG",
+                "write": 1
+              },
+              {
+                "datatype": "F32",
+                "encodedin": "RM",
+                "read": 1,
+                "size": 32,
+                "symbol": "MEM",
+                "type": "MEM"
+              }
+            ],
+            "mnem": "MOVSS",
+            "text": "MOVSS VREG:w:f32=$XMMr MEM:r:f32=$mem32"
+          }
+        }
+      ]
+    }
+  ]
+}

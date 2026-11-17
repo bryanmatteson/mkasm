@@ -1,0 +1,257 @@
+//! Assembler round-trip checks against real code and external assemblers.
+//!
+//! sweep FILE BASE [--emit OUT]   decode raw code at BASE (hex); for each
+//!                                instruction require format -> assemble_at to
+//!                                reproduce it and its template to match it
+//! representatives [--emit OUT]   the same check on every form's representative
+//! verify FILE                    lines `text<TAB>hex`: require each hex encoding
+//!                                (for example from llvm-mc) among assemble(text)
+//! asm TEXT [ADDRESS]             print every encoding of one line
+//! scan FILE BASE TEMPLATE        match a template at every byte offset
+
+use std::collections::BTreeMap;
+use std::io::Write as _;
+use {{.CrateName}}::*;
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim();
+    if text.len() % 2 != 0 { return None; }
+    (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok()).collect()
+}
+
+/// Group failures by instruction shape: the text with every number elided.
+fn shape(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '0' && chars.peek() == Some(&'x') {
+            chars.next();
+            while chars.peek().is_some_and(char::is_ascii_hexdigit) { chars.next(); }
+            out.push('#');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[derive(Default)]
+struct Totals {
+    mode: Option<Mode>,
+    instructions: usize,
+    exact: usize,
+    equivalent: usize,
+    equivalents: BTreeMap<String, (usize, String)>,
+    spans: usize,
+    bare: BTreeMap<String, (usize, String)>,
+    failures: BTreeMap<String, (usize, String)>,
+}
+
+impl Totals {
+    fn check(&mut self, bytes: &[u8], ip: u64, emit: &mut Option<std::fs::File>) {
+        let mode=self.mode.unwrap_or(DEFAULT_MODE);
+        let Ok(decoded) = decode(bytes, mode) else { return };
+        let bytes = &bytes[..decoded.length as usize];
+        let text = decoded.format_intel(ip);
+        self.instructions += 1;
+        if let Some(file) = emit.as_mut() {
+            let relative = decoded.operands().iter().any(|operand| operand.kind == OperandKind::Relative);
+            if !relative { let _ = writeln!(file, "{text}\t{}", hex(bytes)); }
+        }
+        let failure = match assemble_at_in_mode(&text, ip,mode) {
+            Err(error) => Some(format!("assemble: {error}")),
+            Ok(results) => {
+                if results.iter().any(|encoded| encoded.bytes() == bytes) {
+                    self.exact += 1;
+                    None
+                } else if let Some(same) = results.iter().find(|encoded| decode(encoded.bytes(), mode).is_ok_and(|other| other.format_intel(ip) == text)) {
+                    self.equivalent += 1;
+                    let entry = self.equivalents.entry(shape(&text))
+                        .or_insert((0, format!("{} `{text}` assembles as {}", hex(bytes), hex(same.bytes()))));
+                    entry.0 += 1;
+                    None
+                } else {
+                    Some(format!("not reproduced; got {:?}", results.iter().map(|encoded| hex(encoded.bytes())).collect::<Vec<_>>()))
+                }
+            }
+        };
+        let failure = failure.or_else(|| match Template::parse_at_in_mode(&text, ip,mode) {
+            Err(error) => Some(format!("template: {error}")),
+            Ok(template) => {
+                let mut values = Vec::new();
+                (template.matches(bytes, &mut values) != Some(bytes.len())).then(|| "template does not match its own bytes".to_string())
+            }
+        });
+        let failure = failure.or_else(|| self.check_described(bytes));
+        if let Some(failure) = failure {
+            let entry = self.failures.entry(shape(&text)).or_insert((0, format!("{} `{text}`: {failure}", hex(bytes))));
+            entry.0 += 1;
+        }
+    }
+
+    /// `describe`: its text matches; each span as `$h:class` matches and binds
+    /// the span's value. Spans that also work as a bare `$h` are counted.
+    fn check_described(&mut self, bytes: &[u8]) -> Option<String> {
+        let mode=self.mode.unwrap_or(DEFAULT_MODE);
+        let Some(described) = describe_in_mode(bytes,mode) else { return Some("describe failed".to_string()) };
+        let mut values = Vec::new();
+        match Template::parse_in_mode(&described.text,mode) {
+            Ok(template) if template.matches(bytes, &mut values) == Some(described.len) => {}
+            _ => return Some(format!("describe text `{}` does not match", described.text)),
+        }
+        for (index, span) in described.operands.iter().enumerate() {
+            let expected = OperandValue::new(span.class, span.value);
+            let classed = described.with_hole(index, &format!("$h:{}", span.class)).unwrap();
+            let ok = Template::parse_in_mode(&classed,mode).is_ok_and(|hole| hole.matches(bytes, &mut values) == Some(described.len) && values == [expected]);
+            if !ok { return Some(format!("describe span `{classed}` does not bind {expected}")); }
+            self.spans += 1;
+            let bare = described.with_hole(index, "$h").unwrap();
+            if !Template::parse_in_mode(&bare,mode).is_ok_and(|hole| hole.matches(bytes, &mut values) == Some(described.len) && values == [expected]) {
+                let entry = self.bare.entry(format!("{}", span.class)).or_insert((0, bare.clone()));
+                entry.0 += 1;
+            }
+        }
+        None
+    }
+
+    fn report(&self, label: &str) {
+        let failed: usize = self.failures.values().map(|(count, _)| count).sum();
+        println!("{label}: {} instructions, {} reproduced exactly, {} by an identical-text encoding, {} failed in {} shapes",
+            self.instructions, self.exact, self.equivalent, failed, self.failures.len());
+        for (count, example) in self.failures.values() {
+            println!("  {count:6} {example}");
+        }
+        for (count, example) in self.equivalents.values() {
+            println!("  ~{count:5} {example}");
+        }
+        println!("  describe spans checked: {}", self.spans);
+        for (class, (count, example)) in &self.bare {
+            println!("  bare $h needs a class for {count} {class} spans, e.g. `{example}`");
+        }
+    }
+}
+
+fn emit_file(args: &[String]) -> Option<std::fs::File> {
+    args.iter().position(|arg| arg == "--emit")
+        .and_then(|index| args.get(index + 1))
+        .map(|path| std::fs::File::create(path).expect("create --emit file"))
+}
+
+fn main() {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mode=match args.iter().position(|a|a.starts_with("--mode=")) {
+        Some(index)=>match args.remove(index).as_str() {"--mode=16"=>Mode::Mode16,"--mode=32"=>Mode::Mode32,"--mode=64"=>Mode::Mode64,_=>panic!("--mode must be 16, 32, or 64")},
+        None=>DEFAULT_MODE,
+    };
+    let mut emit = emit_file(&args);
+    match args.first().map(String::as_str) {
+        Some("sweep") => {
+            let path = args.get(1).expect("sweep FILE BASE");
+            let base = u64::from_str_radix(args.get(2).expect("sweep FILE BASE").trim_start_matches("0x"), 16).expect("hex base");
+            let code = std::fs::read(path).expect("read code");
+            let mut totals = Totals {mode:Some(mode),..Totals::default()};
+            let mut offset = 0usize;
+            let mut undecodable = 0usize;
+            while offset < code.len() {
+                match decode(&code[offset..], mode) {
+                    Ok(decoded) => {
+                        totals.check(&code[offset..], base + offset as u64, &mut emit);
+                        offset += decoded.length as usize;
+                    }
+                    Err(_) => { undecodable += 1; offset += 1; }
+                }
+            }
+            totals.report(path);
+            println!("  undecodable bytes skipped: {undecodable}");
+        }
+        Some("representatives") => {
+            let mut totals = Totals {mode:Some(mode),..Totals::default()};
+            for form in 0..encoding_count() {
+                let mut bytes = [0u8; 15];
+                if let Ok(length) = encode_representative(form, mode, &mut bytes) {
+                    totals.check(&bytes[..length], 0x1000, &mut emit);
+                }
+            }
+            totals.report("representatives");
+        }
+        Some("verify") => {
+            let path = args.get(1).expect("verify FILE");
+            let text = std::fs::read_to_string(path).expect("read verify file");
+            let (mut total, mut found) = (0usize, 0usize);
+            let mut failures: BTreeMap<String, (usize, String)> = BTreeMap::new();
+            for line in text.lines() {
+                let Some((instruction, encoding)) = line.split_once('\t') else { continue };
+                let Some(bytes) = unhex(encoding) else { continue };
+                total += 1;
+                let outcome = match assemble_in_mode(instruction,mode) {
+                    Ok(results) if results.iter().any(|encoded| encoded.bytes() == bytes.as_slice()) => None,
+                    Ok(results) => Some(format!("not among {:?}", results.iter().map(|encoded| hex(encoded.bytes())).collect::<Vec<_>>())),
+                    Err(error) => Some(error.to_string()),
+                };
+                match outcome {
+                    None => found += 1,
+                    Some(why) => {
+                        let entry = failures.entry(shape(instruction)).or_insert((0, format!("`{instruction}` {}: {why}", hex(&bytes))));
+                        entry.0 += 1;
+                    }
+                }
+            }
+            println!("verify {path}: {total} external encodings, {found} among assemble's results, {} missing in {} shapes",
+                total - found, failures.len());
+            for (count, example) in failures.values() { println!("  {count:6} {example}"); }
+            if found!=total {std::process::exit(1)}
+        }
+        Some("asm") => {
+            let text = args.get(1).expect("asm TEXT [ADDRESS]");
+            let result = match args.get(2) {
+                Some(address) => assemble_at_in_mode(text, u64::from_str_radix(address.trim_start_matches("0x"), 16).expect("hex address"),mode),
+                None => assemble_in_mode(text,mode),
+            };
+            match result {
+                Ok(results) => for encoded in results {
+                    let decoded = decode(encoded.bytes(), mode).expect("verified encoding decodes");
+                    println!("{:<30} {} ({})", hex(encoded.bytes()), decoded.format_intel(0), encoded.encoding().form_id);
+                },
+                Err(error) => { println!("error: {error}"); std::process::exit(1); }
+            }
+        }
+        Some("scan") => {
+            let path = args.get(1).expect("scan FILE BASE TEMPLATE");
+            let base = u64::from_str_radix(args.get(2).expect("scan FILE BASE TEMPLATE").trim_start_matches("0x"), 16).expect("hex base");
+            let template = Template::parse_in_mode(args.get(3).expect("scan FILE BASE TEMPLATE"),mode).unwrap_or_else(|error| {
+                println!("error: {error}");
+                std::process::exit(1);
+            });
+            for hole in template.holes() {
+                let classes: Vec<&str> = hole.classes().iter().map(|class| class.name()).collect();
+                println!("hole ${}: {}", hole.name(), classes.join(", "));
+            }
+            let code = std::fs::read(path).expect("read code");
+            let mut values = Vec::new();
+            let started = std::time::Instant::now();
+            let mut hits = Vec::new();
+            for offset in 0..code.len() {
+                if let Some(length) = template.matches(&code[offset..], &mut values) {
+                    hits.push((offset, length, values.clone()));
+                }
+            }
+            let elapsed = started.elapsed();
+            println!("{} matches over {} offsets in {:?} ({:.0} ns/offset)", hits.len(), code.len(), elapsed,
+                elapsed.as_nanos() as f64 / code.len().max(1) as f64);
+            for (offset, length, values) in hits.iter().take(10) {
+                let decoded = decode(&code[*offset..], mode).expect("matched bytes decode");
+                let values: Vec<String> = values.iter().map(|value| format!("{}={value}", value.class)).collect();
+                println!("  {:#x}: {:<28} {:<40} {}", base + *offset as u64, hex(&code[*offset..*offset + *length]),
+                    decoded.format_intel(base + *offset as u64), values.join(" "));
+            }
+        }
+        _ => {
+            eprintln!("usage: asm_check [--mode=16|32|64] sweep FILE BASE [--emit OUT] | representatives [--emit OUT] | verify FILE | asm TEXT [ADDRESS] | scan FILE BASE TEMPLATE");
+            std::process::exit(2);
+        }
+    }
+}
